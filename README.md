@@ -119,6 +119,23 @@ The SDK exposes the same operations as the TUI: threads, channels, groups, balan
 | `ui.timestamp_format` | `%H:%M` | Message time format |
 | `ui.date_format` | `%Y-%m-%d %H:%M` | Full date format |
 
+## Mirrors
+
+Mirrors index SAMP remarks from the chain and serve them via HTTP, so clients can fetch historical messages without scanning every block. Configure mirrors in `network.mirrors`:
+
+```
+taolk config set network.mirrors https://bittensor-finney.samp.ink
+```
+
+Public mirrors for Bittensor:
+
+| Network | URL |
+|---------|-----|
+| Mainnet | `https://bittensor-finney.samp.ink` |
+| Testnet | `https://bittensor-testnet.samp.ink` |
+
+Run your own mirror using the [mirror-template](https://github.com/samp-org/mirror-template).
+
 ## Security
 
 Wallet files are encrypted with Argon2id (64 MB, 3 iterations) and ChaCha20-Poly1305. Stored at `~/.samp/wallets/` with 0600 permissions.

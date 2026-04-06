@@ -32,13 +32,22 @@ impl Db {
         Self::init(conn, seed)
     }
 
-    pub fn open(wallet_name: &str, seed: &[u8; 32]) -> Result<Self, Box<dyn std::error::Error>> {
-        let dir = dirs::config_dir()
+    pub fn open(
+        wallet_name: &str,
+        seed: &[u8; 32],
+        genesis_hash: &[u8; 32],
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let wallet_dir = dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("taolk")
             .join(wallet_name);
-        std::fs::create_dir_all(&dir)?;
-        let path = dir.join("messages.db");
+
+        let chain_id = hex::encode(&genesis_hash[..4]);
+        crate::migrations::run_all(&wallet_dir, &chain_id);
+        let chain_dir = wallet_dir.join(&chain_id);
+        std::fs::create_dir_all(&chain_dir)?;
+
+        let path = chain_dir.join("messages.db");
         let conn = Connection::open(path)?;
         Self::init(conn, seed)
     }

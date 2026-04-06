@@ -893,7 +893,7 @@ fn run_session(
         }
     };
 
-    let db = db::Db::open(wallet_name, seed)?;
+    let db = db::Db::open(wallet_name, seed, &chain_info.genesis_hash)?;
     let session = session::Session::new(
         keypair,
         zeroize::Zeroizing::new(*seed),
