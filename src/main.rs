@@ -909,7 +909,11 @@ fn run_session(
     app.date_format = cfg.ui.date_format.clone();
     app.session.load_from_db();
 
-    if let Ok(bal) = rt.block_on(extrinsic::fetch_balance(node_url, &my_pubkey)) {
+    if let Ok(bal) = rt.block_on(extrinsic::fetch_balance(
+        node_url,
+        &my_pubkey,
+        &chain_info.account_info_layout,
+    )) {
         app.session.balance = Some(bal);
     }
 
@@ -1192,8 +1196,9 @@ fn run_session(
                 let url = node_url.to_string();
                 let pk = my_pubkey;
                 let tx = event_tx.clone();
+                let layout = app.session.chain_info.account_info_layout.clone();
                 rt.spawn(async move {
-                    if let Ok(bal) = extrinsic::fetch_balance(&url, &pk).await {
+                    if let Ok(bal) = extrinsic::fetch_balance(&url, &pk, &layout).await {
                         let _ = tx.send(event::Event::BalanceUpdated(bal));
                     }
                 });

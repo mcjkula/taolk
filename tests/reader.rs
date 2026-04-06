@@ -2,6 +2,7 @@ use schnorrkel::keys::{ExpansionMode, MiniSecretKey};
 use std::sync::mpsc;
 use taolk::event::Event;
 use taolk::extrinsic::{self, ChainInfo};
+use taolk::metadata::AccountInfoLayout;
 use taolk::reader::{self, ReadContext};
 use taolk::types::Pubkey;
 
@@ -20,6 +21,10 @@ fn ci() -> ChainInfo {
         genesis_hash: [0; 32],
         spec_version: 1,
         tx_version: 1,
+        account_info_layout: AccountInfoLayout {
+            free_offset: 16,
+            free_width: 8,
+        },
     }
 }
 

@@ -1,5 +1,6 @@
 use schnorrkel::keys::{ExpansionMode, MiniSecretKey};
 use taolk::extrinsic::{self, ChainInfo};
+use taolk::metadata::AccountInfoLayout;
 
 fn test_keypair() -> schnorrkel::Keypair {
     MiniSecretKey::from_bytes(&[0xAA; 32])
@@ -12,6 +13,10 @@ fn test_chain_info() -> ChainInfo {
         genesis_hash: [0; 32],
         spec_version: 1,
         tx_version: 1,
+        account_info_layout: AccountInfoLayout {
+            free_offset: 16,
+            free_width: 8,
+        },
     }
 }
 

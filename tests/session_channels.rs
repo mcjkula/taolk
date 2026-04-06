@@ -3,6 +3,7 @@ use schnorrkel::keys::{ExpansionMode, MiniSecretKey};
 use taolk::conversation::NewMessage;
 use taolk::db::Db;
 use taolk::extrinsic::ChainInfo;
+use taolk::metadata::AccountInfoLayout;
 use taolk::session::Session;
 use taolk::types::{BlockRef, Pubkey};
 use taolk::util;
@@ -22,6 +23,10 @@ fn ci() -> ChainInfo {
         genesis_hash: [0; 32],
         spec_version: 1,
         tx_version: 1,
+        account_info_layout: AccountInfoLayout {
+            free_offset: 16,
+            free_width: 8,
+        },
     }
 }
 

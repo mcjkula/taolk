@@ -5,6 +5,7 @@ pub mod db;
 pub mod error;
 pub mod event;
 pub mod extrinsic;
+pub mod metadata;
 pub(crate) mod migrations;
 pub mod mirror;
 pub mod reader;

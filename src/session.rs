@@ -134,7 +134,13 @@ impl Session {
         session.token_decimals = decimals;
         session.load_from_db();
 
-        if let Ok(bal) = crate::extrinsic::fetch_balance(node_url, &my_pubkey).await {
+        if let Ok(bal) = crate::extrinsic::fetch_balance(
+            node_url,
+            &my_pubkey,
+            &session.chain_info.account_info_layout,
+        )
+        .await
+        {
             session.balance = Some(bal);
         }
 
@@ -802,7 +808,7 @@ impl Session {
 
     pub async fn fetch_balance(&self) -> Result<u128> {
         let pk = self.pubkey();
-        crate::extrinsic::fetch_balance(&self.node_url, &pk)
+        crate::extrinsic::fetch_balance(&self.node_url, &pk, &self.chain_info.account_info_layout)
             .await
             .map_err(SdkError::Chain)
     }

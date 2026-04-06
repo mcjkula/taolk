@@ -5,6 +5,7 @@ use schnorrkel::signing_context;
 use serde_json::{Value, json};
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 
+use crate::metadata::AccountInfoLayout;
 use crate::types::Pubkey;
 
 const PALLET_SYSTEM: u8 = 0x00;
@@ -21,9 +22,10 @@ pub struct ChainInfo {
     pub genesis_hash: [u8; 32],
     pub spec_version: u32,
     pub tx_version: u32,
+    pub account_info_layout: AccountInfoLayout,
 }
 
-/// Fetch genesis hash and runtime version from the chain.
+/// Fetch genesis hash, runtime version, and `System.Account` layout from the chain.
 pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, String> {
     let (mut ws, _) = connect_async(node_url)
         .await
@@ -46,10 +48,25 @@ pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, String> {
     let spec_version = rv["specVersion"].as_u64().ok_or("no specVersion")? as u32;
     let tx_version = rv["transactionVersion"].as_u64().ok_or("no txVersion")? as u32;
 
+    // Runtime metadata -> System.Account layout
+    let req = json!({"jsonrpc":"2.0","id":3,"method":"state_getMetadata","params":[]});
+    ws.send(WsMessage::Text(req.to_string().into()))
+        .await
+        .map_err(|e| format!("send: {e}"))?;
+    let metadata_result = read_text_result(&mut ws).await?;
+    let metadata_hex = metadata_result
+        .as_str()
+        .ok_or("state_getMetadata returned no result")?;
+    let metadata_bytes = hex::decode(metadata_hex.trim_start_matches("0x"))
+        .map_err(|e| format!("metadata hex decode: {e}"))?;
+    let account_info_layout = AccountInfoLayout::from_runtime_metadata(&metadata_bytes)
+        .map_err(|e| format!("parse runtime metadata: {e}"))?;
+
     Ok(ChainInfo {
         genesis_hash: genesis_bytes,
         spec_version,
         tx_version,
+        account_info_layout,
     })
 }
 
@@ -260,51 +277,43 @@ pub async fn fetch_token_info(node_url: &str) -> Result<(String, u32), String> {
     Ok((symbol, decimals))
 }
 
-/// Fetch the free balance for an account.
-pub async fn fetch_balance(node_url: &str, pubkey: &Pubkey) -> Result<u128, String> {
+/// Fetch the free balance for an account using the metadata-derived layout.
+pub async fn fetch_balance(
+    node_url: &str,
+    pubkey: &Pubkey,
+    layout: &AccountInfoLayout,
+) -> Result<u128, String> {
     let (mut ws, _) = connect_async(node_url)
         .await
         .map_err(|e| format!("connect: {e}"))?;
 
-    // Build storage key: twox128("System") ++ twox128("Account") ++ blake2_128_concat(pubkey)
-    let mut key = Vec::new();
+    // System.Account key: twox128("System") ++ twox128("Account") ++ blake2_128_concat(pubkey)
+    let mut key = Vec::with_capacity(64);
     key.extend_from_slice(&twox128(b"System"));
     key.extend_from_slice(&twox128(b"Account"));
-    // blake2_128_concat: blake2_128(pubkey) ++ pubkey
-    let hash = {
-        use blake2::Digest;
-        let mut hasher = blake2::Blake2b::<blake2::digest::typenum::U16>::new();
-        hasher.update(pubkey.0);
-        hasher.finalize()
-    };
-    key.extend_from_slice(&hash);
+    let mut hasher = blake2::Blake2b::<blake2::digest::typenum::U16>::new();
+    hasher.update(pubkey.0);
+    key.extend_from_slice(&hasher.finalize());
     key.extend_from_slice(&pubkey.0);
 
-    let key_hex = format!("0x{}", hex::encode(&key));
-    let req = json!({"jsonrpc":"2.0","id":1,"method":"state_getStorage","params":[key_hex]});
+    let req = json!({
+        "jsonrpc":"2.0","id":1,"method":"state_getStorage",
+        "params":[format!("0x{}", hex::encode(&key))]
+    });
     ws.send(WsMessage::Text(req.to_string().into()))
         .await
         .map_err(|e| format!("send: {e}"))?;
 
     let result = read_text_result(&mut ws).await?;
-    let hex_str = result.as_str().ok_or("no storage result")?;
-    let data = hex::decode(hex_str.trim_start_matches("0x")).map_err(|e| format!("hex: {e}"))?;
-
-    // AccountInfo SCALE layout:
-    // nonce: u32 (4 bytes)
-    // consumers: u32 (4 bytes)
-    // providers: u32 (4 bytes)
-    // sufficients: u32 (4 bytes)
-    // data.free: u128 (16 bytes) at offset 16
-    if data.len() < 32 {
-        return Err("account data too short".into());
+    // Null = account never provisioned; chain semantics, not a fallback.
+    if result.is_null() {
+        return Ok(0);
     }
-    let free = u128::from_le_bytes(
-        data[16..32]
-            .try_into()
-            .map_err(|_| "balance data truncated")?,
-    );
-    Ok(free)
+    let hex_str = result
+        .as_str()
+        .ok_or("unexpected state_getStorage response shape")?;
+    let data = hex::decode(hex_str.trim_start_matches("0x")).map_err(|e| format!("hex: {e}"))?;
+    layout.decode_free(&data)
 }
 
 fn twox128(data: &[u8]) -> [u8; 16] {
