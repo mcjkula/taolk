@@ -283,7 +283,7 @@ fn render_standalone(
                 .with_timezone(&chrono::Local)
                 .format(&app.date_format)
                 .to_string();
-            let (type_icon, type_label, badge_bg) = if msg.content_type == 0x01 {
+            let (type_icon, type_label, badge_bg) = if msg.content_type == 0x00 {
                 (super::icons::PUBLIC, "public", Color::Cyan)
             } else {
                 (super::icons::ENCRYPTED, "encrypted", Color::Magenta)
