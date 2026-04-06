@@ -1,0 +1,58 @@
+[package]
+name = "taolk"
+version = "1.0.0"
+edition = "2024"
+license = "MIT"
+description = "Encrypted messaging client for Bittensor"
+repository = "https://github.com/mcjkula/taolk"
+
+[features]
+default = ["tui"]
+tui = ["dep:ratatui", "dep:crossterm", "dep:rpassword", "dep:clap"]
+
+[[bin]]
+name = "taolk"
+required-features = ["tui"]
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
+
+[dependencies]
+samp = { git = "https://github.com/samp-org/samp", subdirectory = "rust" }
+tokio = { version = "1", features = ["full"] }
+schnorrkel = "0.11"
+curve25519-dalek = { version = "4", features = ["digest"] }
+hkdf = "0.12"
+sha2 = "0.10"
+chacha20poly1305 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+futures-util = "0.3"
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+parity-scale-codec = { version = "3.7", features = ["derive"] }
+chrono = "0.4"
+blake2 = "0.10"
+getrandom = "0.3"
+rusqlite = { version = "0.32", features = ["bundled"] }
+dirs = "6"
+argon2 = "0.5"
+bip39 = "2"
+pbkdf2 = "0.12"
+hmac = "0.12"
+twox-hash = "2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+toml = "0.8"
+thiserror = "2"
+zeroize = { version = "1", features = ["derive"] }
+
+# TUI-only dependencies (gated behind "tui" feature)
+ratatui = { version = "0.30", optional = true }
+crossterm = { version = "0.29", optional = true }
+rpassword = { version = "7", optional = true }
+clap = { version = "4", features = ["derive", "env"], optional = true }
+
+[dev-dependencies]
+tempfile = "3"
