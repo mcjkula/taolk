@@ -1,10 +1,12 @@
 use std::path::Path;
 
-/// v1.0.2: Move legacy messages.db from wallet root into chain-scoped subdirectory.
-///
-/// Before: <wallet>/messages.db
-/// After:  <wallet>/<chain_id>/messages.db
-pub fn run(wallet_dir: &Path, chain_id: &str) {
+pub fn run_all(wallet_dir: &Path, chain_id: &str) {
+    move_legacy_messages_db(wallet_dir, chain_id);
+}
+
+/// v1.0.2: Move legacy `<wallet>/messages.db` into the chain-scoped subdir
+/// `<wallet>/<chain_id>/messages.db`.
+fn move_legacy_messages_db(wallet_dir: &Path, chain_id: &str) {
     let legacy_path = wallet_dir.join("messages.db");
     let chain_dir = wallet_dir.join(chain_id);
     let new_path = chain_dir.join("messages.db");
