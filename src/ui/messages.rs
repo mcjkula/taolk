@@ -239,6 +239,7 @@ fn date_separator(date_str: &str) -> Line<'static> {
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     use crate::app::Mode;
+    app.sender_click_regions.borrow_mut().clear();
     // Contact picker takes over the main panel during address selection
     if app.mode == Mode::Compose || (app.mode == Mode::Message && app.msg_recipient.is_none()) {
         render_contact_picker(frame, app, area);
@@ -246,6 +247,10 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     }
     if app.mode == Mode::CreateGroupMembers {
         render_group_member_picker(frame, app, area);
+        return;
+    }
+    if app.mode == Mode::SenderPicker {
+        render_sender_picker(frame, app, area);
         return;
     }
 
@@ -431,8 +436,16 @@ fn render_thread(frame: &mut Frame, app: &App, thread_idx: usize, area: Rect) {
         separator(area.width),
     ];
 
-    render_messages(&mut lines, &thread.messages, app, area.width as usize);
+    let mut pending_clicks = Vec::new();
+    render_messages(
+        &mut lines,
+        &thread.messages,
+        app,
+        area.width as usize,
+        &mut pending_clicks,
+    );
     render_pending(&mut lines, app, View::Thread(thread_idx));
+    record_sender_clicks(app, &pending_clicks, lines.len(), app.scroll_offset, area);
     render_scrolled(frame, lines, app.scroll_offset, area);
 }
 
@@ -473,8 +486,16 @@ fn render_channel(frame: &mut Frame, app: &App, chan_idx: usize, area: Rect) {
 
     lines.push(separator(area.width));
 
-    render_messages(&mut lines, &channel.messages, app, area.width as usize);
+    let mut pending_clicks = Vec::new();
+    render_messages(
+        &mut lines,
+        &channel.messages,
+        app,
+        area.width as usize,
+        &mut pending_clicks,
+    );
     render_pending(&mut lines, app, View::Channel(chan_idx));
+    record_sender_clicks(app, &pending_clicks, lines.len(), app.scroll_offset, area);
     render_scrolled(frame, lines, app.scroll_offset, area);
 }
 
@@ -555,8 +576,16 @@ fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
 
     lines.push(separator(area.width));
 
-    render_messages(&mut lines, &group.messages, app, area.width as usize);
+    let mut pending_clicks = Vec::new();
+    render_messages(
+        &mut lines,
+        &group.messages,
+        app,
+        area.width as usize,
+        &mut pending_clicks,
+    );
     render_pending(&mut lines, app, View::Group(group_idx));
+    record_sender_clicks(app, &pending_clicks, lines.len(), app.scroll_offset, area);
     render_scrolled(frame, lines, app.scroll_offset, area);
 }
 
@@ -669,6 +698,54 @@ fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
     render_scrolled(frame, lines, app.scroll_offset, area);
 }
 
+fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
+    let senders = &app.picker_senders;
+    let total = senders.len();
+    let w = area.width as usize;
+
+    let mut lines: Vec<Line> = vec![
+        header_line("Copy SS58", &format!("{total} senders"), w),
+        separator(area.width),
+    ];
+
+    if total == 0 {
+        lines.push(Line::raw(""));
+        lines.push(dim("  No senders in this view"));
+    }
+
+    for (i, (short, pk)) in senders.iter().enumerate() {
+        let selected = i == app.contact_idx % total.max(1);
+        let display = match pk {
+            Some(pk) => taolk::util::ss58_from_pubkey(pk),
+            None => format!("{short}  (full SS58 unavailable)"),
+        };
+        let addr_max = w.saturating_sub(4);
+        let indicator = if selected { "> " } else { "  " };
+        let addr_color = if selected {
+            Color::White
+        } else if pk.is_some() {
+            Color::Cyan
+        } else {
+            Color::DarkGray
+        };
+        let addr_mod = if selected {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(indicator, Style::default().fg(Color::Cyan)),
+            Span::styled(
+                truncate(&display, addr_max),
+                Style::default().fg(addr_color).add_modifier(addr_mod),
+            ),
+        ]));
+    }
+
+    render_scrolled(frame, lines, 0, area);
+}
+
 fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
     let contacts = app.filtered_contacts();
     let total = app.session.known_contacts().len();
@@ -764,6 +841,7 @@ fn render_messages(
     messages: &[taolk::conversation::ThreadMessage],
     app: &App,
     width: usize,
+    pending_clicks: &mut Vec<(usize, u16, u16, String)>,
 ) {
     let my_ss58 = app.session.ss58();
     let mut last_date: Option<chrono::NaiveDate> = None;
@@ -848,6 +926,14 @@ fn render_messages(
             };
             let indent = 7 + name.len() + 2;
             last_indent = indent;
+            if !msg.is_mine {
+                pending_clicks.push((
+                    lines.len(),
+                    7,
+                    7 + name.len() as u16,
+                    msg.sender_ss58.clone(),
+                ));
+            }
             lines.push(Line::from(vec![
                 Span::styled(format!(" {time} "), Style::default().fg(Color::DarkGray)),
                 Span::styled(
@@ -950,6 +1036,14 @@ fn render_messages(
             };
 
             // First line: timestamp + name + body (first part)
+            if !msg.is_mine {
+                pending_clicks.push((
+                    lines.len(),
+                    7,
+                    7 + name.len() as u16,
+                    msg.sender_ss58.clone(),
+                ));
+            }
             let mut first_spans = vec![
                 Span::styled(format!(" {time} "), Style::default().fg(Color::DarkGray)),
                 Span::styled(
@@ -1016,6 +1110,26 @@ fn render_scrolled(frame: &mut ratatui::Frame, lines: Vec<Line<'_>>, scroll: usi
     let start = bottom.saturating_sub(scroll);
     let end = (start + visible).min(lines.len());
     frame.render_widget(Paragraph::new(lines[start..end].to_vec()), area);
+}
+
+fn record_sender_clicks(
+    app: &App,
+    pending: &[(usize, u16, u16, String)],
+    lines_len: usize,
+    scroll: usize,
+    area: Rect,
+) {
+    let visible = area.height as usize;
+    let bottom = lines_len.saturating_sub(visible);
+    let start = bottom.saturating_sub(scroll);
+    let end = (start + visible).min(lines_len);
+    let mut regions = app.sender_click_regions.borrow_mut();
+    for (line_idx, c0, c1, ss58) in pending {
+        if *line_idx >= start && *line_idx < end {
+            let row = area.y + (*line_idx - start) as u16;
+            regions.push((row, area.x + *c0, area.x + *c1, ss58.clone()));
+        }
+    }
 }
 
 use taolk::util::truncate;

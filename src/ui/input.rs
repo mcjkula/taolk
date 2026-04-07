@@ -528,6 +528,17 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             };
             frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), input_line]), area);
         }
+        Mode::SenderPicker => {
+            let hints = render_hints(
+                &[
+                    ("\u{2191}\u{2193}", "navigate"),
+                    ("Enter", "copy"),
+                    ("Esc", "cancel"),
+                ],
+                area.width as usize,
+            );
+            frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), hints]), area);
+        }
     }
 }
 

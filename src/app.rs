@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::time::Instant;
 use taolk::audio::Audio;
 use taolk::session::Session;
@@ -14,6 +15,7 @@ pub enum Mode {
     CreateChannelDesc,
     CreateGroupMembers,
     Search,
+    SenderPicker,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -61,6 +63,8 @@ pub struct App {
     pub date_format: String,
     pub audio: Audio,
     pub sound_armed: bool,
+    pub picker_senders: Vec<(String, Option<Pubkey>)>,
+    pub sender_click_regions: RefCell<Vec<(u16, u16, u16, String)>>,
 }
 
 impl App {
@@ -100,6 +104,8 @@ impl App {
             date_format: "%Y-%m-%d %H:%M".into(),
             audio,
             sound_armed: false,
+            picker_senders: Vec::new(),
+            sender_click_regions: RefCell::new(Vec::new()),
         }
     }
 
@@ -264,6 +270,98 @@ impl App {
     pub fn clear_standalone(&mut self) {
         self.msg_recipient = None;
         self.msg_type = None;
+    }
+
+    pub fn build_picker_senders(&self) -> Vec<(String, Option<Pubkey>)> {
+        use std::collections::HashMap;
+        let mut last_seen: HashMap<String, BlockRef> = HashMap::new();
+        let mut record = |ss58: &str, br: BlockRef| {
+            let cur = last_seen.get(ss58).copied().unwrap_or(BlockRef::ZERO);
+            if br > cur {
+                last_seen.insert(ss58.to_string(), br);
+            }
+        };
+        match self.view {
+            View::Inbox => {
+                for m in &self.session.inbox {
+                    if !m.is_mine {
+                        record(
+                            &m.peer_ss58,
+                            BlockRef {
+                                block: m.block_number,
+                                index: m.ext_index,
+                            },
+                        );
+                    }
+                }
+            }
+            View::Outbox => {
+                for m in &self.session.outbox {
+                    record(
+                        &m.peer_ss58,
+                        BlockRef {
+                            block: m.block_number,
+                            index: m.ext_index,
+                        },
+                    );
+                }
+            }
+            View::Thread(i) => {
+                if let Some(t) = self.session.threads.get(i) {
+                    for m in &t.messages {
+                        if !m.is_mine {
+                            record(
+                                &m.sender_ss58,
+                                BlockRef {
+                                    block: m.block_number,
+                                    index: m.ext_index,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            View::Channel(i) => {
+                if let Some(c) = self.session.channels.get(i) {
+                    for m in &c.messages {
+                        if !m.is_mine {
+                            record(
+                                &m.sender_ss58,
+                                BlockRef {
+                                    block: m.block_number,
+                                    index: m.ext_index,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            View::Group(i) => {
+                if let Some(g) = self.session.groups.get(i) {
+                    for m in &g.messages {
+                        if !m.is_mine {
+                            record(
+                                &m.sender_ss58,
+                                BlockRef {
+                                    block: m.block_number,
+                                    index: m.ext_index,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            View::ChannelDir => {}
+        }
+        let mut entries: Vec<(String, BlockRef)> = last_seen.into_iter().collect();
+        entries.sort_by(|a, b| b.1.cmp(&a.1));
+        entries
+            .into_iter()
+            .map(|(ss58, _)| {
+                let pk = self.session.peer_pubkeys.get(&ss58).copied();
+                (ss58, pk)
+            })
+            .collect()
     }
 
     pub fn is_pending_channel(&self) -> bool {

@@ -1048,6 +1048,7 @@ fn run_session(
                 }
             }
             TuiEvent::Core(event::Event::NewChannelMessage {
+                sender,
                 sender_ss58,
                 channel_ref,
                 body,
@@ -1060,6 +1061,7 @@ fn run_session(
                 let ts = DateTime::<Utc>::from_timestamp(timestamp as i64, 0).unwrap_or_default();
                 let is_mine = sender_ss58 == util::ss58_short(&app.session.pubkey());
                 let mentioned = util::body_mentions(&body, app.session.ss58());
+                app.session.peer_pubkeys.insert(sender_ss58.clone(), sender);
                 app.session.add_channel_message(
                     channel_ref,
                     conversation::NewMessage {
@@ -1102,6 +1104,7 @@ fn run_session(
                     .discover_group(creator_pubkey, group_ref, members);
             }
             TuiEvent::Core(event::Event::NewGroupMessage {
+                sender,
                 sender_ss58,
                 group_ref,
                 body,
@@ -1114,6 +1117,7 @@ fn run_session(
                 let ts = DateTime::<Utc>::from_timestamp(timestamp as i64, 0).unwrap_or_default();
                 let is_mine = sender_ss58 == util::ss58_short(&app.session.pubkey());
                 let mentioned = util::body_mentions(&body, app.session.ss58());
+                app.session.peer_pubkeys.insert(sender_ss58.clone(), sender);
                 app.session.add_group_message(
                     group_ref,
                     conversation::NewMessage {
@@ -1382,6 +1386,18 @@ fn handle_mouse(
         let x = mouse.column;
         let y = mouse.row;
 
+        let hit = app
+            .sender_click_regions
+            .borrow()
+            .iter()
+            .find(|(row, c0, c1, _)| *row == y && x >= *c0 && x < *c1)
+            .map(|(_, _, _, ss58)| ss58.clone());
+        if let Some(short) = hit {
+            let pk = app.session.peer_pubkeys.get(&short).copied();
+            copy_sender(app, &short, pk.as_ref());
+            return;
+        }
+
         if app.show_sidebar && x < sidebar_width {
             let row = y.saturating_sub(1) as usize;
             app.select_sidebar_row(row);
@@ -1408,6 +1424,7 @@ fn handle_key(
         Mode::CreateChannelDesc => handle_create_channel_desc_key(app, key, send_tx, rt),
         Mode::CreateGroupMembers => handle_create_group_members_key(app, key, send_tx),
         Mode::Search => handle_search_key(app, key),
+        Mode::SenderPicker => handle_sender_picker_key(app, key),
     }
 }
 
@@ -1601,23 +1618,12 @@ fn handle_normal_key(
             app.cursor_pos = 0;
             app.mode = Mode::Search;
         }
-        KeyCode::Char('a') => {
-            // Show full address of current view's peer/channel
-            let info = match app.view {
-                app::View::Thread(idx) => app.session.threads.get(idx).map(|c| {
-                    let full = util::ss58_from_pubkey(&c.peer_pubkey);
-                    full.to_string()
-                }),
-                app::View::Channel(idx) => app.session.channels.get(idx).map(|c| {
-                    format!(
-                        "{}:{} by {}",
-                        c.channel_ref.block, c.channel_ref.index, c.creator_ss58
-                    )
-                }),
-                _ => None,
-            };
-            if let Some(info) = info {
-                app.set_status(info);
+        KeyCode::Char('y') if app.view != app::View::ChannelDir => {
+            let senders = app.build_picker_senders();
+            if !senders.is_empty() {
+                app.picker_senders = senders;
+                app.contact_idx = 0;
+                app.mode = Mode::SenderPicker;
             }
         }
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -2120,6 +2126,51 @@ fn handle_search_key(app: &mut App, key: crossterm::event::KeyEvent) {
             if handle_text_input(app, key) {
                 app.search_query = app.input.clone();
             }
+        }
+    }
+}
+
+fn handle_sender_picker_key(app: &mut App, key: crossterm::event::KeyEvent) {
+    let len = app.picker_senders.len();
+    match key.code {
+        KeyCode::Esc => {
+            app.picker_senders.clear();
+            app.mode = Mode::Normal;
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if len > 0 {
+                app.contact_idx = if app.contact_idx == 0 {
+                    len - 1
+                } else {
+                    app.contact_idx - 1
+                };
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => {
+            if len > 0 {
+                app.contact_idx = (app.contact_idx + 1) % len;
+            }
+        }
+        KeyCode::Enter => {
+            if let Some((short, pk)) = app.picker_senders.get(app.contact_idx).cloned() {
+                copy_sender(app, &short, pk.as_ref());
+            }
+            app.picker_senders.clear();
+            app.mode = Mode::Normal;
+        }
+        _ => {}
+    }
+}
+
+fn copy_sender(app: &mut App, short_ss58: &str, pubkey: Option<&types::Pubkey>) {
+    match pubkey {
+        Some(pk) => {
+            let full = util::ss58_from_pubkey(pk);
+            util::copy_to_clipboard(&full);
+            app.set_status(format!("Copied {short_ss58} to clipboard"));
+        }
+        None => {
+            app.set_error(format!("{short_ss58}: full SS58 unavailable"));
         }
     }
 }

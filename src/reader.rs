@@ -381,6 +381,7 @@ fn process_remark(
             {
                 let sender_ss58 = crate::util::ss58_short(sender);
                 let _ = tx.send(Event::NewChannelMessage {
+                    sender: *sender,
                     sender_ss58,
                     channel_ref,
                     body,
@@ -429,6 +430,7 @@ fn process_remark(
                 let body = String::from_utf8(first_msg.to_vec()).unwrap_or_default();
                 let sender_ss58 = crate::util::ss58_short(sender);
                 let _ = tx.send(Event::NewGroupMessage {
+                    sender: *sender,
                     sender_ss58,
                     group_ref: BlockRef {
                         block: block_number,
@@ -449,6 +451,7 @@ fn process_remark(
                 };
                 let sender_ss58 = crate::util::ss58_short(sender);
                 let _ = tx.send(Event::NewGroupMessage {
+                    sender: *sender,
                     sender_ss58,
                     group_ref,
                     body,

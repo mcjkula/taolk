@@ -282,6 +282,7 @@ impl Session {
         let is_mine = sender == self.pubkey();
         let peer = if is_mine { recipient } else { sender };
         let peer_ss58 = crate::util::ss58_short(&peer);
+        self.peer_pubkeys.insert(peer_ss58.clone(), peer);
         let msg = InboxMessage {
             peer_ss58,
             timestamp,

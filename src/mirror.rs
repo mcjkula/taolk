@@ -219,10 +219,14 @@ fn process_remark_from_mirror(r: &RemarkResp, tx: &Sender<Event>) {
         && let Ok((reply_to, continues, body_bytes)) = samp::decode_channel_content(&remark.content)
         && let Ok(body) = String::from_utf8(body_bytes.to_vec())
     {
-        let sender_ss58 = crate::util::pubkey_from_ss58(&r.sender)
-            .map(|pk| crate::util::ss58_short(&pk))
-            .unwrap_or_else(|| r.sender.clone());
+        let sender = crate::util::pubkey_from_ss58(&r.sender).unwrap_or(Pubkey::ZERO);
+        let sender_ss58 = if sender == Pubkey::ZERO {
+            r.sender.clone()
+        } else {
+            crate::util::ss58_short(&sender)
+        };
         let _ = tx.send(Event::NewChannelMessage {
+            sender,
             sender_ss58,
             channel_ref: samp::channel_ref_from_recipient(&remark.recipient),
             body,
@@ -360,6 +364,7 @@ fn process_group_remark(r: &RemarkResp, scalar: &Scalar, tx: &Sender<Event>) {
         let body = String::from_utf8(first_msg.to_vec()).unwrap_or_default();
         let sender_ss58 = crate::util::ss58_short(&sender_pubkey);
         let _ = tx.send(Event::NewGroupMessage {
+            sender: sender_pubkey,
             sender_ss58,
             group_ref: BlockRef {
                 block: r.block,
@@ -379,6 +384,7 @@ fn process_group_remark(r: &RemarkResp, scalar: &Scalar, tx: &Sender<Event>) {
         };
         let sender_ss58 = crate::util::ss58_short(&sender_pubkey);
         let _ = tx.send(Event::NewGroupMessage {
+            sender: sender_pubkey,
             sender_ss58,
             group_ref,
             body,
