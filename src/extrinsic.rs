@@ -122,7 +122,6 @@ pub fn build_remark_extrinsic(
 
     let tip: u8 = 0x00;
 
-    // Signing payload: call || extensions || implicit (spec, tx, genesis, block_hash, metadata_hash)
     let mut signing_payload = Vec::new();
     signing_payload.extend_from_slice(&call_data);
     signing_payload.push(ERA_IMMORTAL);
@@ -249,8 +248,6 @@ async fn read_text_result_raw(
     }
 }
 
-/// Estimate the fee for a remark extrinsic via TransactionPaymentApi runtime call.
-/// Fetches the nonce, builds the extrinsic, and calls state_call on one connection.
 pub async fn estimate_fee(
     node_url: &str,
     remark: &[u8],
@@ -340,8 +337,6 @@ pub async fn fetch_token_info(node_url: &str) -> Result<(String, u32), ChainErro
                 .and_then(|a| a.first()?.as_u64())
         })
         .unwrap_or(0);
-    // SECURITY: token decimal counts are bounded to ~18 in practice; saturating
-    // to u32::MAX on absurd values is fine for display purposes.
     let decimals = u32::try_from(decimals_raw).unwrap_or(u32::MAX);
 
     Ok((symbol, decimals))
@@ -464,7 +459,6 @@ fn scale_compact_len(data: &[u8], offset: usize) -> Result<usize, ChainError> {
         0b01 => Ok(2),
         0b10 => Ok(4),
         0b11 => {
-            // SECURITY: `>> 2` of a u8 yields 0..=63, fits in usize on every target.
             let extra = usize::from(data[offset] >> 2) + 4;
             Ok(1 + extra)
         }

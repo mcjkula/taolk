@@ -6,7 +6,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use taolk::conversation::InboxMessage;
 
-// Avoids Cyan (reserved for "You"), Red (errors), DarkGray (metadata).
 const SENDER_COLORS: &[Color] = &[
     Color::Yellow,
     Color::Green,
@@ -206,7 +205,6 @@ fn wrap_text(text: &str, max_width: usize, indent: usize) -> Vec<String> {
     }
 }
 
-/// Format a centered date separator: ─────── April 4, 2026 ───────
 fn date_separator(date_str: &str) -> Line<'static> {
     let label = format!(" {date_str} ");
     let dashes = 3;

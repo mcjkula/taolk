@@ -5,11 +5,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-/// Render key hints that fit within the available width.
-/// Drops hints from the right when the window is too narrow.
 fn render_hints(pairs: &[(&str, &str)], width: usize) -> Line<'static> {
     let mut spans = Vec::new();
-    let mut used: usize = 1; // leading space
+    let mut used: usize = 1;
     for (key, label) in pairs {
         let needed = key.len() + 1 + label.len() + 2;
         if used + needed > width {
@@ -28,7 +26,6 @@ fn render_hints(pairs: &[(&str, &str)], width: usize) -> Line<'static> {
     Line::from(spans)
 }
 
-/// Truncate a string to fit within max bytes, adding ellipsis if truncated.
 fn fit(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
@@ -39,10 +36,6 @@ fn fit(s: &str, max: usize) -> String {
     format!("{}\u{2026}", &s[..max - 1])
 }
 
-/// Render visible portion of input text within a fixed width.
-/// Returns (spans, cursor_x_offset) where cursor_x_offset is the cursor position
-/// within the rendered spans. Handles scrolling (text wider than available space)
-/// and limit coloring (characters past limit shown in red).
 fn visible_input(
     text: &str,
     cursor: usize,

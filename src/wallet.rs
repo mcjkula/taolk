@@ -47,16 +47,12 @@ fn derive_key(password: &Password, salt: &[u8; SALT_LEN]) -> [u8; 32] {
     let argon2 = Argon2::new(
         argon2::Algorithm::Argon2id,
         argon2::Version::V0x13,
-        // SECURITY: Params::new only fails for invalid combinations of memory/iterations/parallelism;
-        // these are constants chosen to be valid.
         argon2::Params::new(65536, 3, 1, Some(32)).expect("constant argon2 params"),
     );
     let mut key = [0u8; 32];
-    // SECURITY: hash_password_into only fails on output length mismatch with Params::output_len;
-    // we set both to 32.
     argon2
         .hash_password_into(password.as_str().as_bytes(), salt, &mut key)
-        .expect("argon2 hash with matched output length");
+        .expect("argon2 hash");
     key
 }
 
@@ -80,20 +76,17 @@ pub fn create_at(
     }
 
     let mut salt = [0u8; SALT_LEN];
-    // SECURITY: getrandom only fails when the OS RNG is unavailable; treat as fatal at create-time.
-    getrandom::fill(&mut salt).expect("OS RNG available at wallet create");
+    getrandom::fill(&mut salt).expect("OS RNG");
     let mut nonce_bytes = [0u8; NONCE_LEN];
-    getrandom::fill(&mut nonce_bytes).expect("OS RNG available at wallet create");
+    getrandom::fill(&mut nonce_bytes).expect("OS RNG");
 
     let mut key = derive_key(password, &salt);
     let cipher = ChaCha20Poly1305::new((&key).into());
     key.zeroize();
     let nonce = Nonce::from_slice(&nonce_bytes);
-    // SECURITY: encrypt only fails if the AEAD invariants are violated, which is unreachable
-    // for ChaCha20-Poly1305 with a 32-byte key, 12-byte nonce, and bounded plaintext.
     let ciphertext = cipher
         .encrypt(nonce, seed.as_bytes().as_slice())
-        .expect("ChaCha20-Poly1305 encrypt with valid key+nonce");
+        .expect("encrypt");
 
     let mut file_data = Vec::with_capacity(WALLET_FILE_LEN);
     file_data.push(WALLET_VERSION);

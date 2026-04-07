@@ -14,7 +14,6 @@ pub struct ReadContext<'a> {
     pub tx: &'a Sender<Event>,
 }
 
-/// Read a block for SAMP messages.
 pub fn read_block(block: &Value, ctx: &ReadContext) {
     let extrinsics = match block["extrinsics"].as_array() {
         Some(exts) => exts,
@@ -41,7 +40,6 @@ pub fn read_block(block: &Value, ctx: &ReadContext) {
         let signer = extract_signer(&ext_bytes);
         let remark = extract_remark(&ext_bytes);
 
-        // SECURITY: Substrate blocks have far fewer than 65k extrinsics; saturate.
         let ext_index_u16 = u16::try_from(ext_index).unwrap_or(u16::MAX);
         if let (Some(sender), Some(remark_data)) = (signer, remark) {
             process_remark(
@@ -56,7 +54,6 @@ pub fn read_block(block: &Value, ctx: &ReadContext) {
     }
 }
 
-/// Process a specific extrinsic (for DAG gap filling).
 pub fn read_extrinsic(
     ext_hex: &str,
     ctx: &ReadContext,
@@ -84,7 +81,6 @@ pub fn read_extrinsic(
     }
 }
 
-// Substrate signed extrinsic layout constants
 const SIGNED_BIT: u8 = 0x80; // bit 7 of version byte: 1 = signed
 const ADDR_TYPE_ACCOUNT: u8 = 0x00; // MultiAddress::Id (raw 32-byte AccountId)
 const SIGNED_HEADER_LEN: usize = 99; // version(1) + addr_type(1) + account(32) + sig_type(1) + sig(64)
@@ -94,37 +90,30 @@ const SYSTEM_PALLET: u8 = 0x00;
 const REMARK_WITH_EVENT_CALL: u8 = 0x07;
 const REMARK_CALL: u8 = 0x09;
 
-/// Extract the remark payload from a system.remark_with_event extrinsic.
 fn extract_remark(ext_bytes: &[u8]) -> Option<Vec<u8>> {
     let (_, prefix_len) = decode_compact_prefix(ext_bytes)?;
     let payload = &ext_bytes[prefix_len..];
 
-    // Must be a signed extrinsic with minimum length
     if payload.len() < MIN_SIGNED_EXTRINSIC || payload[0] & SIGNED_BIT == 0 {
         return None;
     }
 
-    // Skip signed header: version + addr_type + account + sig_type + signature
     let mut offset = SIGNED_HEADER_LEN;
     if offset >= payload.len() {
         return None;
     }
-    // Era: 0x00 = immortal (1 byte), anything else = mortal (2 bytes)
+    // era: 0x00 = immortal (1 byte), else mortal (2 bytes)
     if payload[offset] != 0x00 {
-        offset += 2; // mortal era
+        offset += 2;
     } else {
-        offset += 1; // immortal era
+        offset += 1;
     }
-    // Nonce (SCALE compact)
     let (_, nonce_len) = decode_compact_prefix(&payload[offset..])?;
     offset += nonce_len;
-    // Tip (SCALE compact)
     let (_, tip_len) = decode_compact_prefix(&payload[offset..])?;
     offset += tip_len;
-    // Metadata hash mode byte
-    offset += 1;
+    offset += 1; // metadata hash mode byte
 
-    // Call: pallet_index(1) + call_index(1)
     if offset + 2 >= payload.len() {
         return None;
     }
@@ -132,12 +121,10 @@ fn extract_remark(ext_bytes: &[u8]) -> Option<Vec<u8>> {
     let call = payload[offset + 1];
     offset += 2;
 
-    // system.remark_with_event or system.remark
     if pallet != SYSTEM_PALLET || (call != REMARK_WITH_EVENT_CALL && call != REMARK_CALL) {
         return None;
     }
 
-    // Remark body (SCALE compact length prefix + data)
     let (remark_len, compact_len) = decode_compact_prefix(&payload[offset..])?;
     offset += compact_len;
 
@@ -150,7 +137,6 @@ fn extract_remark(ext_bytes: &[u8]) -> Option<Vec<u8>> {
 fn extract_signer(ext_bytes: &[u8]) -> Option<Pubkey> {
     let (_, prefix_len) = decode_compact_prefix(ext_bytes)?;
     let payload = &ext_bytes[prefix_len..];
-    // Signed extrinsic: SIGNED_BIT set, addr_type = AccountId (0x00)
     if payload.len() < MIN_SIGNER_PAYLOAD
         || payload[0] & SIGNED_BIT == 0
         || payload[1] != ADDR_TYPE_ACCOUNT
@@ -198,13 +184,11 @@ fn decode_compact_u64(data: &[u8]) -> Option<(u64, usize)> {
     }
     let mode = data[0] & 0b11;
     match mode {
-        // SECURITY: u8 >> 2 ⊆ 0..=63, fits in u64.
         0b00 => Some((u64::from(data[0] >> 2), 1)),
         0b01 => {
             if data.len() < 2 {
                 return None;
             }
-            // SECURITY: u16 >> 2 ⊆ 0..=16383, fits in u64.
             let raw = u16::from_le_bytes([data[0], data[1]]);
             Some((u64::from(raw >> 2), 2))
         }
@@ -212,12 +196,10 @@ fn decode_compact_u64(data: &[u8]) -> Option<(u64, usize)> {
             if data.len() < 4 {
                 return None;
             }
-            // SECURITY: u32 >> 2, fits in u64.
             let raw = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
             Some((u64::from(raw >> 2), 4))
         }
         _ => {
-            // SECURITY: (u8 >> 2) + 4 ⊆ 4..=67, fits in usize on every target.
             let bytes_following = usize::from(data[0] >> 2) + 4;
             if data.len() < 1 + bytes_following {
                 return None;
@@ -236,13 +218,11 @@ fn decode_compact_prefix(data: &[u8]) -> Option<(usize, usize)> {
     }
     let mode = data[0] & 0b11;
     match mode {
-        // SECURITY: u8 >> 2 ⊆ 0..=63, fits in usize on every target.
         0b00 => Some((usize::from(data[0] >> 2), 1)),
         0b01 => {
             if data.len() < 2 {
                 return None;
             }
-            // SECURITY: u16 >> 2 ⊆ 0..=16383, fits in usize on every target.
             let raw = u16::from_le_bytes([data[0], data[1]]);
             Some((usize::from(raw >> 2), 2))
         }
@@ -251,15 +231,12 @@ fn decode_compact_prefix(data: &[u8]) -> Option<(usize, usize)> {
                 return None;
             }
             let raw = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-            // SECURITY: u32 >> 2 ⊆ 0..=2^30; usize::try_from is identity on
-            // 64-bit targets and fallible on 32-bit (refuse oversized prefix).
             usize::try_from(raw >> 2).ok().map(|v| (v, 4))
         }
         _ => None,
     }
 }
 
-/// Process a remark payload. Reader is fully stateless -- no group keys needed.
 fn process_remark(
     remark_data: &[u8],
     sender: &Pubkey,
@@ -273,7 +250,7 @@ fn process_remark(
     let tx = ctx.tx;
     let remark = match decode_remark(remark_data) {
         Ok(r) => r,
-        Err(_) => return, // Not a valid SAMP remark
+        Err(_) => return,
     };
 
     match remark.content_type {
@@ -376,7 +353,6 @@ fn process_remark(
             });
         }
         ContentType::Channel => {
-            // content = reply_to(6) + continues(6) + body
             let channel_ref = samp::channel_ref_from_recipient(&remark.recipient);
             if let Ok((reply_to, continues, body_bytes)) = decode_channel_content(&remark.content)
                 && let Ok(body) = String::from_utf8(body_bytes.to_vec())
@@ -396,16 +372,14 @@ fn process_remark(
             }
         }
         ContentType::Group => {
-            // content = eph_pubkey(32) + capsules(33*N) + ciphertext
             let scalar = samp::sr25519_signing_scalar(seed);
 
             let plaintext =
                 match samp::decrypt_from_group(&remark.content, &scalar, &remark.nonce, None) {
                     Ok(pt) => pt,
-                    Err(_) => return, // Not for us (no matching capsule) or decryption failed
+                    Err(_) => return,
                 };
 
-            // Parse plaintext: group_ref(6) + reply_to(6) + continues(6) + body
             let (group_ref, reply_to, continues, body_bytes) =
                 match decode_group_content(&plaintext) {
                     Ok(r) => r,
@@ -413,7 +387,6 @@ fn process_remark(
                 };
 
             if group_ref.is_zero() {
-                // Root message (group creation): body = member_count + pubkeys + first_message
                 let (members, first_msg) = match decode_group_members(body_bytes) {
                     Ok(r) => r,
                     Err(_) => return,
@@ -427,7 +400,6 @@ fn process_remark(
                     },
                     members,
                 });
-                // Emit the root's first message (can be empty)
                 let body = String::from_utf8(first_msg.to_vec()).unwrap_or_default();
                 let sender_ss58 = crate::util::ss58_short(sender);
                 let _ = tx.send(Event::NewGroupMessage {
@@ -445,7 +417,6 @@ fn process_remark(
                     timestamp: block_ts_ms / 1000,
                 });
             } else {
-                // Regular message
                 let body = match String::from_utf8(body_bytes.to_vec()) {
                     Ok(b) => b,
                     Err(_) => return,
@@ -464,8 +435,6 @@ fn process_remark(
                 });
             }
         }
-        ContentType::Application(_) => {
-            // Application-defined types: not part of SAMP core
-        }
+        ContentType::Application(_) => {}
     }
 }

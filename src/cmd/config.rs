@@ -7,29 +7,19 @@ use crate::cli_fmt::{
 
 #[derive(Subcommand)]
 pub enum ConfigAction {
-    /// Show all configuration values
     List,
-    /// Get configuration values (all if no key given)
     Get {
-        /// Key in dot-notation (e.g., network.node)
         key: Option<String>,
     },
-    /// Set a configuration value
     Set {
-        /// Key in dot-notation (e.g., network.node)
         key: String,
-        /// Value(s) -- multiple values for list fields like network.mirrors
         #[arg(num_args = 1..)]
         value: Vec<String>,
     },
-    /// Remove a key (revert to default)
     Unset {
-        /// Key in dot-notation
         key: String,
     },
-    /// Open config file in $EDITOR
     Edit,
-    /// Show config file path
     Path,
 }
 

@@ -98,7 +98,6 @@ impl Thread {
     }
 }
 
-/// Channel metadata only — not yet subscribed.
 pub struct ChannelInfo {
     pub name: String,
     pub description: String,
@@ -131,7 +130,6 @@ impl Channel {
     }
 }
 
-/// Members are fixed at creation; you only see groups you're a member of.
 pub struct Group {
     pub creator_pubkey: Pubkey,
     pub group_ref: BlockRef,

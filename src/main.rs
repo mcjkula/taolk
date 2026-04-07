@@ -107,12 +107,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Manage wallets
     Wallet {
         #[command(subcommand)]
         action: cmd::wallet::WalletAction,
     },
-    /// View and modify configuration
     Config {
         #[command(subcommand)]
         action: cmd::config::ConfigAction,
@@ -473,7 +471,6 @@ fn run_lock_screen(
     }
 }
 
-/// Session: takes seed, builds app, runs event loop. Returns true=quit, false=lock.
 fn run_session(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     events: &TuiEventHandler,
@@ -1590,7 +1587,6 @@ fn handle_create_channel_desc_key(
             }
         }
         KeyCode::Esc => {
-            // Step back to name input
             app.input = app.pending_channel_name.take().unwrap_or_default();
             app.cursor_pos = app.input.len();
             app.mode = Mode::CreateChannel;

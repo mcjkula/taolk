@@ -4,8 +4,7 @@ pub fn run_all(wallet_dir: &Path, chain_id: &str) {
     move_legacy_messages_db(wallet_dir, chain_id);
 }
 
-/// v1.0.2: Move legacy `<wallet>/messages.db` into the chain-scoped subdir
-/// `<wallet>/<chain_id>/messages.db`.
+// v1.0.2: <wallet>/messages.db → <wallet>/<chain_id>/messages.db
 fn move_legacy_messages_db(wallet_dir: &Path, chain_id: &str) {
     let legacy_path = wallet_dir.join("messages.db");
     let chain_dir = wallet_dir.join(chain_id);

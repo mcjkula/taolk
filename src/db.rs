@@ -18,9 +18,6 @@ type ChannelMeta = (BlockRef, String, String, String);
 const DB_KEY_INFO: &[u8] = b"taolk-db-v1";
 
 fn ts(secs: i64) -> chrono::DateTime<Utc> {
-    // SECURITY: timestamp_opt only fails for out-of-range epoch seconds
-    // (~year 292B). For unparseable rows we deliberately fall back to UNIX
-    // epoch rather than panic, since stored DB rows are not user-controlled.
     Utc.timestamp_opt(secs, 0)
         .single()
         .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_default())

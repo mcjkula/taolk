@@ -1,6 +1,5 @@
 use crate::types::{BlockRef, Pubkey};
 
-/// All `timestamp` fields in events are Unix seconds (block timestamp milliseconds / 1000).
 pub enum Event {
     NewMessage {
         sender: Pubkey,

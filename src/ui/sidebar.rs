@@ -299,7 +299,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 0 => "(you)".to_string(),
                 1 => taolk::util::ss58_short(&others[0]),
                 _ => {
-                    // First 6 chars per member (matches start of ss58_short)
                     let a = &taolk::util::ss58_from_pubkey(&others[0])[..6];
                     let b = &taolk::util::ss58_from_pubkey(&others[1])[..6];
                     if others.len() == 2 {

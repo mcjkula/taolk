@@ -245,7 +245,6 @@ pub fn get_value(config: &Config, key: &str) -> String {
     }
 }
 
-/// True only if the key is present in the on-disk TOML file (not a serde default).
 pub fn is_user_set(key: &str) -> bool {
     let def = match lookup_key(key) {
         Some(d) => d,

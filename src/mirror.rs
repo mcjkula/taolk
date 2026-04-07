@@ -273,29 +273,23 @@ fn process_encrypted_remark(
         Err(_) => return,
     };
 
-    // Check view tag (recipient path)
     let tag = match samp::check_view_tag(&remark, scalar) {
         Ok(t) => t,
         Err(_) => return,
     };
 
-    // Try recipient decryption first
     let (plaintext, is_mine) = if tag == remark.view_tag {
         match samp::decrypt(&remark, scalar) {
             Ok(pt) => (pt, false),
             Err(_) => return,
         }
     } else {
-        // Try sender self-decryption
         match samp::decrypt_as_sender(&remark, seed) {
-            Ok(pt) => {
-                // Verify the unsealed recipient is valid
-                match samp::unseal_recipient(&remark, seed) {
-                    Ok(_) => (pt, true),
-                    Err(_) => return,
-                }
-            }
-            Err(_) => return, // Not for us and not from us
+            Ok(pt) => match samp::unseal_recipient(&remark, seed) {
+                Ok(_) => (pt, true),
+                Err(_) => return,
+            },
+            Err(_) => return,
         }
     };
 

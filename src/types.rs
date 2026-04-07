@@ -1,4 +1,3 @@
-/// 32-byte SR25519 public key. Not a seed, not a hash.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Pubkey(pub [u8; 32]);
 

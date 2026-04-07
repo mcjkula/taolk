@@ -17,7 +17,6 @@ pub fn ss58_from_pubkey(pubkey: &Pubkey) -> String {
     bs58_encode(&payload)
 }
 
-/// "5FHneW...94ty" — first 6 chars are the conventional human-memorable handle.
 pub fn ss58_short(pubkey: &Pubkey) -> String {
     let full = ss58_from_pubkey(pubkey);
     if full.len() > 12 {
@@ -79,7 +78,6 @@ fn format_balance_inner(
     }
 }
 
-/// Below 0.001 TAO, display as integer RAO; above, as TAO.
 pub fn format_fee(plancks: u128, decimals: u32, symbol: &str) -> String {
     let divisor = 10u128.pow(decimals);
     if plancks < divisor / 1000 {
@@ -240,11 +238,10 @@ fn b64_encode(data: &[u8]) -> String {
         let b1 = u32::from(chunk.get(1).copied().unwrap_or(0));
         let b2 = u32::from(chunk.get(2).copied().unwrap_or(0));
         let n = (b0 << 16) | (b1 << 8) | b2;
-        // SECURITY: `& 0x3f` masks each index to 0..=63, always in bounds for the 64-byte ALPHABET.
-        let i0 = ((n >> 18) & 0x3f) as usize; // SECURITY: bounded 0..=63
-        let i1 = ((n >> 12) & 0x3f) as usize; // SECURITY: bounded 0..=63
-        let i2 = ((n >> 6) & 0x3f) as usize; // SECURITY: bounded 0..=63
-        let i3 = (n & 0x3f) as usize; // SECURITY: bounded 0..=63
+        let i0 = ((n >> 18) & 0x3f) as usize;
+        let i1 = ((n >> 12) & 0x3f) as usize;
+        let i2 = ((n >> 6) & 0x3f) as usize;
+        let i3 = (n & 0x3f) as usize;
         out.push(char::from(ALPHABET[i0]));
         out.push(char::from(ALPHABET[i1]));
         out.push(if chunk.len() > 1 {
@@ -265,13 +262,11 @@ fn bs58_decode(input: &str) -> Result<Vec<u8>, ()> {
     const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
     let mut bytes = vec![0u8];
     for c in input.chars() {
-        // SECURITY: only ASCII chars in the ALPHABET; non-ASCII fails the position check.
         let byte = u8::try_from(u32::from(c)).map_err(|_| ())?;
         let idx = ALPHABET.iter().position(|&a| a == byte).ok_or(())?;
         let mut carry = idx;
         for b in bytes.iter_mut() {
             carry += usize::from(*b) * 58;
-            // SECURITY: `carry % 256` ⊆ 0..=255, always fits in u8.
             *b = u8::try_from(carry % 256).unwrap_or(0);
             carry /= 256;
         }
@@ -280,7 +275,6 @@ fn bs58_decode(input: &str) -> Result<Vec<u8>, ()> {
             carry /= 256;
         }
     }
-    // Leading '1' characters = leading zero bytes
     for c in input.chars() {
         if c == '1' {
             bytes.push(0);
@@ -319,7 +313,7 @@ fn bs58_encode(data: &[u8]) -> String {
         }
     }
     for &d in digits.iter().rev() {
-        let idx = d as usize; // SECURITY: digits are computed `% 58`, always in 0..=57.
+        let idx = d as usize;
         result.push(char::from(ALPHABET[idx]));
     }
     result

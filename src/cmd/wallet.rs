@@ -9,32 +9,23 @@ use crate::cli_fmt::{
 
 #[derive(Subcommand)]
 pub enum WalletAction {
-    /// Create a new wallet with a fresh recovery phrase
     Create {
-        /// Wallet name
         #[arg(long)]
         name: String,
-        /// Password (skips interactive prompt)
         #[arg(long)]
         password: Option<String>,
     },
-    /// Import a wallet from an existing recovery phrase or seed
     #[command(group = ArgGroup::new("source").required(true))]
     Import {
-        /// Wallet name
         #[arg(long)]
         name: String,
-        /// BIP39 recovery phrase (12 or 24 words)
         #[arg(long, group = "source")]
         mnemonic: Option<String>,
-        /// Raw seed (64 hex characters)
         #[arg(long, group = "source")]
         seed: Option<String>,
-        /// Password (skips interactive prompt)
         #[arg(long)]
         password: Option<String>,
     },
-    /// List available wallets
     List,
 }
 

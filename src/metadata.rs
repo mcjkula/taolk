@@ -214,17 +214,10 @@ impl AccountInfoLayout {
 
 #[derive(Clone)]
 enum TypeShape {
-    Primitive {
-        width: usize,
-        unsigned_int: bool,
-    },
+    Primitive { width: usize, unsigned_int: bool },
     Composite(Vec<(String, u32)>),
-    Array {
-        len: u32,
-        inner: u32,
-    },
+    Array { len: u32, inner: u32 },
     Tuple(Vec<u32>),
-    /// `(variant_index, variant_name, first_doc_line)` per variant.
     Variant(Vec<(u8, String, String)>),
     Variable,
 }
@@ -279,7 +272,6 @@ fn byte_size(registry: &[TypeShape], id: u32) -> Result<usize, MetadataError> {
             .iter()
             .try_fold(0, |sum, (_, t)| Ok(sum + byte_size(registry, *t)?)),
         TypeShape::Array { len, inner } => {
-            // SECURITY: SCALE Array len comes from V14 metadata; bounded by Substrate runtime.
             let len_usize =
                 usize::try_from(*len).map_err(|_| MetadataError::TypeIdMissing(*len))?;
             Ok(len_usize * byte_size(registry, *inner)?)

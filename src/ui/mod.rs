@@ -67,13 +67,11 @@ fn render_main_panel(frame: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Dynamic input height: grows with content in Insert mode (up to 4 text lines)
     let text_lines = if app.mode == Mode::Insert && !app.input.is_empty() {
         app.input.split('\n').count().clamp(1, 4)
     } else {
         1
     };
-    // SECURITY: text_lines clamped to [1, 4] above; +2 fits in u16.
     let input_height = u16::try_from(text_lines + 2).unwrap_or(6);
 
     let rows = Layout::default()

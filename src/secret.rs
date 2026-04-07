@@ -44,9 +44,8 @@ impl Seed {
             .expect("Phrase only constructed via validated paths");
         let mut entropy = mnemonic.to_entropy();
         let mut pbkdf_out = Zeroizing::new([0u8; 64]);
-        // SECURITY: pbkdf2 only fails on zero-length output; 64 is constant.
         pbkdf2::pbkdf2::<Hmac<Sha512>>(&entropy, b"mnemonic", 2048, pbkdf_out.as_mut())
-            .expect("pbkdf2 with constant non-zero output length");
+            .expect("pbkdf2");
         entropy.zeroize();
         let mut mini_secret = [0u8; 32];
         mini_secret.copy_from_slice(&pbkdf_out[..32]);
@@ -61,10 +60,7 @@ impl Seed {
     }
 
     pub fn derive_signing_key(&self) -> SigningKey {
-        // SECURITY: MiniSecretKey::from_bytes only fails when input != 32 bytes;
-        // Self::0 is a fixed [u8; 32] so this branch is unreachable.
-        let msk = MiniSecretKey::from_bytes(self.0.as_ref())
-            .expect("32-byte mini-secret is always valid");
+        let msk = MiniSecretKey::from_bytes(self.0.as_ref()).expect("32-byte seed");
         SigningKey {
             inner: msk.expand_to_keypair(ExpansionMode::Ed25519),
         }
@@ -97,10 +93,7 @@ impl Phrase {
     pub fn generate() -> Result<Self, PhraseError> {
         let mut entropy = Zeroizing::new([0u8; 16]);
         getrandom::fill(entropy.as_mut())?;
-        // SECURITY: Mnemonic::from_entropy only fails on entropy lengths
-        // outside [16, 32] step 4; 16 is hardcoded.
-        let mnemonic = Mnemonic::from_entropy(entropy.as_ref())
-            .expect("16-byte entropy is always valid BIP39 input");
+        let mnemonic = Mnemonic::from_entropy(entropy.as_ref()).expect("16-byte entropy");
         Ok(Self(Zeroizing::new(mnemonic.to_string())))
     }
 
@@ -129,8 +122,6 @@ impl SigningKey {
         &self.inner
     }
 }
-
-// schnorrkel::Keypair already implements Drop -> zeroize for its secret half.
 
 #[cfg(test)]
 mod tests {
@@ -176,7 +167,6 @@ mod tests {
     fn phrase_generate_is_valid_mnemonic() {
         let phrase = Phrase::generate().unwrap();
         assert_eq!(phrase.words().split_whitespace().count(), 12);
-        // Re-parsing the generated phrase succeeds.
         let _ = Phrase::parse(phrase.words()).unwrap();
     }
 

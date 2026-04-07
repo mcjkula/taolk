@@ -142,7 +142,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         Span::raw("")
     };
 
-    // Highlight recently changed values: bright for ~2 seconds (8 frames), then fade
     let highlight_frames: u32 = 8;
 
     let balance_str = match app.session.balance {
@@ -179,7 +178,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
     let chain = chain_pill(&app.session.chain_info.chain_name);
     let reconnect = reconnect_pill(app.connection);
-    // SECURITY: span widths are bounded by terminal width; saturate to u16::MAX.
     let chain_width = u16::try_from(chain.width()).unwrap_or(u16::MAX);
     let reconnect_width = reconnect
         .as_ref()
