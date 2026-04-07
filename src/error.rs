@@ -139,4 +139,10 @@ pub enum SdkError {
     Other(String),
 }
 
+impl From<rusqlite::Error> for SdkError {
+    fn from(e: rusqlite::Error) -> Self {
+        SdkError::Database(e.to_string())
+    }
+}
+
 pub type Result<T> = std::result::Result<T, SdkError>;

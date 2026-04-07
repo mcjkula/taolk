@@ -121,8 +121,7 @@ impl Session {
             .await
             .unwrap_or_else(|_| ("TAO".into(), 9));
 
-        let db = Db::open(wallet_name, seed, &chain_info.genesis_hash)
-            .map_err(|e| SdkError::Database(e.to_string()))?;
+        let db = Db::open(wallet_name, seed, &chain_info.genesis_hash)?;
 
         let mut session = Self::new(
             signing,

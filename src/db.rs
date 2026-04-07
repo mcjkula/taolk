@@ -7,6 +7,7 @@ use sha2::Sha256;
 use std::path::PathBuf;
 
 use crate::conversation::{InboxMessage, ThreadMessage};
+use crate::error::SdkError;
 use crate::types::{BlockRef, Pubkey};
 
 type ThreadRow = (BlockRef, String, ThreadMessage, Vec<u8>);
@@ -17,7 +18,12 @@ type ChannelMeta = (BlockRef, String, String, String);
 const DB_KEY_INFO: &[u8] = b"taolk-db-v1";
 
 fn ts(secs: i64) -> chrono::DateTime<Utc> {
-    Utc.timestamp_opt(secs, 0).single().unwrap_or_default()
+    // SECURITY: timestamp_opt only fails for out-of-range epoch seconds
+    // (~year 292B). For unparseable rows we deliberately fall back to UNIX
+    // epoch rather than panic, since stored DB rows are not user-controlled.
+    Utc.timestamp_opt(secs, 0)
+        .single()
+        .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_default())
 }
 
 pub struct Db {
@@ -26,9 +32,8 @@ pub struct Db {
 }
 
 impl Db {
-    #[allow(dead_code)]
-    pub fn open_in_memory(seed: &[u8; 32]) -> Result<Self, Box<dyn std::error::Error>> {
-        let conn = Connection::open_in_memory()?;
+    pub fn open_in_memory(seed: &[u8; 32]) -> Result<Self, SdkError> {
+        let conn = Connection::open_in_memory().map_err(|e| SdkError::Database(e.to_string()))?;
         Self::init(conn, seed)
     }
 
@@ -36,7 +41,7 @@ impl Db {
         wallet_name: &str,
         seed: &[u8; 32],
         genesis_hash: &[u8; 32],
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> Result<Self, SdkError> {
         let wallet_dir = dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("taolk")
@@ -45,14 +50,14 @@ impl Db {
         let chain_id = hex::encode(&genesis_hash[..4]);
         crate::migrations::run_all(&wallet_dir, &chain_id);
         let chain_dir = wallet_dir.join(&chain_id);
-        std::fs::create_dir_all(&chain_dir)?;
+        std::fs::create_dir_all(&chain_dir).map_err(|e| SdkError::Database(e.to_string()))?;
 
         let path = chain_dir.join("messages.db");
-        let conn = Connection::open(path)?;
+        let conn = Connection::open(path).map_err(|e| SdkError::Database(e.to_string()))?;
         Self::init(conn, seed)
     }
 
-    fn init(conn: Connection, seed: &[u8; 32]) -> Result<Self, Box<dyn std::error::Error>> {
+    fn init(conn: Connection, seed: &[u8; 32]) -> Result<Self, SdkError> {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS inbox (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
