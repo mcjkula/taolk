@@ -38,6 +38,7 @@ impl Audio {
         }
     }
 
+    // COVERAGE: rodio sink playback is hardware-bound; not exercised in tests.
     pub fn play(&self, sound: Sound) {
         if !self.cfg.enabled {
             return;

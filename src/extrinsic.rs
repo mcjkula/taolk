@@ -462,6 +462,7 @@ fn scale_compact_len(data: &[u8], offset: usize) -> Result<usize, ChainError> {
             let extra = usize::from(data[offset] >> 2) + 4;
             Ok(1 + extra)
         }
+        // COVERAGE: byte & 0b11 ⊆ {0,1,2,3}; the four arms above are exhaustive.
         _ => unreachable!(),
     }
 }
