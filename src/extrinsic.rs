@@ -305,9 +305,8 @@ pub async fn fetch_balance(
         .map_err(|e| format!("send: {e}"))?;
 
     let result = read_text_result(&mut ws).await?;
-    // Null = account never provisioned; chain semantics, not a fallback.
     if result.is_null() {
-        return Ok(0);
+        return Err("account storage missing on this RPC backend".into());
     }
     let hex_str = result
         .as_str()

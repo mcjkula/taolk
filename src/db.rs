@@ -274,7 +274,7 @@ impl Db {
     pub fn load_inbox(&self) -> (Vec<InboxMessage>, Vec<InboxMessage>) {
         let inner = || -> Option<Vec<InboxMessage>> {
             let mut stmt = self.conn.prepare(
-                "SELECT id, peer_ss58, timestamp, body, content_type, is_mine, block_number, ext_index FROM inbox ORDER BY timestamp"
+                "SELECT id, peer_ss58, timestamp, body, content_type, is_mine, block_number, ext_index FROM inbox ORDER BY block_number, ext_index"
             ).ok()?;
             let all = stmt
                 .query_map([], |row| {

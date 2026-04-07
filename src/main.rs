@@ -982,10 +982,22 @@ fn run_session(
                 app.frame = app.frame.wrapping_add(1);
             }
             TuiEvent::Core(event::Event::BlockUpdate(num)) => {
-                if num != app.session.block_number {
+                let new_block = num != app.session.block_number;
+                if new_block {
                     app.block_changed_at = app.frame;
                 }
                 app.session.block_number = num;
+                if new_block {
+                    let url = node_url.to_string();
+                    let pk = my_pubkey;
+                    let layout = app.session.chain_info.account_info_layout.clone();
+                    let tx = event_tx.clone();
+                    rt.spawn(async move {
+                        if let Ok(bal) = extrinsic::fetch_balance(&url, &pk, &layout).await {
+                            let _ = tx.send(event::Event::BalanceUpdated(bal));
+                        }
+                    });
+                }
             }
             TuiEvent::Core(event::Event::NewMessage {
                 sender,
@@ -1010,7 +1022,7 @@ fn run_session(
 
                 match kind {
                     0x00 | 0x01 => {
-                        // Public (0x10) or Encrypted (0x11)
+                        // Public or encrypted
                         app.session.add_inbox_message(
                             sender,
                             recipient,
@@ -1024,7 +1036,7 @@ fn run_session(
                         );
                     }
                     0x02 => {
-                        // Thread (0x12)
+                        // Thread
                         app.session.add_thread_message(
                             sender,
                             recipient,

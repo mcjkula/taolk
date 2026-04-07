@@ -147,7 +147,6 @@ fn extract_remark(ext_bytes: &[u8]) -> Option<Vec<u8>> {
     Some(payload[offset..offset + remark_len].to_vec())
 }
 
-/// Extract the signer (account_id) from a signed Substrate extrinsic.
 fn extract_signer(ext_bytes: &[u8]) -> Option<Pubkey> {
     let (_, prefix_len) = decode_compact_prefix(ext_bytes)?;
     let payload = &ext_bytes[prefix_len..];
@@ -163,7 +162,6 @@ fn extract_signer(ext_bytes: &[u8]) -> Option<Pubkey> {
     Some(Pubkey(account))
 }
 
-/// Extract the block timestamp (milliseconds) from the timestamp inherent.
 pub fn extract_block_timestamp(extrinsics: &[Value]) -> u64 {
     for ext in extrinsics {
         let ext_hex = match ext.as_str() {
@@ -272,7 +270,6 @@ fn process_remark(
 
     match remark.content_type {
         ContentType::Public => {
-            // Public standalone message (0x10)
             if remark.recipient != my_pubkey.0 && *sender != *my_pubkey {
                 return;
             }
@@ -293,12 +290,11 @@ fn process_remark(
             });
         }
         ContentType::Encrypted | ContentType::Thread => {
-            // 1:1 encrypted (0x11) or thread (0x12)
             let is_mine = *sender == *my_pubkey;
 
             if !is_mine {
                 let scalar = samp::sr25519_signing_scalar(seed);
-                let tag = match samp::check_view_tag(&scalar, &remark.content) {
+                let tag = match samp::check_view_tag(&remark, &scalar) {
                     Ok(t) => t,
                     Err(_) => return,
                 };
@@ -308,10 +304,10 @@ fn process_remark(
             }
 
             let plaintext = if is_mine {
-                samp::decrypt_as_sender(&remark.content, seed, &remark.nonce)
+                samp::decrypt_as_sender(&remark, seed)
             } else {
                 let scalar = samp::sr25519_signing_scalar(seed);
-                samp::decrypt(&remark.content, &scalar, &remark.nonce)
+                samp::decrypt(&remark, &scalar)
             };
 
             let plaintext = match plaintext {
@@ -320,12 +316,11 @@ fn process_remark(
             };
 
             let mut recipient = remark.recipient;
-            if is_mine && let Ok(r) = samp::unseal_recipient(&remark.content, seed, &remark.nonce) {
+            if is_mine && let Ok(r) = samp::unseal_recipient(&remark, seed) {
                 recipient = r;
             }
 
             let ct = remark.content_type.to_byte();
-            // Thread (0x12): lower nibble 0x02
             let (body, thread_ref, reply_to, continues) = if ct & 0x0F == 0x02 {
                 match decode_thread_content(&plaintext) {
                     Ok((thread, reply_to, continues, body_bytes)) => {
@@ -357,7 +352,6 @@ fn process_remark(
             });
         }
         ContentType::ChannelCreate => {
-            // Channel creation (0x13)
             let (name, description) = match decode_channel_create(&remark.content) {
                 Ok(r) => (r.0.to_string(), r.1.to_string()),
                 Err(_) => return,
@@ -374,7 +368,7 @@ fn process_remark(
             });
         }
         ContentType::Channel => {
-            // Channel message (0x14): public, content = reply_to(6) + continues(6) + body
+            // content = reply_to(6) + continues(6) + body
             let channel_ref = samp::channel_ref_from_recipient(&remark.recipient);
             if let Ok((reply_to, continues, body_bytes)) = decode_channel_content(&remark.content)
                 && let Ok(body) = String::from_utf8(body_bytes.to_vec())
@@ -394,7 +388,6 @@ fn process_remark(
             }
         }
         ContentType::Group => {
-            // Group message (0x15): per-message capsules, stateless decryption
             // content = eph_pubkey(32) + capsules(33*N) + ciphertext
             let scalar = samp::sr25519_signing_scalar(seed);
 
@@ -464,7 +457,7 @@ fn process_remark(
             }
         }
         ContentType::Application(_) => {
-            // Application-defined types (0x18-0x1F): not part of SAMP core
+            // Application-defined types: not part of SAMP core
         }
     }
 }

@@ -80,7 +80,7 @@ fn build_encrypted_message_decryptable() {
 
     assert_eq!(decoded.content_type, samp::ContentType::Encrypted);
 
-    let plaintext = samp::decrypt(&decoded.content, &bob_scalar(), &decoded.nonce).unwrap();
+    let plaintext = samp::decrypt(&decoded, &bob_scalar()).unwrap();
     assert_eq!(std::str::from_utf8(&plaintext).unwrap(), "hello");
 }
 
@@ -100,7 +100,7 @@ fn build_thread_root_decryptable() {
 
     assert_eq!(decoded.content_type, samp::ContentType::Thread);
 
-    let plaintext = samp::decrypt(&decoded.content, &bob_scalar(), &decoded.nonce).unwrap();
+    let plaintext = samp::decrypt(&decoded, &bob_scalar()).unwrap();
     let (thread_ref, _reply_to, _continues, body) =
         samp::decode_thread_content(&plaintext).unwrap();
 

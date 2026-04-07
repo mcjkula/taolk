@@ -1,7 +1,7 @@
 use crate::types::{BlockRef, Pubkey};
 use chrono::{DateTime, Utc};
 
-/// A standalone message (public 0x01 or encrypted 0x02). Not threaded.
+/// A standalone message (public or encrypted). Not threaded.
 #[derive(Clone)]
 pub struct InboxMessage {
     pub peer_ss58: String,
@@ -13,7 +13,7 @@ pub struct InboxMessage {
     pub ext_index: u16,
 }
 
-/// A message in a threaded conversation (0x03 thread or 0x04 channel).
+/// A message in a threaded conversation (thread or channel).
 #[derive(Clone)]
 pub struct ThreadMessage {
     pub sender_ss58: String,
@@ -79,7 +79,7 @@ pub fn gap_refs(messages: &[ThreadMessage]) -> Vec<BlockRef> {
     refs
 }
 
-/// An encrypted 1:1 threaded conversation (0x03 messages).
+/// An encrypted 1:1 threaded conversation.
 pub struct Thread {
     pub thread_ref: BlockRef,
     pub peer_ss58: String,
@@ -112,7 +112,7 @@ pub struct ChannelInfo {
     pub channel_ref: BlockRef,
 }
 
-/// A subscribed public channel (0x14 messages).
+/// A subscribed public channel.
 pub struct Channel {
     pub name: String,
     pub description: String,
@@ -138,7 +138,7 @@ impl Channel {
     }
 }
 
-/// An encrypted group (0x15 messages). Members are fixed at creation.
+/// An encrypted group. Members are fixed at creation.
 /// Auto-subscribed on discovery (you only see groups you're a member of).
 pub struct Group {
     pub creator_pubkey: Pubkey,

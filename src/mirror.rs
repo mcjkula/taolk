@@ -127,51 +127,43 @@ async fn sync_inner(
         }
     }
 
-    // 4. Fetch encrypted remarks (client checks view tags locally)
-    let encrypted: Vec<RemarkResp> = client
-        .get(format!("{base}/v1/remarks?type=0x11&after={last_block}"))
-        .send()
-        .await
-        .map_err(|e| format!("encrypted: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("encrypted json: {e}"))?;
-
+    // 4. Fetch inbox remarks for every SAMP content type and dispatch by kind.
     let scalar = samp::sr25519_signing_scalar(seed);
-    for r in encrypted {
+
+    for r in fetch_remarks(&client, base, 0x10, last_block, "public").await? {
+        process_public_remark(&r, my_pubkey, tx);
+    }
+    for r in fetch_remarks(&client, base, 0x11, last_block, "encrypted").await? {
         process_encrypted_remark(&r, &scalar, my_pubkey, seed, tx);
     }
-
-    // 5. Fetch thread remarks
-    let threads: Vec<RemarkResp> = client
-        .get(format!("{base}/v1/remarks?type=0x12&after={last_block}"))
-        .send()
-        .await
-        .map_err(|e| format!("threads: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("threads json: {e}"))?;
-
-    for r in threads {
+    for r in fetch_remarks(&client, base, 0x12, last_block, "thread").await? {
         process_encrypted_remark(&r, &scalar, my_pubkey, seed, tx);
     }
-
-    // 6. Fetch group remarks (client decrypts capsules locally)
-    let groups: Vec<RemarkResp> = client
-        .get(format!("{base}/v1/remarks?type=0x15&after={last_block}"))
-        .send()
-        .await
-        .map_err(|e| format!("groups: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("groups json: {e}"))?;
-
-    for r in groups {
+    for r in fetch_remarks(&client, base, 0x15, last_block, "group").await? {
         process_group_remark(&r, &scalar, tx);
     }
 
     let _ = tx.send(Event::Status("All caught up".into()));
     Ok(())
+}
+
+async fn fetch_remarks(
+    client: &reqwest::Client,
+    base: &str,
+    type_byte: u8,
+    after: u64,
+    label: &str,
+) -> Result<Vec<RemarkResp>, String> {
+    client
+        .get(format!(
+            "{base}/v1/remarks?type=0x{type_byte:02x}&after={after}"
+        ))
+        .send()
+        .await
+        .map_err(|e| format!("{label}: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("{label} json: {e}"))
 }
 
 /// Fetch a single channel's messages from the mirror. Called when subscribing or pressing `r`.
@@ -239,6 +231,36 @@ fn process_remark_from_mirror(r: &RemarkResp, tx: &Sender<Event>) {
     }
 }
 
+fn process_public_remark(r: &RemarkResp, my_pubkey: &Pubkey, tx: &Sender<Event>) {
+    let bytes = match hex::decode(&r.remark) {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+    let remark = match decode_remark(&bytes) {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    if remark.content_type != ContentType::Public {
+        return;
+    }
+    let sender = crate::util::pubkey_from_ss58(&r.sender).unwrap_or(Pubkey::ZERO);
+    if remark.recipient != my_pubkey.0 && sender != *my_pubkey {
+        return;
+    }
+    let _ = tx.send(Event::NewMessage {
+        sender,
+        content_type: remark.content_type.to_byte(),
+        recipient: Pubkey(remark.recipient),
+        decrypted_body: String::from_utf8(remark.content).ok(),
+        thread_ref: BlockRef::ZERO,
+        reply_to: BlockRef::ZERO,
+        continues: BlockRef::ZERO,
+        block_number: r.block,
+        ext_index: r.index,
+        timestamp: r.timestamp,
+    });
+}
+
 fn process_encrypted_remark(
     r: &RemarkResp,
     scalar: &Scalar,
@@ -256,23 +278,23 @@ fn process_encrypted_remark(
     };
 
     // Check view tag (recipient path)
-    let tag = match samp::check_view_tag(scalar, &remark.content) {
+    let tag = match samp::check_view_tag(&remark, scalar) {
         Ok(t) => t,
         Err(_) => return,
     };
 
     // Try recipient decryption first
     let (plaintext, is_mine) = if tag == remark.view_tag {
-        match samp::decrypt(&remark.content, scalar, &remark.nonce) {
+        match samp::decrypt(&remark, scalar) {
             Ok(pt) => (pt, false),
             Err(_) => return,
         }
     } else {
         // Try sender self-decryption
-        match samp::decrypt_as_sender(&remark.content, seed, &remark.nonce) {
+        match samp::decrypt_as_sender(&remark, seed) {
             Ok(pt) => {
                 // Verify the unsealed recipient is valid
-                match samp::unseal_recipient(&remark.content, seed, &remark.nonce) {
+                match samp::unseal_recipient(&remark, seed) {
                     Ok(_) => (pt, true),
                     Err(_) => return,
                 }
@@ -283,11 +305,10 @@ fn process_encrypted_remark(
 
     let ct = remark.content_type.to_byte();
     let mut recipient = remark.recipient;
-    if is_mine && let Ok(r) = samp::unseal_recipient(&remark.content, seed, &remark.nonce) {
+    if is_mine && let Ok(r) = samp::unseal_recipient(&remark, seed) {
         recipient = r;
     }
 
-    // Parse thread content if 0x12
     let (body, thread_ref, reply_to, continues) = if ct & 0x0F == 0x02 {
         match samp::decode_thread_content(&plaintext) {
             Ok((thread, reply_to, continues, body_bytes)) => (
@@ -331,7 +352,6 @@ fn process_group_remark(r: &RemarkResp, scalar: &Scalar, tx: &Sender<Event>) {
         Err(_) => return,
     };
 
-    // Decrypt using capsule scanning (stateless)
     let plaintext = match samp::decrypt_from_group(&remark.content, scalar, &remark.nonce, None) {
         Ok(pt) => pt,
         Err(_) => return, // Not for us
@@ -343,11 +363,9 @@ fn process_group_remark(r: &RemarkResp, scalar: &Scalar, tx: &Sender<Event>) {
         Err(_) => return,
     };
 
-    // Sender pubkey: parse from the mirror's SS58
     let sender_pubkey = crate::util::pubkey_from_ss58(&r.sender).unwrap_or(Pubkey::ZERO);
 
     if group_ref.is_zero() {
-        // Root message: parse member list
         let (members, first_msg) = match samp::decode_group_members(body_bytes) {
             Ok(r) => r,
             Err(_) => return,

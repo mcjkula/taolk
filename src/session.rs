@@ -305,11 +305,13 @@ impl Session {
             ext_index,
         };
         self.db.insert_inbox(&msg);
-        if is_mine {
-            self.outbox.push(msg);
+        let target = if is_mine {
+            &mut self.outbox
         } else {
-            self.inbox.push(msg);
-        }
+            &mut self.inbox
+        };
+        target.push(msg);
+        target.sort_by_key(|m| (m.block_number, m.ext_index));
     }
 
     pub fn add_thread_message(
@@ -714,7 +716,12 @@ impl Session {
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         let vt = samp::compute_view_tag(&self.seed, &enc_pk, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
-        Ok(samp::encode_encrypted(0x11, vt, &nonce, &encrypted))
+        Ok(samp::encode_encrypted(
+            samp::CONTENT_TYPE_ENCRYPTED,
+            vt,
+            &nonce,
+            &encrypted,
+        ))
     }
 
     pub fn build_thread_root(&self, recipient: &Pubkey, body: &str) -> Result<Vec<u8>> {
@@ -730,7 +737,12 @@ impl Session {
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         let vt = samp::compute_view_tag(&self.seed, &enc_pk, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
-        Ok(samp::encode_encrypted(0x12, vt, &nonce, &encrypted))
+        Ok(samp::encode_encrypted(
+            samp::CONTENT_TYPE_THREAD,
+            vt,
+            &nonce,
+            &encrypted,
+        ))
     }
 
     pub fn build_thread_reply(&self, thread_idx: usize, body: &str) -> Result<Vec<u8>> {
@@ -750,7 +762,12 @@ impl Session {
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         let vt = samp::compute_view_tag(&self.seed, &enc_pk, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
-        Ok(samp::encode_encrypted(0x12, vt, &nonce, &encrypted))
+        Ok(samp::encode_encrypted(
+            samp::CONTENT_TYPE_THREAD,
+            vt,
+            &nonce,
+            &encrypted,
+        ))
     }
 
     pub fn build_channel_create(&self, name: &str, description: &str) -> Result<Vec<u8>> {
