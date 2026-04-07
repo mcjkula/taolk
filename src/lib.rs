@@ -11,6 +11,7 @@ pub mod metadata;
 pub(crate) mod migrations;
 pub mod mirror;
 pub mod reader;
+pub mod secret;
 pub mod session;
 pub mod types;
 pub mod util;
