@@ -140,6 +140,14 @@ impl Db {
                 block_number INTEGER NOT NULL,
                 ext_index INTEGER NOT NULL,
                 UNIQUE(block_number, ext_index)
+            );
+            CREATE TABLE IF NOT EXISTS drafts (
+                kind INTEGER NOT NULL,
+                ref_block INTEGER NOT NULL,
+                ref_index INTEGER NOT NULL,
+                body BLOB NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (kind, ref_block, ref_index)
             );",
         )?;
 
@@ -180,6 +188,77 @@ impl Db {
             .ok()
             .and_then(|pt| String::from_utf8(pt).ok())
             .unwrap_or_default()
+    }
+
+    fn encrypt_draft(&self, plaintext: &str, kind: u8, block: u32, index: u16) -> Vec<u8> {
+        let nonce = draft_nonce(kind, block, index);
+        self.cipher
+            .encrypt(Nonce::from_slice(&nonce), plaintext.as_bytes())
+            .unwrap_or_default()
+    }
+
+    fn decrypt_draft(&self, ciphertext: &[u8], kind: u8, block: u32, index: u16) -> String {
+        let nonce = draft_nonce(kind, block, index);
+        self.cipher
+            .decrypt(Nonce::from_slice(&nonce), ciphertext)
+            .ok()
+            .and_then(|pt| String::from_utf8(pt).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save_draft(&self, kind: u8, block: u32, index: u16, body: &str) {
+        if body.is_empty() {
+            self.delete_draft(kind, block, index);
+            return;
+        }
+        let encrypted = self.encrypt_draft(body, kind, block, index);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let _ = self.conn.execute(
+            "INSERT INTO drafts (kind, ref_block, ref_index, body, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(kind, ref_block, ref_index)
+             DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at",
+            params![kind, block, index, encrypted, now],
+        );
+    }
+
+    pub fn delete_draft(&self, kind: u8, block: u32, index: u16) {
+        let _ = self.conn.execute(
+            "DELETE FROM drafts WHERE kind = ?1 AND ref_block = ?2 AND ref_index = ?3",
+            params![kind, block, index],
+        );
+    }
+
+    pub fn load_drafts(&self) -> Vec<(u8, BlockRef, String)> {
+        let inner = || -> Option<Vec<(u8, BlockRef, Vec<u8>)>> {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT kind, ref_block, ref_index, body FROM drafts")
+                .ok()?;
+            let rows = stmt
+                .query_map([], |row| {
+                    let kind: u8 = row.get(0)?;
+                    let block: u32 = row.get(1)?;
+                    let index: u16 = row.get(2)?;
+                    let body: Vec<u8> = row.get(3)?;
+                    Ok((kind, BlockRef { block, index }, body))
+                })
+                .ok()?
+                .filter_map(|r| r.ok())
+                .collect();
+            Some(rows)
+        };
+        inner()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(kind, bref, encrypted)| {
+                let body = self.decrypt_draft(&encrypted, kind, bref.block, bref.index);
+                (kind, bref, body)
+            })
+            .collect()
     }
 
     pub fn insert_inbox(&self, msg: &InboxMessage) {
@@ -734,5 +813,14 @@ fn inbox_nonce(id: i64) -> [u8; 12] {
     let mut nonce = [0u8; 12];
     nonce[..8].copy_from_slice(&id.to_le_bytes());
     nonce[8] = 0xFF;
+    nonce
+}
+
+fn draft_nonce(kind: u8, block: u32, index: u16) -> [u8; 12] {
+    let mut nonce = [0u8; 12];
+    nonce[0] = kind;
+    nonce[1] = 0xDD;
+    nonce[2..6].copy_from_slice(&block.to_le_bytes());
+    nonce[6..8].copy_from_slice(&index.to_le_bytes());
     nonce
 }

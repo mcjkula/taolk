@@ -1,5 +1,3 @@
-// Standard Unicode symbols -- render in any modern terminal, any monospace font.
-// Single-width characters from Geometric Shapes, Dingbats, Miscellaneous Symbols.
 pub const INBOX: &str = "\u{2709}"; // ✉ Envelope
 pub const OUTBOX: &str = "\u{2197}"; // ↗ North East Arrow
 pub const PUBLIC: &str = "\u{25CB}"; // ○ White Circle (open)

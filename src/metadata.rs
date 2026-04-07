@@ -1,23 +1,39 @@
-//! Locate `frame_system::AccountInfo.data.free` in the live runtime so balances
-//! decode at the width the chain actually uses (Bittensor: `u64`; vanilla
-//! Substrate: `u128`). Single-pass stream walk over V14 SCALE metadata; no
-//! derived schema shells, no hardcoded offsets.
+//! Decode V14 SCALE runtime metadata into the artifacts taolk needs at
+//! startup: the byte layout of `frame_system::AccountInfo.data.free` (so
+//! balances decode at the width the chain actually uses), and the table of
+//! pallet error variants (so `DispatchError` codes can be translated to
+//! `Pallet::Variant` strings without hardcoding). Single-pass stream walk.
 
 use parity_scale_codec::{Compact, Decode, Error as CodecError, Input};
+use std::collections::HashMap;
 
 const METADATA_MAGIC: u32 = 0x6174_656d; // "meta"
 
-/// Byte position of `data.free` inside the SCALE-encoded `AccountInfo` blob,
-/// discovered from the runtime's own type registry.
 #[derive(Clone, Debug)]
 pub struct AccountInfoLayout {
     pub free_offset: usize,
     pub free_width: usize,
 }
 
-impl AccountInfoLayout {
-    /// Parse a `RuntimeMetadataPrefixed` (V14) blob and resolve the layout of
-    /// `frame_system::AccountInfo.data.free`.
+#[derive(Clone, Debug, Default)]
+pub struct ErrorTable {
+    by_idx: HashMap<(u8, u8), ErrorEntry>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ErrorEntry {
+    pub pallet: String,
+    pub variant: String,
+    pub doc: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct Metadata {
+    pub layout: AccountInfoLayout,
+    pub errors: ErrorTable,
+}
+
+impl Metadata {
     pub fn from_runtime_metadata(bytes: &[u8]) -> Result<Self, String> {
         let input = &mut &bytes[..];
 
@@ -31,11 +47,126 @@ impl AccountInfoLayout {
         }
 
         let registry = read_registry(input)?;
-        let account_info_id = find_storage_value_type(input, "System", "Account")?;
-        Self::resolve(&registry, account_info_id)
+        let pallets = walk_pallets(input)?;
+
+        let layout = AccountInfoLayout::resolve(&registry, pallets.account_info_ty)?;
+        let errors = ErrorTable::build(&registry, &pallets.errors);
+        Ok(Self { layout, errors })
+    }
+}
+
+impl ErrorTable {
+    pub fn humanize(&self, pallet_idx: u8, err_idx: u8) -> Option<String> {
+        let e = self.by_idx.get(&(pallet_idx, err_idx))?;
+        if e.doc.is_empty() {
+            Some(format!("{}::{}", e.pallet, e.variant))
+        } else {
+            Some(format!("{}::{}: {}", e.pallet, e.variant, e.doc))
+        }
     }
 
-    /// Decode `data.free` from a raw `System.Account` storage value.
+    pub fn humanize_rpc_error(&self, raw: &str) -> String {
+        if let Some(payload) = find_after_any(raw, &["RPC error: ", "transaction failed: "])
+            && let Some(json_str) = trim_to_json(payload)
+            && let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str)
+        {
+            if let Some(s) = v.get("data").and_then(|d| d.as_str()) {
+                return self
+                    .maybe_translate_module(s)
+                    .unwrap_or_else(|| s.to_string());
+            }
+            if let Some(s) = v.get("message").and_then(|m| m.as_str()) {
+                return s.to_string();
+            }
+        }
+        if let Some(t) = self.maybe_translate_module(raw) {
+            return t;
+        }
+        raw.to_string()
+    }
+
+    fn maybe_translate_module(&self, s: &str) -> Option<String> {
+        let start = s.find("Module")?;
+        let tail = &s[start..];
+        let idx = parse_after(tail, "index:")?;
+        let err = parse_first_byte_after(tail, "error:")?;
+        self.humanize(idx as u8, err as u8)
+    }
+
+    fn build(registry: &[TypeShape], pallets: &[PalletErrorRef]) -> Self {
+        let mut by_idx = HashMap::new();
+        for p in pallets {
+            if let Some(TypeShape::Variant(variants)) = registry.get(p.error_ty as usize) {
+                for (variant_idx, variant_name, doc) in variants {
+                    by_idx.insert(
+                        (p.pallet_idx, *variant_idx),
+                        ErrorEntry {
+                            pallet: p.pallet_name.clone(),
+                            variant: variant_name.clone(),
+                            doc: doc.clone(),
+                        },
+                    );
+                }
+            }
+        }
+        Self { by_idx }
+    }
+}
+
+fn find_after_any<'a>(s: &'a str, needles: &[&str]) -> Option<&'a str> {
+    needles
+        .iter()
+        .find_map(|n| s.find(n).map(|i| &s[i + n.len()..]))
+}
+
+fn trim_to_json(s: &str) -> Option<&str> {
+    let start = s.find('{')?;
+    let bytes = s.as_bytes();
+    let mut depth = 0i32;
+    let mut in_str = false;
+    let mut esc = false;
+    for (i, &b) in bytes.iter().enumerate().skip(start) {
+        if esc {
+            esc = false;
+            continue;
+        }
+        match b {
+            b'\\' if in_str => esc = true,
+            b'"' => in_str = !in_str,
+            b'{' if !in_str => depth += 1,
+            b'}' if !in_str => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&s[start..=i]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn parse_after(haystack: &str, needle: &str) -> Option<u32> {
+    let after = haystack.find(needle)?;
+    let rest = &haystack[after + needle.len()..];
+    let digits: String = rest
+        .chars()
+        .skip_while(|c| c.is_whitespace())
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse().ok()
+}
+
+fn parse_first_byte_after(haystack: &str, needle: &str) -> Option<u32> {
+    let after = haystack.find(needle)?;
+    let rest = &haystack[after + needle.len()..];
+    let bracket = rest.find('[')?;
+    let inside = &rest[bracket + 1..];
+    let digits: String = inside.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
+}
+
+impl AccountInfoLayout {
     pub fn decode_free(&self, account_info: &[u8]) -> Result<u128, String> {
         let end = self.free_offset + self.free_width;
         if account_info.len() < end {
@@ -72,19 +203,34 @@ impl AccountInfoLayout {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Type registry: only the shapes we need to size composites and identify the
-// `free` primitive. Names are kept only on composite fields so we can walk to
-// `AccountInfo.data.free` by name; everything else is anonymous.
-// ---------------------------------------------------------------------------
-
 #[derive(Clone)]
 enum TypeShape {
-    Primitive { width: usize, unsigned_int: bool },
+    Primitive {
+        width: usize,
+        unsigned_int: bool,
+    },
     Composite(Vec<(String, u32)>),
-    Array { len: u32, inner: u32 },
+    Array {
+        len: u32,
+        inner: u32,
+    },
     Tuple(Vec<u32>),
+    /// `(variant_index, variant_name, first_doc_line)` per variant.
+    Variant(Vec<(u8, String, String)>),
     Variable,
+}
+
+#[derive(Clone, Debug)]
+struct PalletErrorRef {
+    pallet_name: String,
+    pallet_idx: u8,
+    error_ty: u32,
+}
+
+#[derive(Debug, Default)]
+struct PalletWalkResult {
+    account_info_ty: u32,
+    errors: Vec<PalletErrorRef>,
 }
 
 impl TypeShape {
@@ -122,15 +268,10 @@ fn byte_size(registry: &[TypeShape], id: u32) -> Result<usize, String> {
         TypeShape::Tuple(ids) => ids
             .iter()
             .try_fold(0, |sum, t| Ok(sum + byte_size(registry, *t)?)),
+        TypeShape::Variant(_) => Err(format!("type id {id} is a variant (variable width)")),
         TypeShape::Variable => Err(format!("type id {id} has variable width")),
     }
 }
-
-// ---------------------------------------------------------------------------
-// SCALE stream walk. Imperative, single pass; allocates only the registry and
-// composite-field name lists. Unused fields are decoded-and-dropped via the
-// built-in `Decode` impls so we never lose positional sync.
-// ---------------------------------------------------------------------------
 
 fn read_registry<I: Input>(input: &mut I) -> Result<Vec<TypeShape>, String> {
     let n = compact(input)?;
@@ -154,13 +295,23 @@ fn read_type_def<I: Input>(input: &mut I) -> Result<TypeShape, String> {
         0 => TypeShape::Composite(read_fields(input)?),
         1 => {
             // Variant { variants: Vec<{ name, fields, index, docs }> }
-            for _ in 0..compact(input)? {
-                let _ = String::decode(input).map_err(scale)?;
+            // We capture (index, name, first_doc_line) for the pallet error path;
+            // field shapes are decoded-and-dropped to keep stream sync.
+            let n = compact(input)?;
+            let mut variants = Vec::with_capacity(n as usize);
+            for _ in 0..n {
+                let name = String::decode(input).map_err(scale)?;
                 let _ = read_fields(input)?;
-                let _ = u8::decode(input).map_err(scale)?;
-                skip_strings(input)?;
+                let index = u8::decode(input).map_err(scale)?;
+                let docs = <Vec<String>>::decode(input).map_err(scale)?;
+                let doc = docs
+                    .into_iter()
+                    .map(|d| d.trim().to_string())
+                    .find(|d| !d.is_empty())
+                    .unwrap_or_default();
+                variants.push((index, name, doc));
             }
-            TypeShape::Variable
+            TypeShape::Variant(variants)
         }
         2 => {
             // Sequence { type_param }
@@ -251,17 +402,10 @@ fn primitive_shape(tag: u8) -> Result<TypeShape, String> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// Pallet stream walk: locate the value type id of `<pallet>.<entry>` storage
-// and return as soon as it's found, leaving the rest of the metadata stream
-// unread.
-// ---------------------------------------------------------------------------
+fn walk_pallets<I: Input>(input: &mut I) -> Result<PalletWalkResult, String> {
+    let mut account_info_ty: Option<u32> = None;
+    let mut errors: Vec<PalletErrorRef> = Vec::new();
 
-fn find_storage_value_type<I: Input>(
-    input: &mut I,
-    pallet: &str,
-    entry: &str,
-) -> Result<u32, String> {
     for _ in 0..compact(input)? {
         let pallet_name = String::decode(input).map_err(scale)?;
         // storage: Option<{ prefix, entries }>
@@ -271,8 +415,8 @@ fn find_storage_value_type<I: Input>(
                 let entry_name = String::decode(input).map_err(scale)?;
                 let _ = u8::decode(input).map_err(scale)?; // modifier
                 let value_ty = read_storage_entry_value_type(input)?;
-                if pallet_name == pallet && entry_name == entry {
-                    return Ok(value_ty);
+                if pallet_name == "System" && entry_name == "Account" {
+                    account_info_ty = Some(value_ty);
                 }
                 let _ = <Vec<u8>>::decode(input).map_err(scale)?; // default
                 skip_strings(input)?; // docs
@@ -287,10 +431,26 @@ fn find_storage_value_type<I: Input>(
             let _ = <Vec<u8>>::decode(input).map_err(scale)?;
             skip_strings(input)?;
         }
-        skip_optional_compact(input)?; // error:    Option<{ ty }>
-        let _ = u8::decode(input).map_err(scale)?; // pallet index
+        // error: Option<{ ty }>
+        let error_ty = if option_tag(input)? {
+            Some(compact(input)?)
+        } else {
+            None
+        };
+        let pallet_index = u8::decode(input).map_err(scale)?;
+        if let Some(ty) = error_ty {
+            errors.push(PalletErrorRef {
+                pallet_name: pallet_name.clone(),
+                pallet_idx: pallet_index,
+                error_ty: ty,
+            });
+        }
     }
-    Err(format!("{pallet}.{entry} storage entry not found"))
+
+    Ok(PalletWalkResult {
+        account_info_ty: account_info_ty.ok_or("System.Account storage entry not found")?,
+        errors,
+    })
 }
 
 fn read_storage_entry_value_type<I: Input>(input: &mut I) -> Result<u32, String> {
@@ -307,10 +467,6 @@ fn read_storage_entry_value_type<I: Input>(input: &mut I) -> Result<u32, String>
         tag => Err(format!("unknown StorageEntryType tag {tag}")),
     }
 }
-
-// ---------------------------------------------------------------------------
-// SCALE primitives
-// ---------------------------------------------------------------------------
 
 fn compact<I: Input>(input: &mut I) -> Result<u32, String> {
     Ok(<Compact<u32>>::decode(input).map_err(scale)?.0)
@@ -338,4 +494,91 @@ fn skip_optional_compact<I: Input>(input: &mut I) -> Result<(), String> {
 
 fn scale(e: CodecError) -> String {
     format!("scale decode: {e}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture_table() -> ErrorTable {
+        let mut by_idx = HashMap::new();
+        by_idx.insert(
+            (5, 3),
+            ErrorEntry {
+                pallet: "Balances".into(),
+                variant: "InsufficientBalance".into(),
+                doc: "Balance too low to send value.".into(),
+            },
+        );
+        by_idx.insert(
+            (12, 0),
+            ErrorEntry {
+                pallet: "SubtensorModule".into(),
+                variant: "NotEnoughBalanceToStake".into(),
+                doc: String::new(),
+            },
+        );
+        ErrorTable { by_idx }
+    }
+
+    #[test]
+    fn humanize_includes_doc_when_present() {
+        let t = fixture_table();
+        assert_eq!(
+            t.humanize(5, 3).as_deref(),
+            Some("Balances::InsufficientBalance: Balance too low to send value."),
+        );
+    }
+
+    #[test]
+    fn humanize_omits_doc_when_empty() {
+        let t = fixture_table();
+        assert_eq!(
+            t.humanize(12, 0).as_deref(),
+            Some("SubtensorModule::NotEnoughBalanceToStake"),
+        );
+    }
+
+    #[test]
+    fn humanize_returns_none_for_unknown() {
+        let t = fixture_table();
+        assert!(t.humanize(99, 99).is_none());
+    }
+
+    #[test]
+    fn humanize_rpc_error_extracts_data_field() {
+        let t = ErrorTable::default();
+        let raw = r#"RPC error: {"code":1010,"data":"Transaction has a bad signature","message":"Invalid Transaction"}"#;
+        assert_eq!(t.humanize_rpc_error(raw), "Transaction has a bad signature");
+    }
+
+    #[test]
+    fn humanize_rpc_error_falls_back_to_message_field() {
+        let t = ErrorTable::default();
+        let raw = r#"RPC error: {"code":1010,"message":"Invalid Transaction"}"#;
+        assert_eq!(t.humanize_rpc_error(raw), "Invalid Transaction");
+    }
+
+    #[test]
+    fn humanize_rpc_error_decodes_module_dispatch_error() {
+        let t = fixture_table();
+        let raw = r#"transaction failed: {"data":"Module(ModuleError { index: 5, error: [3, 0, 0, 0], message: None })"}"#;
+        assert_eq!(
+            t.humanize_rpc_error(raw),
+            "Balances::InsufficientBalance: Balance too low to send value."
+        );
+    }
+
+    #[test]
+    fn humanize_rpc_error_passes_through_unparseable() {
+        let t = ErrorTable::default();
+        assert_eq!(t.humanize_rpc_error("not json at all"), "not json at all");
+    }
+
+    #[test]
+    fn humanize_rpc_error_unwraps_send_failed_prefix() {
+        let t = ErrorTable::default();
+        let raw = r#"Send failed: RPC error: {"code":1010,"data":"Transaction has a bad signature","message":"Invalid Transaction"}"#;
+        assert_eq!(t.humanize_rpc_error(raw), "Transaction has a bad signature");
+    }
 }

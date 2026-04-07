@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::time::Instant;
 use taolk::audio::Audio;
+use taolk::event::ConnState;
 use taolk::session::Session;
 use taolk::types::{BlockRef, Pubkey};
 
@@ -16,6 +17,7 @@ pub enum Mode {
     CreateGroupMembers,
     Search,
     SenderPicker,
+    Help,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -65,6 +67,7 @@ pub struct App {
     pub sound_armed: bool,
     pub picker_senders: Vec<(String, Option<Pubkey>)>,
     pub sender_click_regions: RefCell<Vec<(u16, u16, u16, String)>>,
+    pub connection: ConnState,
 }
 
 impl App {
@@ -106,6 +109,7 @@ impl App {
             sound_armed: false,
             picker_senders: Vec::new(),
             sender_click_regions: RefCell::new(Vec::new()),
+            connection: ConnState::Connected,
         }
     }
 
@@ -115,6 +119,11 @@ impl App {
 
     pub fn set_error(&mut self, msg: impl Into<String>) {
         self.status_message = Some((msg.into(), Instant::now(), 30, true));
+    }
+
+    pub fn set_chain_error(&mut self, raw: &str) {
+        let translated = self.session.chain_info.errors.humanize_rpc_error(raw);
+        self.set_error(translated);
     }
 
     pub fn current_status(&self) -> Option<(&str, bool)> {
@@ -171,6 +180,12 @@ impl App {
     }
 
     pub fn save_draft(&mut self) {
+        let key: Option<(u8, BlockRef)> = match self.view {
+            View::Thread(i) => self.session.threads.get(i).map(|t| (0u8, t.thread_ref)),
+            View::Channel(i) => self.session.channels.get(i).map(|c| (1u8, c.channel_ref)),
+            View::Group(i) => self.session.groups.get(i).map(|g| (2u8, g.group_ref)),
+            _ => None,
+        };
         match self.view {
             View::Thread(i) => {
                 if let Some(thread) = self.session.threads.get_mut(i) {
@@ -188,6 +203,11 @@ impl App {
                 }
             }
             _ => {}
+        }
+        if let Some((kind, bref)) = key {
+            self.session
+                .db
+                .save_draft(kind, bref.block, bref.index, &self.input);
         }
     }
 
@@ -234,6 +254,12 @@ impl App {
     }
 
     pub fn clear_draft(&mut self) {
+        let key: Option<(u8, BlockRef)> = match self.view {
+            View::Thread(i) => self.session.threads.get(i).map(|t| (0u8, t.thread_ref)),
+            View::Channel(i) => self.session.channels.get(i).map(|c| (1u8, c.channel_ref)),
+            View::Group(i) => self.session.groups.get(i).map(|g| (2u8, g.group_ref)),
+            _ => None,
+        };
         match self.view {
             View::Thread(i) => {
                 if let Some(thread) = self.session.threads.get_mut(i) {
@@ -251,6 +277,9 @@ impl App {
                 }
             }
             _ => {}
+        }
+        if let Some((kind, bref)) = key {
+            self.session.db.delete_draft(kind, bref.block, bref.index);
         }
     }
 

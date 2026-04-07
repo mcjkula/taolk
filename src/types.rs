@@ -25,5 +25,4 @@ impl From<Pubkey> for [u8; 32] {
     }
 }
 
-/// Re-export BlockRef from the samp crate for consistent use across the codebase.
 pub use samp::BlockRef;

@@ -12,6 +12,32 @@ cargo install --path .
 
 Requires Rust 1.85+. The release build uses LTO and strips debug symbols.
 
+On **Linux**, taolk needs ALSA development headers for the notification sounds:
+
+```
+sudo apt install libasound2-dev      # Debian / Ubuntu
+sudo pacman -S alsa-lib              # Arch
+sudo dnf install alsa-lib-devel      # Fedora
+```
+
+The build will fail with a cryptic linker error if these are missing. taolk runs without them, but you'll get no audio.
+
+**macOS** and **Linux** are supported. **Windows** is not currently built or tested.
+
+## Getting started
+
+1. **Create a wallet.** You'll be shown a 12-word recovery phrase and asked to type it back to confirm — write it down somewhere safe before confirming, because it's the *only* way to recover funds and message history if you lose your password.
+   ```
+   taolk wallet create --name alice
+   ```
+2. **Fund it.** taolk's address is shown after wallet creation and on the lock screen.
+   - **Mainnet (Bittensor / Finney):** acquire τ via an exchange and transfer to your taolk SS58.
+   - **Testnet:** ask in the Bittensor Discord for the current testnet faucet — testnet faucets are operator-run and the URL changes occasionally.
+3. **Test your setup with a self-DM.** Your own SS58 is always a valid recipient, and SAMP's `decrypt_as_sender` round-trips the message through the full encrypt → sign → submit → confirm → fetch → decrypt pipeline. If you can send a message to yourself and read it back, the setup works end-to-end.
+4. **Message a friend.** Share SS58 addresses out of band (DM, email, in person), then press `n` in taolk to start a thread.
+5. **Browse public channels.** Press `c` to open the channel directory and subscribe to any channel a mirror has indexed.
+6. **Press `?`** in Normal mode for the in-app keybind reference, anytime.
+
 ## Quick start
 
 Create a wallet:
@@ -32,15 +58,18 @@ If you have one wallet, it opens directly. Multiple wallets show a selector on t
 
 ## TUI
 
-Vim-style modal interface.
+Vim-style modal interface. Press `?` in Normal mode for an in-app reference of every keybind.
 
 | Mode | Keys |
 |------|------|
-| Normal | `j`/`k` navigate sidebar, `i` compose, `q` quit |
-| Insert | Type message, `Enter` send, `Esc` cancel |
-| Confirm | `Enter` confirm send, `Esc` back to edit |
+| Global | `?` help, `Ctrl+L` lock, `Ctrl+W` switch wallet, `Ctrl+C` quit immediately |
+| Normal | `i` compose, `n` new thread, `m` standalone message, `c` channels, `g` group, `/` search, `y` copy SS58, `r` refresh / fill gaps, `Space` toggle sidebar, `j`/`k` up/down, `q` quit |
+| Insert | Type, `Enter` send, `Ctrl+N` newline, `Esc` save draft and exit |
+| Confirm | `Enter` submit, `Esc` back to edit |
 
-`Ctrl+L` locks the session. Auto-lock after 5 minutes (configurable).
+`Ctrl+L` locks the session. `Ctrl+W` re-opens the wallet picker so you can switch accounts without quitting. Auto-lock after 5 minutes (configurable).
+
+Drafts are persisted to the encrypted local database, so an unsent message survives a crash or `Ctrl+C`.
 
 ### Messaging
 

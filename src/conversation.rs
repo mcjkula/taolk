@@ -1,7 +1,6 @@
 use crate::types::{BlockRef, Pubkey};
 use chrono::{DateTime, Utc};
 
-/// A standalone message (public or encrypted). Not threaded.
 #[derive(Clone)]
 pub struct InboxMessage {
     pub peer_ss58: String,
@@ -13,7 +12,6 @@ pub struct InboxMessage {
     pub ext_index: u16,
 }
 
-/// A message in a threaded conversation (thread or channel).
 #[derive(Clone)]
 pub struct ThreadMessage {
     pub sender_ss58: String,
@@ -27,7 +25,6 @@ pub struct ThreadMessage {
     pub has_gap: bool,
 }
 
-/// Parameters for adding a new message to a thread, channel, or group.
 pub struct NewMessage {
     pub sender_ss58: String,
     pub timestamp: DateTime<Utc>,
@@ -37,8 +34,6 @@ pub struct NewMessage {
     pub block_number: u32,
     pub ext_index: u16,
 }
-
-// Shared DAG helpers for any Vec<ThreadMessage> (used by Thread and Channel).
 
 pub fn last_ref(messages: &[ThreadMessage]) -> BlockRef {
     messages
@@ -79,7 +74,6 @@ pub fn gap_refs(messages: &[ThreadMessage]) -> Vec<BlockRef> {
     refs
 }
 
-/// An encrypted 1:1 threaded conversation.
 pub struct Thread {
     pub thread_ref: BlockRef,
     pub peer_ss58: String,
@@ -104,7 +98,7 @@ impl Thread {
     }
 }
 
-/// A discovered public channel (metadata only, not yet subscribed).
+/// Channel metadata only — not yet subscribed.
 pub struct ChannelInfo {
     pub name: String,
     pub description: String,
@@ -112,7 +106,6 @@ pub struct ChannelInfo {
     pub channel_ref: BlockRef,
 }
 
-/// A subscribed public channel.
 pub struct Channel {
     pub name: String,
     pub description: String,
@@ -138,8 +131,7 @@ impl Channel {
     }
 }
 
-/// An encrypted group. Members are fixed at creation.
-/// Auto-subscribed on discovery (you only see groups you're a member of).
+/// Members are fixed at creation; you only see groups you're a member of.
 pub struct Group {
     pub creator_pubkey: Pubkey,
     pub group_ref: BlockRef,

@@ -1,15 +1,14 @@
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use std::sync::mpsc::Sender;
+use std::time::Duration;
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 use zeroize::Zeroizing;
 
-use crate::event::Event;
+use crate::event::{ConnState, Event};
 use crate::reader;
 use crate::types::Pubkey;
 
-/// Fetch a block and process only the extrinsic at the given index.
-/// Used for DAG walk -- we know exactly which (block, index) we need.
 pub async fn fetch_and_process_extrinsic(
     node_url: &str,
     block_num: u32,
@@ -27,7 +26,6 @@ pub async fn fetch_and_process_extrinsic(
     }
 }
 
-/// Read the next Text message from a WebSocket, skipping Ping/Pong/Binary frames.
 async fn next_text(
     ws: &mut futures_util::stream::SplitStream<
         tokio_tungstenite::WebSocketStream<
@@ -105,37 +103,56 @@ async fn fetch_extrinsic_inner(
     Ok(())
 }
 
-/// Subscribe to finalized heads and read SAMP messages from each block.
 pub async fn subscribe_blocks(
     node_url: &str,
     my_pubkey: Pubkey,
     seed: Zeroizing<[u8; 32]>,
     tx: Sender<Event>,
 ) {
-    let (mut ws, _) = match connect_async(node_url).await {
-        Ok(conn) => conn,
-        Err(e) => {
-            let _ = tx.send(Event::Error(format!("WebSocket connect failed: {e}")));
-            return;
+    let mut delay: u32 = 1;
+    loop {
+        let _ = tx.send(Event::ConnectionStatus(ConnState::Connected));
+        match run_subscription(node_url, &my_pubkey, &seed, &tx).await {
+            Ok(()) => return,
+            Err(e) => {
+                let _ = tx.send(Event::Status(format!("Chain disconnected: {e}")));
+            }
         }
-    };
+        for remaining in (1..=delay).rev() {
+            let _ = tx.send(Event::ConnectionStatus(ConnState::Reconnecting {
+                in_secs: remaining,
+            }));
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        delay = (delay * 2).min(60);
+    }
+}
+
+async fn run_subscription(
+    node_url: &str,
+    my_pubkey: &Pubkey,
+    seed: &[u8; 32],
+    tx: &Sender<Event>,
+) -> Result<(), String> {
+    let (mut ws, _) = connect_async(node_url)
+        .await
+        .map_err(|e| format!("connect: {e}"))?;
 
     let sub_msg = json!({
         "jsonrpc": "2.0", "id": 1,
         "method": "chain_subscribeNewHeads", "params": []
     });
-    if ws
-        .send(WsMessage::Text(sub_msg.to_string().into()))
+    ws.send(WsMessage::Text(sub_msg.to_string().into()))
         .await
-        .is_err()
-    {
-        let _ = tx.send(Event::Error("Failed to subscribe".into()));
-        return;
-    }
+        .map_err(|e| format!("subscribe: {e}"))?;
 
     let mut request_id: u64 = 100;
 
-    while let Some(Ok(msg)) = ws.next().await {
+    while let Some(frame) = ws.next().await {
+        let msg = match frame {
+            Ok(m) => m,
+            Err(e) => return Err(format!("read: {e}")),
+        };
         let text = match &msg {
             WsMessage::Text(t) => t.to_string(),
             _ => continue,
@@ -156,7 +173,9 @@ pub async fn subscribe_blocks(
                 "jsonrpc": "2.0", "id": request_id,
                 "method": "chain_getBlockHash", "params": [block_num]
             });
-            let _ = ws.send(WsMessage::Text(hash_req.to_string().into())).await;
+            ws.send(WsMessage::Text(hash_req.to_string().into()))
+                .await
+                .map_err(|e| format!("send: {e}"))?;
             continue;
         }
 
@@ -167,17 +186,19 @@ pub async fn subscribe_blocks(
                     "jsonrpc": "2.0", "id": request_id,
                     "method": "chain_getBlock", "params": [block_hash]
                 });
-                let _ = ws.send(WsMessage::Text(block_req.to_string().into())).await;
+                ws.send(WsMessage::Text(block_req.to_string().into()))
+                    .await
+                    .map_err(|e| format!("send: {e}"))?;
             } else if let Some(block) = result.get("block") {
                 let ctx = reader::ReadContext {
-                    my_pubkey: &my_pubkey,
-                    seed: &seed,
-                    tx: &tx,
+                    my_pubkey,
+                    seed,
+                    tx,
                 };
                 reader::read_block(block, &ctx);
             }
         }
     }
 
-    let _ = tx.send(Event::Error("WebSocket connection closed".into()));
+    Err("connection closed".into())
 }

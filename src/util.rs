@@ -4,7 +4,6 @@ use crate::types::Pubkey;
 
 const SS58_PREFIX: u8 = 42;
 
-/// Full SS58 address from a 32-byte public key.
 pub fn ss58_from_pubkey(pubkey: &Pubkey) -> String {
     let mut payload = vec![SS58_PREFIX];
     payload.extend_from_slice(&pubkey.0);
@@ -18,8 +17,7 @@ pub fn ss58_from_pubkey(pubkey: &Pubkey) -> String {
     bs58_encode(&payload)
 }
 
-/// Shortened SS58 display: "5FHneW...94ty" (first 6 + ... + last 4 = 13 chars).
-/// The first 6 chars are the human-memorable identifier (how people refer to wallets).
+/// "5FHneW...94ty" — first 6 chars are the conventional human-memorable handle.
 pub fn ss58_short(pubkey: &Pubkey) -> String {
     let full = ss58_from_pubkey(pubkey);
     if full.len() > 12 {
@@ -29,7 +27,6 @@ pub fn ss58_short(pubkey: &Pubkey) -> String {
     }
 }
 
-/// Truncate a string with ellipsis in the middle.
 pub fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
@@ -40,13 +37,10 @@ pub fn truncate(s: &str, max: usize) -> String {
     format!("{}...{}", &s[..max - 7], &s[s.len() - 4..])
 }
 
-/// Format a balance in plancks to human-readable form. Uses τ symbol for TAO.
-/// Full precision -- used for fee display.
 pub fn format_balance(plancks: u128, decimals: u32, symbol: &str) -> String {
     format_balance_inner(plancks, decimals, symbol, None)
 }
 
-/// Format a balance with limited decimal places -- used for status bar display.
 pub fn format_balance_short(plancks: u128, decimals: u32, symbol: &str) -> String {
     format_balance_inner(plancks, decimals, symbol, Some(4))
 }
@@ -84,16 +78,13 @@ fn format_balance_inner(
     }
 }
 
-/// Format a fee amount -- uses RAO for small amounts, TAO for large.
-/// Picks the unit that produces the most readable number.
+/// Below 0.001 TAO, display as integer RAO; above, as TAO.
 pub fn format_fee(plancks: u128, decimals: u32, symbol: &str) -> String {
     let divisor = 10u128.pow(decimals);
     if plancks < divisor / 1000 {
-        // Less than 0.001 TAO -- display in RAO (whole numbers)
         let rao_symbol = if symbol == "TAO" { "RAO" } else { symbol };
         format!("{} {rao_symbol}", format_number(plancks as u64))
     } else {
-        // 0.001 TAO or more -- display in TAO with full precision
         format_balance(plancks, decimals, symbol)
     }
 }
@@ -110,12 +101,10 @@ pub fn format_number(n: u64) -> String {
     result
 }
 
-/// Try to parse an SS58 address to a 32-byte public key. Returns None on failure.
 pub fn pubkey_from_ss58(address: &str) -> Option<Pubkey> {
     ss58_decode(address).ok()
 }
 
-/// True if `body` contains `@<my_ss58>` at a word boundary.
 pub fn body_mentions(body: &str, my_ss58: &str) -> bool {
     let target = my_ss58.as_bytes();
     if target.len() != 48 {
@@ -155,7 +144,6 @@ fn is_base58_byte(b: u8) -> bool {
     )
 }
 
-/// Decode an SS58 address to a 32-byte public key.
 pub fn ss58_decode(address: &str) -> Result<Pubkey, String> {
     let decoded = bs58_decode(address).map_err(|_| "Invalid base58")?;
     // Minimum: 1 (prefix) + 32 (pubkey) + 2 (checksum) = 35
@@ -184,14 +172,64 @@ pub fn ss58_decode(address: &str) -> Result<Pubkey, String> {
     Ok(Pubkey(pubkey))
 }
 
-pub fn copy_to_clipboard(text: &str) {
+pub fn copy_to_clipboard(text: &str) -> bool {
+    if write_osc52(text) && term_supports_osc52() {
+        return true;
+    }
+    #[cfg(target_os = "macos")]
+    if try_pipe("pbcopy", &[], text) {
+        return true;
+    }
+    if std::env::var("WAYLAND_DISPLAY").is_ok() && try_pipe("wl-copy", &[], text) {
+        return true;
+    }
+    if std::env::var("DISPLAY").is_ok() && try_pipe("xclip", &["-selection", "clipboard"], text) {
+        return true;
+    }
+    if try_pipe("xsel", &["-b", "-i"], text) {
+        return true;
+    }
+    false
+}
+
+fn write_osc52(text: &str) -> bool {
     use std::io::{Write, stdout};
     let encoded = b64_encode(text.as_bytes());
     let mut out = stdout().lock();
-    let _ = out.write_all(b"\x1b]52;c;");
-    let _ = out.write_all(encoded.as_bytes());
-    let _ = out.write_all(b"\x07");
-    let _ = out.flush();
+    out.write_all(b"\x1b]52;c;").is_ok()
+        && out.write_all(encoded.as_bytes()).is_ok()
+        && out.write_all(b"\x07").is_ok()
+        && out.flush().is_ok()
+}
+
+fn term_supports_osc52() -> bool {
+    if std::env::var("TMUX").is_ok() {
+        return true;
+    }
+    matches!(
+        std::env::var("TERM_PROGRAM").as_deref(),
+        Ok("iTerm.app" | "WezTerm" | "Alacritty" | "kitty" | "ghostty")
+    )
+}
+
+fn try_pipe(cmd: &str, args: &[&str], text: &str) -> bool {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let Ok(mut child) = Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    if let Some(mut stdin) = child.stdin.take()
+        && stdin.write_all(text.as_bytes()).is_err()
+    {
+        return false;
+    }
+    matches!(child.wait(), Ok(s) if s.success())
 }
 
 fn b64_encode(data: &[u8]) -> String {

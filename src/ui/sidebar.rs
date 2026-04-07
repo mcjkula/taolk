@@ -9,7 +9,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let max_name = area.width.saturating_sub(8) as usize;
     let mut items: Vec<ListItem> = Vec::new();
 
-    // Inbox
     let inbox_selected = app.view == View::Inbox;
     let inbox_style = item_style(inbox_selected);
     items.push(ListItem::new(Line::from(vec![
@@ -21,7 +20,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         ),
     ])));
 
-    // Outbox
     let outbox_selected = app.view == View::Outbox;
     let outbox_style = item_style(outbox_selected);
     items.push(ListItem::new(Line::from(vec![
@@ -33,7 +31,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         ),
     ])));
 
-    // Threads section -- grouped by peer
     if !app.session.threads.is_empty() {
         items.push(ListItem::new(Line::raw("")));
         items.push(ListItem::new(Line::from(vec![
@@ -45,7 +42,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("Threads", Style::default().fg(Color::DarkGray)),
         ])));
 
-        // Group thread indices by peer_ss58, sorted by most recent activity
         let mut peer_groups: Vec<(String, Vec<usize>)> = Vec::new();
         let mut peer_idx_map: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
@@ -58,7 +54,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 peer_groups.push((thread.peer_ss58.clone(), vec![i]));
             }
         }
-        // Sort peer groups by most recent message (highest block_number) descending
         peer_groups.sort_by(|a, b| {
             let latest_a =
                 a.1.iter()
@@ -74,7 +69,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                     .unwrap_or((0, 0));
             latest_b.cmp(&latest_a)
         });
-        // Sort threads within each peer group by most recent message descending
         for (_, idxs) in &mut peer_groups {
             idxs.sort_by(|&a, &b| {
                 let la = app.session.threads[a]
@@ -93,7 +87,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
         for (peer_ss58, thread_idxs) in &peer_groups {
             if thread_idxs.len() == 1 {
-                // Single thread: show peer name directly (selectable)
                 let i = thread_idxs[0];
                 let thread = &app.session.threads[i];
                 let selected = matches!(app.view, View::Thread(idx) if idx == i);
@@ -130,7 +123,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 }
                 items.push(ListItem::new(Line::from(spans)));
             } else {
-                // Multiple threads: peer header + indented thread entries
                 items.push(ListItem::new(Line::styled(
                     format!("    {}", truncate(peer_ss58, max_name.saturating_sub(2))),
                     Style::default().fg(Color::DarkGray),
@@ -184,7 +176,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    // Channels section (header is selectable → ChannelDir)
     {
         items.push(ListItem::new(Line::raw("")));
         let dir_selected = app.view == View::ChannelDir;
@@ -263,7 +254,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    // Groups section
     if !app.session.groups.is_empty() {
         items.push(ListItem::new(Line::raw("")));
         items.push(ListItem::new(Line::from(vec![

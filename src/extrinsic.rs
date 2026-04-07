@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::time::Duration;
+
 use blake2::Digest;
 use futures_util::{SinkExt, StreamExt};
 use parity_scale_codec::{Compact, Encode};
@@ -5,7 +8,7 @@ use schnorrkel::signing_context;
 use serde_json::{Value, json};
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 
-use crate::metadata::AccountInfoLayout;
+use crate::metadata::{AccountInfoLayout, ErrorTable, Metadata};
 use crate::types::Pubkey;
 
 const PALLET_SYSTEM: u8 = 0x00;
@@ -16,22 +19,21 @@ const EXT_VERSION_SIGNED: u8 = 0x84;
 const ADDR_TYPE_ID: u8 = 0x00;
 const SIG_TYPE_SR25519: u8 = 0x01;
 
-/// Chain parameters fetched once at startup.
 #[derive(Clone)]
 pub struct ChainInfo {
     pub genesis_hash: [u8; 32],
     pub spec_version: u32,
     pub tx_version: u32,
     pub account_info_layout: AccountInfoLayout,
+    pub errors: Arc<ErrorTable>,
+    pub chain_name: String,
 }
 
-/// Fetch genesis hash, runtime version, and `System.Account` layout from the chain.
 pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, String> {
     let (mut ws, _) = connect_async(node_url)
         .await
         .map_err(|e| format!("connect: {e}"))?;
 
-    // Genesis hash
     let req = json!({"jsonrpc":"2.0","id":1,"method":"chain_getBlockHash","params":[0]});
     ws.send(WsMessage::Text(req.to_string().into()))
         .await
@@ -39,7 +41,6 @@ pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, String> {
     let genesis_hash = read_text_result(&mut ws).await?;
     let genesis_bytes = hex_to_32(genesis_hash.as_str().ok_or("no genesis hash")?)?;
 
-    // Runtime version
     let req = json!({"jsonrpc":"2.0","id":2,"method":"state_getRuntimeVersion","params":[]});
     ws.send(WsMessage::Text(req.to_string().into()))
         .await
@@ -48,7 +49,6 @@ pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, String> {
     let spec_version = rv["specVersion"].as_u64().ok_or("no specVersion")? as u32;
     let tx_version = rv["transactionVersion"].as_u64().ok_or("no txVersion")? as u32;
 
-    // Runtime metadata -> System.Account layout
     let req = json!({"jsonrpc":"2.0","id":3,"method":"state_getMetadata","params":[]});
     ws.send(WsMessage::Text(req.to_string().into()))
         .await
@@ -59,18 +59,41 @@ pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, String> {
         .ok_or("state_getMetadata returned no result")?;
     let metadata_bytes = hex::decode(metadata_hex.trim_start_matches("0x"))
         .map_err(|e| format!("metadata hex decode: {e}"))?;
-    let account_info_layout = AccountInfoLayout::from_runtime_metadata(&metadata_bytes)
+    let parsed = Metadata::from_runtime_metadata(&metadata_bytes)
         .map_err(|e| format!("parse runtime metadata: {e}"))?;
+
+    let req = json!({"jsonrpc":"2.0","id":4,"method":"system_chain","params":[]});
+    ws.send(WsMessage::Text(req.to_string().into()))
+        .await
+        .map_err(|e| format!("send: {e}"))?;
+    let chain_name_raw = read_text_result(&mut ws).await?;
+    let chain_name = canonical_chain_name(chain_name_raw.as_str().unwrap_or("unknown"));
 
     Ok(ChainInfo {
         genesis_hash: genesis_bytes,
         spec_version,
         tx_version,
-        account_info_layout,
+        account_info_layout: parsed.layout,
+        errors: Arc::new(parsed.errors),
+        chain_name,
     })
 }
 
-/// Build a signed extrinsic for system.remark_with_event(remark).
+fn canonical_chain_name(raw: &str) -> String {
+    let lower = raw.to_ascii_lowercase();
+    if lower.contains("test") {
+        "test".into()
+    } else if lower == "bittensor" || lower == "finney" {
+        "finney".into()
+    } else {
+        let mut s = raw.to_string();
+        if s.chars().count() > 12 {
+            s = s.chars().take(12).collect();
+        }
+        s
+    }
+}
+
 pub fn build_remark_extrinsic(
     remark: &[u8],
     keypair: &schnorrkel::Keypair,
@@ -123,7 +146,6 @@ pub fn build_remark_extrinsic(
     extrinsic_payload.push(METADATA_HASH_DISABLED);
     extrinsic_payload.extend_from_slice(&call_data);
 
-    // Wrap with compact length prefix
     let mut full = Vec::new();
     Compact(extrinsic_payload.len() as u32).encode_to(&mut full);
     full.extend_from_slice(&extrinsic_payload);
@@ -157,6 +179,8 @@ async fn refresh_signing_params(
         spec_version,
         tx_version,
         account_info_layout: base.account_info_layout.clone(),
+        errors: base.errors.clone(),
+        chain_name: base.chain_name.clone(),
     })
 }
 
@@ -389,34 +413,38 @@ pub async fn submit_remark(
         .await
         .map_err(|e| format!("send: {e}"))?;
 
-    // Wait for inBlock or finalized status
-    loop {
-        let resp = read_text_result_raw(&mut ws).await?;
-        // Subscription confirmation (returns subscription id)
-        if resp.get("result").is_some() && resp.get("method").is_none() {
-            continue;
-        }
-        // Status update from subscription
-        if let Some(status) = resp.pointer("/params/result") {
-            if let Some(block_hash) = status.get("inBlock").and_then(|v| v.as_str()) {
-                return Ok(block_hash.to_string());
+    // Wait for inBlock or finalized status, bounded by SUBMIT_TIMEOUT
+    let wait = async {
+        loop {
+            let resp = read_text_result_raw(&mut ws).await?;
+            if resp.get("result").is_some() && resp.get("method").is_none() {
+                continue;
             }
-            if let Some(block_hash) = status.get("finalized").and_then(|v| v.as_str()) {
-                return Ok(block_hash.to_string());
+            if let Some(status) = resp.pointer("/params/result") {
+                if let Some(block_hash) = status.get("inBlock").and_then(|v| v.as_str()) {
+                    return Ok(block_hash.to_string());
+                }
+                if let Some(block_hash) = status.get("finalized").and_then(|v| v.as_str()) {
+                    return Ok(block_hash.to_string());
+                }
+                if status.get("dropped").is_some()
+                    || status.get("invalid").is_some()
+                    || status.get("usurped").is_some()
+                {
+                    return Err(format!("transaction failed: {status}"));
+                }
+                continue;
             }
-            if status.get("dropped").is_some()
-                || status.get("invalid").is_some()
-                || status.get("usurped").is_some()
-            {
-                return Err(format!("transaction failed: {status}"));
+            if let Some(err) = resp.get("error") {
+                return Err(format!("RPC error: {err}"));
             }
-            // Other statuses (ready, broadcast, future): keep waiting
-            continue;
         }
-        // RPC error
-        if let Some(err) = resp.get("error") {
-            return Err(format!("RPC error: {err}"));
-        }
+    };
+    match tokio::time::timeout(Duration::from_secs(60), wait).await {
+        Ok(result) => result,
+        Err(_) => Err(
+            "Timed out after 60s waiting for block inclusion — your message may or may not have landed".into(),
+        ),
     }
 }
 

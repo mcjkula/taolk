@@ -4,6 +4,35 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
+use taolk::event::ConnState;
+
+fn chain_pill(name: &str) -> Span<'_> {
+    let bg = match name {
+        "finney" => Color::Cyan,
+        "test" => Color::Yellow,
+        _ => Color::DarkGray,
+    };
+    Span::styled(
+        format!(" {name} "),
+        Style::default()
+            .fg(Color::Black)
+            .bg(bg)
+            .add_modifier(Modifier::BOLD),
+    )
+}
+
+fn reconnect_pill(state: ConnState) -> Option<Span<'static>> {
+    match state {
+        ConnState::Connected => None,
+        ConnState::Reconnecting { in_secs } => Some(Span::styled(
+            format!(" reconnecting in {in_secs}s "),
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        )),
+    }
+}
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let mode = match app.mode {
@@ -77,6 +106,13 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
+        Mode::Help => Span::styled(
+            " HELP ",
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
     };
 
     let status_span = if let Some((status, is_error)) = app.current_status() {
@@ -141,10 +177,16 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     };
     let block_span = Span::styled(&block_str, Style::default().fg(block_color));
 
-    let right_width = balance_str.len() as u16 + block_str.len() as u16;
+    let chain = chain_pill(&app.session.chain_info.chain_name);
+    let reconnect = reconnect_pill(app.connection);
+    let chain_width = chain.width() as u16;
+    let reconnect_width = reconnect.as_ref().map_or(0, |s| s.width() as u16);
+
+    let right_width = balance_str.len() as u16 + block_str.len() as u16 + reconnect_width;
     let mode_width = mode.width() as u16;
-    // Truncate status if it would overflow
-    let max_status = area.width.saturating_sub(mode_width + right_width + 1) as usize;
+    let max_status = area
+        .width
+        .saturating_sub(chain_width + mode_width + right_width + 1) as usize;
     let status_span = if status_span.width() > max_status {
         let content = status_span.content.to_string();
         let truncated = if max_status > 2 {
@@ -156,20 +198,18 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         status_span
     };
-    let used = mode_width + status_span.width() as u16;
+    let used = chain_width + mode_width + status_span.width() as u16;
     let padding = area.width.saturating_sub(used + right_width);
     let pad_span = Span::raw(" ".repeat(padding as usize));
 
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            mode,
-            status_span,
-            pad_span,
-            balance_span,
-            block_span,
-        ])),
-        area,
-    );
+    let mut spans = vec![chain, mode, status_span, pad_span];
+    if let Some(rc) = reconnect {
+        spans.push(rc);
+    }
+    spans.push(balance_span);
+    spans.push(block_span);
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 use taolk::util::format_number;

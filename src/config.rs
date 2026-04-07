@@ -102,10 +102,6 @@ pub fn config_path() -> PathBuf {
         .join("config.toml")
 }
 
-// ---------------------------------------------------------------------------
-// Key registry
-// ---------------------------------------------------------------------------
-
 pub struct KeyDef {
     pub key: &'static str,
     pub section: &'static str,
@@ -249,7 +245,7 @@ pub fn get_value(config: &Config, key: &str) -> String {
     }
 }
 
-/// Check if a key was explicitly set in the config file (vs filled by serde default).
+/// True only if the key is present in the on-disk TOML file (not a serde default).
 pub fn is_user_set(key: &str) -> bool {
     let def = match lookup_key(key) {
         Some(d) => d,
@@ -269,12 +265,10 @@ pub fn is_user_set(key: &str) -> bool {
         .is_some()
 }
 
-/// Validate and set a key in the raw TOML file (read-modify-write).
-/// Only the specified key is written — other defaults stay out of the file.
+/// Set one key in the TOML file without touching defaults of unrelated keys.
 pub fn set_key(key: &str, raw: &[String]) -> Result<String, String> {
     let def = lookup_key(key).ok_or_else(|| format!("Unknown key: {key}"))?;
 
-    // Parse and validate the value
     let toml_value = match key {
         "wallet.default" | "network.node" | "ui.timestamp_format" | "ui.date_format" => {
             toml::Value::String(raw.join(" "))
@@ -310,7 +304,6 @@ pub fn set_key(key: &str, raw: &[String]) -> Result<String, String> {
         _ => return Err(format!("Unknown key: {key}")),
     };
 
-    // Read-modify-write the TOML file
     let path = config_path();
     let content = std::fs::read_to_string(&path).unwrap_or_default();
     let mut table: toml::Table = content.parse().unwrap_or_default();
@@ -324,7 +317,6 @@ pub fn set_key(key: &str, raw: &[String]) -> Result<String, String> {
 
     write_table(&path, &table)?;
 
-    // Return the display value
     let cfg = load();
     Ok(get_value(&cfg, key))
 }
@@ -346,7 +338,6 @@ fn write_table(path: &std::path::Path, table: &toml::Table) -> Result<(), String
     std::fs::write(path, content).map_err(|e| e.to_string())
 }
 
-/// Remove a single key from the TOML file. Returns the default value for display.
 pub fn unset_key(key: &str) -> Result<String, String> {
     let def = lookup_key(key).ok_or("unknown key")?;
 
@@ -366,10 +357,6 @@ pub fn unset_key(key: &str) -> Result<String, String> {
     write_table(&path, &table)?;
     Ok(def.default_display.to_string())
 }
-
-// ---------------------------------------------------------------------------
-// Parsing helpers
-// ---------------------------------------------------------------------------
 
 fn parse_val<T: std::str::FromStr>(raw: &[String], expected: &str) -> Result<T, String> {
     let s = raw.first().map(|s| s.as_str()).unwrap_or("");

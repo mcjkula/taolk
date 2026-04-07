@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 use zeroize::Zeroizing;
 
+pub const MAX_GROUP_MEMBERS: usize = 20;
+
 fn rand_nonce() -> [u8; 12] {
     let mut nonce = [0u8; 12];
     getrandom::fill(&mut nonce).expect("OS RNG");
@@ -146,7 +148,6 @@ impl Session {
 
         let (tx, rx) = mpsc::channel();
 
-        // Chain subscription
         {
             let url = node_url.to_string();
             let etx = tx.clone();
@@ -156,7 +157,6 @@ impl Session {
             });
         }
 
-        // Mirror sync
         session.has_mirror = !mirror_urls.is_empty();
         if session.has_mirror {
             let subscribed: Vec<BlockRef> =
@@ -262,6 +262,30 @@ impl Session {
                 last_read: msg_count,
             });
             self.refresh_group_gaps(i);
+        }
+
+        for (kind, bref, body) in self.db.load_drafts() {
+            if body.is_empty() {
+                continue;
+            }
+            match kind {
+                0 => {
+                    if let Some(t) = self.threads.iter_mut().find(|t| t.thread_ref == bref) {
+                        t.draft = body;
+                    }
+                }
+                1 => {
+                    if let Some(c) = self.channels.iter_mut().find(|c| c.channel_ref == bref) {
+                        c.draft = body;
+                    }
+                }
+                2 => {
+                    if let Some(g) = self.groups.iter_mut().find(|g| g.group_ref == bref) {
+                        g.draft = body;
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -701,10 +725,6 @@ impl Session {
             .collect()
     }
 
-    // -----------------------------------------------------------------------
-    // Remark builders — encode SAMP messages ready for on-chain submission
-    // -----------------------------------------------------------------------
-
     pub fn build_public_message(&self, recipient: &Pubkey, body: &str) -> Result<Vec<u8>> {
         Ok(samp::encode_public(&recipient.0, body.as_bytes()))
     }
@@ -788,6 +808,11 @@ impl Session {
     }
 
     pub fn build_group_create(&self, members: &[Pubkey], body: &str) -> Result<Vec<u8>> {
+        if members.len() > MAX_GROUP_MEMBERS {
+            return Err(SdkError::Other(format!(
+                "Group too large: max {MAX_GROUP_MEMBERS} members supported"
+            )));
+        }
         let nonce = rand_nonce();
         let raw_members: Vec<[u8; 32]> = members.iter().map(|pk| pk.0).collect();
         let mut body_bytes = samp::encode_group_members(&raw_members);
@@ -863,8 +888,6 @@ impl Session {
         .await
         .map_err(SdkError::Chain)
     }
-
-    // -----------------------------------------------------------------------
 
     pub fn cleanup_pending(&mut self) -> Option<CleanupResult> {
         let mut removed_thread = None;

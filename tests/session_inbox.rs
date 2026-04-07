@@ -29,6 +29,8 @@ fn ci() -> ChainInfo {
             free_offset: 16,
             free_width: 8,
         },
+        errors: Default::default(),
+        chain_name: "test".into(),
     }
 }
 

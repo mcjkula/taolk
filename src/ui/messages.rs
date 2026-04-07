@@ -6,7 +6,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use taolk::conversation::InboxMessage;
 
-// Deterministic sender colors derived from SS58 address.
 // Avoids Cyan (reserved for "You"), Red (errors), DarkGray (metadata).
 const SENDER_COLORS: &[Color] = &[
     Color::Yellow,
@@ -48,7 +47,6 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
         if at_boundary {
             let remaining = &text[pos..];
 
-            // URL: https:// or http:// -- clickable via OSC 8 hyperlink
             if remaining.starts_with("https://") || remaining.starts_with("http://") {
                 let end = remaining
                     .find(|c: char| c.is_whitespace())
@@ -65,7 +63,6 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
                 continue;
             }
 
-            // @-mention
             if bytes[pos] == b'@' && is_ss58_at(bytes, pos + 1) {
                 let is_self = &text[pos + 1..pos + 49] == my_ss58;
                 let color = if is_self { Color::Cyan } else { Color::Yellow };
@@ -79,7 +76,6 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
                 continue;
             }
 
-            // Bare SS58
             if is_ss58_at(bytes, pos) {
                 spans.push(Span::styled(
                     text[pos..pos + 48].to_string(),
@@ -91,7 +87,6 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
                 continue;
             }
 
-            // Block: block:\d+
             if let Some(after_block) = remaining.strip_prefix("block:") {
                 let digits = after_block
                     .bytes()
@@ -110,7 +105,6 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
                 }
             }
 
-            // Extrinsic: ext:\d+:\d+
             if let Some(after_ext) = remaining.strip_prefix("ext:") {
                 let d1 = after_ext.bytes().take_while(|b| b.is_ascii_digit()).count();
                 if d1 > 0 && 4 + d1 < remaining.len() && remaining.as_bytes()[4 + d1] == b':' {
@@ -133,12 +127,10 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
             }
         }
 
-        // No pattern matched -- consume until next whitespace
         let word_end = text[pos..]
             .find(|c: char| c.is_whitespace())
             .map(|p| pos + p)
             .unwrap_or(text.len());
-        // Include trailing whitespace in the plain span
         let span_end = text[word_end..]
             .find(|c: char| !c.is_whitespace())
             .map(|p| word_end + p)
@@ -157,8 +149,6 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
     }
 }
 
-/// Word-wrap a line at the given max width, returning wrapped segments.
-/// First line uses full width; continuation lines are indented by `indent`.
 fn wrap_text(text: &str, max_width: usize, indent: usize) -> Vec<String> {
     if max_width == 0 || text.len() <= max_width {
         return vec![text.to_string()];
@@ -185,7 +175,6 @@ fn wrap_text(text: &str, max_width: usize, indent: usize) -> Vec<String> {
             break;
         }
 
-        // Find last space before width limit for word boundary
         let effective = width;
         let search_area = &remaining[..effective.min(remaining.len())];
         let split_at = search_area
@@ -193,7 +182,6 @@ fn wrap_text(text: &str, max_width: usize, indent: usize) -> Vec<String> {
             .unwrap_or(effective.min(remaining.len()));
 
         if split_at == 0 {
-            // No space found, hard break
             let brk = effective.min(remaining.len());
             if result.is_empty() {
                 result.push(remaining[..brk].to_string());
@@ -240,7 +228,6 @@ fn date_separator(date_str: &str) -> Line<'static> {
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     use crate::app::Mode;
     app.sender_click_regions.borrow_mut().clear();
-    // Contact picker takes over the main panel during address selection
     if app.mode == Mode::Compose || (app.mode == Mode::Message && app.msg_recipient.is_none()) {
         render_contact_picker(frame, app, area);
         return;
@@ -354,7 +341,6 @@ fn render_standalone(
 
     if let Some(text) = pending {
         let spinner = app.spinner_16();
-        // Match confirmed layout: "YYYY-MM-DD HH:MM" = 16 chars
         let (type_icon, type_label) = if app.msg_type == Some(0x01) {
             (super::icons::PUBLIC, "public")
         } else {
@@ -513,7 +499,6 @@ fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
     } else {
         format!("{}:{}", ref_block, ref_index)
     };
-    // Sort member indices: creator first, then rest in order
     let mut member_order: Vec<usize> = (0..group.members.len()).collect();
     if let Some(pos) = member_order
         .iter()
@@ -849,16 +834,14 @@ fn render_messages(
     let mut last_indent: usize = 7; // fallback
 
     for (i, msg) in messages.iter().enumerate() {
-        // Date separator between different days
         let msg_date = msg.timestamp.with_timezone(&chrono::Local).date_naive();
         if last_date.is_some() && last_date != Some(msg_date) {
             let date_str = msg_date.format("%B %-d, %Y").to_string();
             lines.push(date_separator(&date_str));
-            last_sender = None; // reset compaction after date separator
+            last_sender = None;
         }
         last_date = Some(msg_date);
 
-        // Gap indicator
         if msg.has_gap {
             let pulse = if app.frame % 8 < 4 {
                 Color::DarkGray
@@ -873,7 +856,7 @@ fn render_messages(
                 gap_text,
                 Style::default().fg(pulse),
             )]));
-            last_sender = None; // reset compaction after gap
+            last_sender = None;
         }
 
         let search = &app.search_query;
@@ -884,8 +867,6 @@ fn render_messages(
         let display_body = if is_empty_body { "empty" } else { &msg.body };
         let first_body_line = display_body.lines().next().unwrap_or("");
 
-        // Compact consecutive: same sender omits timestamp+name
-        // But show timestamp if >5 minutes since last message
         let same_sender = last_sender == Some(&msg.sender_ss58);
         let time_gap = if i > 0 {
             (msg.timestamp - messages[i - 1].timestamp)
@@ -910,7 +891,6 @@ fn render_messages(
                     .add_modifier(Modifier::ITALIC),
             )]));
         } else if is_empty_body {
-            // Empty body with header (new sender or time gap): render header then italic "empty"
             let time = msg
                 .timestamp
                 .with_timezone(&chrono::Local)
@@ -948,7 +928,6 @@ fn render_messages(
                 ),
             ]));
         } else if same_sender && !time_gap {
-            // Compact: just body at previous indent
             for body_line in display_body.lines() {
                 let prefixed = format!("{:last_indent$}{body_line}", "");
                 for wrapped in wrap_text(&prefixed, width, last_indent) {
@@ -956,7 +935,6 @@ fn render_messages(
                 }
             }
         } else if same_sender && time_gap {
-            // Same sender but time gap: show timestamp, no name
             let time = msg
                 .timestamp
                 .with_timezone(&chrono::Local)
@@ -1000,7 +978,6 @@ fn render_messages(
                 }
             }
         } else {
-            // Blank line between different sender groups
             if i > 0 {
                 lines.push(Line::raw(""));
             }
@@ -1022,7 +999,6 @@ fn render_messages(
             let indent = 7 + name.len() + 2;
             last_indent = indent;
 
-            // Wrap the first body line within available space after header
             let header_width = indent;
             let body_avail = width.saturating_sub(header_width);
             let first_wrapped = if first_body_line.len() > body_avail && body_avail > 0 {
@@ -1035,7 +1011,6 @@ fn render_messages(
                 (first_body_line.to_string(), None)
             };
 
-            // First line: timestamp + name + body (first part)
             if !msg.is_mine {
                 pending_clicks.push((
                     lines.len(),
@@ -1057,14 +1032,12 @@ fn render_messages(
             }
             lines.push(Line::from(first_spans));
 
-            // Overflow from first line wrap
             if let Some(overflow) = first_wrapped.1 {
                 for wrapped in wrap_text(&format!("{:indent$}{overflow}", ""), width, indent) {
                     lines.push(render_body_line(&wrapped, body_color, my_ss58));
                 }
             }
 
-            // Continuation lines (explicit \n in message)
             for body_line in msg.body.lines().skip(1) {
                 let prefixed = format!("{:indent$}{body_line}", "");
                 for wrapped in wrap_text(&prefixed, width, indent) {

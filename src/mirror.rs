@@ -30,7 +30,6 @@ struct RemarkResp {
     remark: String,
 }
 
-/// Sync historical data from a SAMP mirror. Produces events on the same channel as the chain reader.
 pub async fn sync(
     mirror_url: &str,
     expected_ss58_prefix: u16,
@@ -69,7 +68,6 @@ async fn sync_inner(
     let client = reqwest::Client::new();
     let base = mirror_url.trim_end_matches('/');
 
-    // 1. Health check: verify SS58 prefix matches (same chain)
     let health: HealthResp = client
         .get(format!("{base}/v1/health"))
         .send()
@@ -86,7 +84,6 @@ async fn sync_inner(
         ));
     }
 
-    // 2. Fetch all channels
     let channels: Vec<ChannelResp> = client
         .get(format!("{base}/v1/channels"))
         .send()
@@ -108,7 +105,6 @@ async fn sync_inner(
         });
     }
 
-    // 3. Fetch messages for subscribed channels
     for ch in &subscribed_channels {
         let (ch_block, ch_index) = (ch.block, ch.index);
         let remarks: Vec<RemarkResp> = client
@@ -127,7 +123,6 @@ async fn sync_inner(
         }
     }
 
-    // 4. Fetch inbox remarks for every SAMP content type and dispatch by kind.
     let scalar = samp::sr25519_signing_scalar(seed);
 
     for r in fetch_remarks(&client, base, 0x10, last_block, "public").await? {
@@ -166,7 +161,6 @@ async fn fetch_remarks(
         .map_err(|e| format!("{label} json: {e}"))
 }
 
-/// Fetch a single channel's messages from the mirror. Called when subscribing or pressing `r`.
 pub async fn fetch_channel(mirror_url: &str, channel_ref: BlockRef, tx: Sender<Event>) {
     let base = mirror_url.trim_end_matches('/');
     let client = reqwest::Client::new();

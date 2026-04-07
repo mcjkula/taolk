@@ -56,11 +56,9 @@ fn visible_input(
     let text_len = text.len();
     let over_limit = limit.is_some_and(|l| text_len > l);
 
-    // Calculate visible window
     let (start, end) = if text_len <= width {
         (0, text_len)
     } else {
-        // Keep cursor visible with some context
         let half = width / 2;
         let s = if cursor <= half {
             0
@@ -89,7 +87,6 @@ fn visible_input(
         let Some(lim) = limit else {
             return (spans, cursor_x);
         };
-        // Split visible text into ok/over portions
         if start < lim {
             let ok_end = (lim - start).min(visible.len());
             spans.push(Span::styled(
@@ -103,7 +100,6 @@ fn visible_input(
                 ));
             }
         } else {
-            // Entire visible portion is over limit
             spans.push(Span::styled(
                 visible.to_string(),
                 Style::default().fg(Color::Red),
@@ -123,7 +119,6 @@ fn visible_input(
         ));
     }
 
-    // Add limit counter if there's a limit
     if let Some(lim) = limit {
         let counter_color = if text_len > lim {
             Color::Red
@@ -143,7 +138,6 @@ fn key_hints(width: usize) -> Line<'static> {
     render_hints(&[("Enter", "next"), ("Esc", "cancel")], width)
 }
 
-/// Render a single-line input with prompt, scrolling, and optional limit.
 fn render_single_input(
     frame: &mut Frame,
     app: &App,
@@ -175,7 +169,6 @@ fn render_single_input(
     }
 
     let avail = (area.width as usize).saturating_sub(prompt_width + 1);
-    // Reserve space for limit counter if applicable
     let counter_width = limit.map_or(0, |l| format!(" {}/{}", app.input.len(), l).len());
     let text_width = avail.saturating_sub(counter_width);
     let (text_spans, cursor_off) = visible_input(&app.input, app.cursor_pos, text_width, limit);
@@ -214,7 +207,6 @@ fn compose_hints(width: usize, multiline: bool) -> Line<'static> {
     }
 }
 
-/// Get the line number and column of the cursor within multi-line text.
 fn cursor_line_col(text: &str, byte_pos: usize) -> (usize, usize) {
     let before = &text[..byte_pos.min(text.len())];
     let line = before.matches('\n').count();
@@ -222,7 +214,6 @@ fn cursor_line_col(text: &str, byte_pos: usize) -> (usize, usize) {
     (line, col)
 }
 
-/// Render a multi-line input (message composition).
 fn render_compose_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) {
     let prompt = "> ";
     let prompt_width: usize = 3; // " > "
@@ -264,11 +255,9 @@ fn render_compose_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect)
     let total_lines = lines_vec.len();
     let (cursor_line, cursor_col) = cursor_line_col(&app.input, app.cursor_pos);
 
-    // How many text rows fit (area height minus separator and hints)
     let max_visible = (area.height as usize).saturating_sub(2);
     let max_visible = max_visible.max(1);
 
-    // Scroll so cursor line is visible
     let scroll_start = if cursor_line >= max_visible {
         cursor_line - max_visible + 1
     } else {
@@ -305,7 +294,6 @@ fn render_compose_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect)
 
     frame.render_widget(Paragraph::new(paragraph_lines), area);
 
-    // Place cursor
     let visible_cursor_row = cursor_line - scroll_start;
     let (_, cursor_off) = visible_input(
         lines_vec.get(cursor_line).unwrap_or(&""),
@@ -357,10 +345,8 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         }
         Mode::Message => {
             if app.msg_recipient.is_none() {
-                // Phase 1: contact picker -- same as Compose
                 render_picker_input(frame, app, sep, area);
             } else {
-                // Phase 2: type selector
                 let Some((_, ss58)) = app.msg_recipient.as_ref() else {
                     return;
                 };
@@ -397,7 +383,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             let action = if is_channel { "Create?" } else { "Send?" };
             let esc_label = if is_channel { " back" } else { " edit" };
 
-            // Preview of what's being sent
             let (preview, is_empty_preview) = if let Some(name) = &app.pending_channel_name {
                 let desc = app.pending_channel_desc.as_deref().unwrap_or("");
                 let text = if desc.is_empty() {
@@ -453,7 +438,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         }
         Mode::Normal => {
             let input_line = if let Some(draft) = app.current_draft() {
-                // Show draft with scrolling
                 let suffix = "  [i to continue]";
                 let avail = (area.width as usize).saturating_sub(4 + suffix.len()); // " > " + suffix
                 let draft_str = draft.to_string();
@@ -478,7 +462,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                     ),
                     crate::app::View::ChannelDir => {
                         if !app.channel_dir_input.is_empty() {
-                            // ID input mode: render in the input area with scrolling
                             let prompt = " ID: ";
                             let avail = w.saturating_sub(prompt.len() + 1);
                             let (text_spans, cursor_off) = visible_input(
@@ -539,15 +522,17 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             );
             frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), hints]), area);
         }
+        Mode::Help => {
+            let hints = render_hints(&[("any key", "close")], area.width as usize);
+            frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), hints]), area);
+        }
     }
 }
 
-/// Render the input area for contact picker (Compose/Message Phase 1).
 fn render_picker_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) {
     let w = area.width as usize;
 
     if app.input.is_empty() {
-        // Browsing mode: show navigation hints
         let hints = render_hints(
             &[("j/k", "navigate"), ("Enter", "select"), ("Esc", "cancel")],
             w,
@@ -566,7 +551,6 @@ fn render_picker_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
             frame.set_cursor_position((cursor_x, cursor_y));
         }
     } else {
-        // Typing mode: show input with search hints
         let hints = render_hints(&[("Enter", "select"), ("Esc", "clear")], w);
         let avail = w.saturating_sub(6); // " To: " + margin
         let (text_spans, cursor_off) = visible_input(&app.input, app.cursor_pos, avail, None);
@@ -582,7 +566,6 @@ fn render_picker_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
     }
 }
 
-/// Render the input area for group member picker (multi-select).
 fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) {
     let w = area.width as usize;
     let selected_count = app.pending_group_members.len();

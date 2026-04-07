@@ -1,6 +1,8 @@
+mod help;
 mod icons;
 mod input;
 mod messages;
+pub mod modal;
 mod sidebar;
 mod status;
 
@@ -35,6 +37,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 
     status::render(frame, app, status_area);
+
+    if app.mode == crate::app::Mode::Help {
+        help::render(frame, frame.area());
+    }
 }
 
 fn render_main_panel(frame: &mut Frame, app: &App, area: Rect) {

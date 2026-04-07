@@ -69,10 +69,6 @@ pub fn list_wallets() -> Vec<String> {
     names
 }
 
-// ---------------------------------------------------------------------------
-// Mnemonic / seed derivation (Substrate-compatible)
-// ---------------------------------------------------------------------------
-
 pub fn generate_mnemonic() -> Mnemonic {
     let mut entropy = [0u8; 16];
     getrandom::fill(&mut entropy).expect("getrandom");
@@ -103,10 +99,6 @@ pub fn seed_from_hex(hex_str: &str) -> Result<[u8; 32], String> {
         .try_into()
         .map_err(|_| "Seed must be 32 bytes (64 hex chars)".to_string())
 }
-
-// ---------------------------------------------------------------------------
-// Wallet file encryption
-// ---------------------------------------------------------------------------
 
 fn derive_key(password: &str, salt: &[u8; SALT_LEN]) -> [u8; 32] {
     let argon2 = Argon2::new(

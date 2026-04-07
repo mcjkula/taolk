@@ -64,7 +64,14 @@ pub enum Event {
         fee_raw: Option<u128>,
     },
     BalanceUpdated(u128),
+    ConnectionStatus(ConnState),
     Status(String),
     Error(String),
     CatchupComplete,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConnState {
+    Connected,
+    Reconnecting { in_secs: u32 },
 }
