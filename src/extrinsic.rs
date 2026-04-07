@@ -131,6 +131,35 @@ pub fn build_remark_extrinsic(
     full
 }
 
+async fn refresh_signing_params(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    base: &ChainInfo,
+) -> Result<ChainInfo, String> {
+    let req = json!({"jsonrpc":"2.0","id":91,"method":"chain_getBlockHash","params":[0]});
+    ws.send(WsMessage::Text(req.to_string().into()))
+        .await
+        .map_err(|e| format!("send: {e}"))?;
+    let g = read_text_result(ws).await?;
+    let genesis_hash = hex_to_32(g.as_str().ok_or("no genesis hash")?)?;
+
+    let req = json!({"jsonrpc":"2.0","id":92,"method":"state_getRuntimeVersion","params":[]});
+    ws.send(WsMessage::Text(req.to_string().into()))
+        .await
+        .map_err(|e| format!("send: {e}"))?;
+    let rv = read_text_result(ws).await?;
+    let spec_version = rv["specVersion"].as_u64().ok_or("no specVersion")? as u32;
+    let tx_version = rv["transactionVersion"].as_u64().ok_or("no txVersion")? as u32;
+
+    Ok(ChainInfo {
+        genesis_hash,
+        spec_version,
+        tx_version,
+        account_info_layout: base.account_info_layout.clone(),
+    })
+}
+
 async fn read_text_result(
     ws: &mut tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
@@ -186,7 +215,8 @@ pub async fn estimate_fee(
         .await
         .map_err(|e| format!("connect: {e}"))?;
 
-    // 1. Fetch real nonce
+    let chain_info = refresh_signing_params(&mut ws, chain_info).await?;
+
     let nonce_req =
         json!({"jsonrpc":"2.0","id":1,"method":"system_accountNextIndex","params":[ss58]});
     ws.send(WsMessage::Text(nonce_req.to_string().into()))
@@ -198,8 +228,7 @@ pub async fn estimate_fee(
         .map(|n| n as u32)
         .ok_or_else(|| format!("unexpected nonce response: {nonce_result}"))?;
 
-    // 2. Build extrinsic with real nonce
-    let ext = build_remark_extrinsic(remark, keypair, nonce, chain_info);
+    let ext = build_remark_extrinsic(remark, keypair, nonce, &chain_info);
 
     // 3. Call TransactionPaymentApi_query_info
     let mut params = Vec::new();
@@ -339,7 +368,8 @@ pub async fn submit_remark(
         .await
         .map_err(|e| format!("connect: {e}"))?;
 
-    // Get nonce
+    let chain_info = refresh_signing_params(&mut ws, chain_info).await?;
+
     let nonce_req =
         json!({"jsonrpc":"2.0","id":1,"method":"system_accountNextIndex","params":[ss58]});
     ws.send(WsMessage::Text(nonce_req.to_string().into()))
@@ -351,8 +381,7 @@ pub async fn submit_remark(
         .map(|n| n as u32)
         .ok_or_else(|| format!("unexpected nonce response: {nonce_result}"))?;
 
-    // Build and submit extrinsic, wait for block inclusion
-    let ext = build_remark_extrinsic(remark, keypair, nonce, chain_info);
+    let ext = build_remark_extrinsic(remark, keypair, nonce, &chain_info);
     let hex = format!("0x{}", hex::encode(&ext));
     let watch_req =
         json!({"jsonrpc":"2.0","id":2,"method":"author_submitAndWatchExtrinsic","params":[hex]});
