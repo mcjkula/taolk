@@ -1044,15 +1044,7 @@ fn run_session(
                 }
 
                 if app.sound_armed && !is_mine {
-                    let viewing_destination = match kind {
-                        0x00 | 0x01 => app.view == app::View::Inbox,
-                        0x02 => matches!(app.view, app::View::Thread(i)
-                            if app.session.thread_index_of(&thread_ref) == Some(i)),
-                        _ => false,
-                    };
-                    if !viewing_destination {
-                        app.audio.play(audio::Sound::Dm);
-                    }
+                    app.audio.play(audio::Sound::Dm);
                 }
             }
             TuiEvent::Core(event::Event::NewChannelMessage {
@@ -1081,16 +1073,12 @@ fn run_session(
                     },
                 );
                 if app.sound_armed && !is_mine {
-                    let viewing = matches!(app.view, app::View::Channel(i)
-                        if app.session.channel_index_of(&channel_ref) == Some(i));
-                    if !viewing {
-                        let sound = if mentioned {
-                            audio::Sound::Mention
-                        } else {
-                            audio::Sound::Ambient
-                        };
-                        app.audio.play(sound);
-                    }
+                    let sound = if mentioned {
+                        audio::Sound::Mention
+                    } else {
+                        audio::Sound::Ambient
+                    };
+                    app.audio.play(sound);
                 }
             }
             TuiEvent::Core(event::Event::ChannelDiscovered {
@@ -1139,16 +1127,12 @@ fn run_session(
                     },
                 );
                 if app.sound_armed && !is_mine {
-                    let viewing = matches!(app.view, app::View::Group(i)
-                        if app.session.group_index_of(&group_ref) == Some(i));
-                    if !viewing {
-                        let sound = if mentioned {
-                            audio::Sound::Mention
-                        } else {
-                            audio::Sound::Ambient
-                        };
-                        app.audio.play(sound);
-                    }
+                    let sound = if mentioned {
+                        audio::Sound::Mention
+                    } else {
+                        audio::Sound::Ambient
+                    };
+                    app.audio.play(sound);
                 }
             }
             TuiEvent::Core(event::Event::SubmitRemark { remark }) => {
