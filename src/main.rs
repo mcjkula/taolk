@@ -1,5 +1,6 @@
 mod app;
 mod cli_fmt;
+mod cmd;
 mod ui;
 
 use taolk::{
@@ -9,7 +10,7 @@ use taolk::{
 
 use app::{App, Mode};
 use chrono::{DateTime, Utc};
-use clap::{ArgGroup, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use crossterm::ExecutableCommand;
 use crossterm::event::{
     self as term_event, Event as TermEvent, KeyCode, KeyEvent, KeyModifiers, MouseEvent,
@@ -109,72 +110,13 @@ enum Commands {
     /// Manage wallets
     Wallet {
         #[command(subcommand)]
-        action: WalletAction,
+        action: cmd::wallet::WalletAction,
     },
     /// View and modify configuration
     Config {
         #[command(subcommand)]
-        action: ConfigAction,
+        action: cmd::config::ConfigAction,
     },
-}
-
-#[derive(Subcommand)]
-enum ConfigAction {
-    /// Show all configuration values
-    List,
-    /// Get configuration values (all if no key given)
-    Get {
-        /// Key in dot-notation (e.g., network.node)
-        key: Option<String>,
-    },
-    /// Set a configuration value
-    Set {
-        /// Key in dot-notation (e.g., network.node)
-        key: String,
-        /// Value(s) -- multiple values for list fields like network.mirrors
-        #[arg(num_args = 1..)]
-        value: Vec<String>,
-    },
-    /// Remove a key (revert to default)
-    Unset {
-        /// Key in dot-notation
-        key: String,
-    },
-    /// Open config file in $EDITOR
-    Edit,
-    /// Show config file path
-    Path,
-}
-
-#[derive(Subcommand)]
-enum WalletAction {
-    /// Create a new wallet with a fresh recovery phrase
-    Create {
-        /// Wallet name
-        #[arg(long)]
-        name: String,
-        /// Password (skips interactive prompt)
-        #[arg(long)]
-        password: Option<String>,
-    },
-    /// Import a wallet from an existing recovery phrase or seed
-    #[command(group = ArgGroup::new("source").required(true))]
-    Import {
-        /// Wallet name
-        #[arg(long)]
-        name: String,
-        /// BIP39 recovery phrase (12 or 24 words)
-        #[arg(long, group = "source")]
-        mnemonic: Option<String>,
-        /// Raw seed (64 hex characters)
-        #[arg(long, group = "source")]
-        seed: Option<String>,
-        /// Password (skips interactive prompt)
-        #[arg(long)]
-        password: Option<String>,
-    },
-    /// List available wallets
-    List,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -182,8 +124,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = config::load();
 
     match cli.command {
-        Some(Commands::Wallet { action }) => run_wallet_command(action),
-        Some(Commands::Config { action }) => run_config_command(action),
+        Some(Commands::Wallet { action }) => cmd::wallet::run(action),
+        Some(Commands::Config { action }) => cmd::config::run(action),
         None => {
             let node = if cli.node != "wss://entrypoint-finney.opentensor.ai:443" {
                 cli.node
@@ -215,333 +157,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             run_tui(wallet.as_deref(), &wallets, &node, &mirrors, &cfg)
         }
     }
-}
-
-fn run_wallet_command(action: WalletAction) -> Result<(), Box<dyn std::error::Error>> {
-    match action {
-        WalletAction::Create { name, password } => cmd_wallet_create(&name, password),
-        WalletAction::Import {
-            name,
-            mnemonic,
-            seed,
-            password,
-        } => cmd_wallet_import(&name, mnemonic, seed, password),
-        WalletAction::List => cmd_wallet_list(),
-    }
-}
-
-fn cmd_wallet_create(
-    wallet_name: &str,
-    cli_password: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use cli_fmt::*;
-
-    if wallet::wallet_exists(wallet_name) {
-        error(&format!("Wallet '{}' already exists", wallet_name));
-        hint("  Use --wallet <other-name> to create a different wallet");
-        std::process::exit(1);
-    }
-
-    header(&format!(
-        "\u{03C4}alk \u{2014} Create wallet '{wallet_name}'"
-    ));
-    blank();
-
-    let password = match cli_password {
-        Some(p) => taolk::secret::Password::new(p),
-        None => prompt_new_password()?,
-    };
-
-    let phrase = taolk::secret::Phrase::generate()?;
-    let seed = taolk::secret::Seed::from_phrase(&phrase);
-    let words: Vec<&str> = phrase.words().split_whitespace().collect();
-    let canonical_phrase = words.join(" ");
-
-    blank();
-    header("Recovery phrase");
-    hint("  Write this down. It is the ONLY way to recover your wallet.");
-    blank();
-    for (i, word) in words.iter().enumerate() {
-        eprint!(
-            "  {DIM}{:>2}.{RESET} {CYAN}{BOLD}{:<14}{RESET}",
-            i + 1,
-            word
-        );
-        if (i + 1) % 3 == 0 {
-            eprintln!();
-        }
-    }
-    if !words.len().is_multiple_of(3) {
-        eprintln!();
-    }
-    blank();
-    hint("  Type the recovery phrase to confirm (3 attempts):");
-    blank();
-
-    let mut attempts_left = 3u32;
-    loop {
-        let typed = rpassword::prompt_password(format!("  {YELLOW}Phrase:{RESET} "))?;
-        if normalize_phrase(&typed) == normalize_phrase(&canonical_phrase) {
-            success("Verified");
-            break;
-        }
-        attempts_left -= 1;
-        if attempts_left == 0 {
-            error("Recovery phrase did not match after 3 attempts. Wallet not created.");
-            hint("  Re-run `taolk wallet create` and copy the phrase carefully.");
-            std::process::exit(1);
-        }
-        error(&format!(
-            "Phrases don't match. {attempts_left} attempt{} left.",
-            if attempts_left == 1 { "" } else { "s" }
-        ));
-    }
-
-    wallet::create(wallet_name, &password, &seed)?;
-
-    let address = util::ss58_from_pubkey(&seed.derive_signing_key().public_key());
-
-    blank();
-    success("Wallet created");
-    blank();
-    label("Wallet", &format!("{BOLD}{wallet_name}{RESET}"));
-    label_magenta("Address", &address);
-    blank();
-
-    Ok(())
-}
-
-fn normalize_phrase(s: &str) -> String {
-    s.split_whitespace()
-        .collect::<Vec<&str>>()
-        .join(" ")
-        .to_lowercase()
-}
-
-fn cmd_wallet_import(
-    wallet_name: &str,
-    mnemonic: Option<String>,
-    seed_hex: Option<String>,
-    cli_password: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use cli_fmt::*;
-
-    if wallet::wallet_exists(wallet_name) {
-        error(&format!("Wallet '{}' already exists", wallet_name));
-        hint("  Use --wallet <other-name> to import under a different name");
-        std::process::exit(1);
-    }
-
-    header(&format!(
-        "\u{03C4}alk \u{2014} Import wallet '{wallet_name}'"
-    ));
-    blank();
-
-    let seed = if let Some(phrase) = mnemonic {
-        let p = taolk::secret::Phrase::parse(&phrase)?;
-        taolk::secret::Seed::from_phrase(&p)
-    } else if let Some(hex) = seed_hex {
-        taolk::secret::Seed::from_hex(&hex)?
-    } else {
-        error("Provide --mnemonic or --seed");
-        std::process::exit(1);
-    };
-
-    let password = match cli_password {
-        Some(p) => taolk::secret::Password::new(p),
-        None => prompt_new_password()?,
-    };
-    wallet::create(wallet_name, &password, &seed)?;
-
-    let address = util::ss58_from_pubkey(&seed.derive_signing_key().public_key());
-
-    blank();
-    success("Wallet imported");
-    blank();
-    label("Wallet", &format!("{BOLD}{wallet_name}{RESET}"));
-    label_magenta("Address", &address);
-    blank();
-
-    Ok(())
-}
-
-fn cmd_wallet_list() -> Result<(), Box<dyn std::error::Error>> {
-    use cli_fmt::*;
-
-    let wallets = wallet::list_wallets();
-    if wallets.is_empty() {
-        hint("No wallets found");
-        hint("  Run `taolk wallet create` to create one");
-    } else {
-        header("\u{03C4}alk wallets");
-        blank();
-        for name in &wallets {
-            let path = wallet::wallet_path(name);
-            eprintln!(
-                "  {CYAN}{BOLD}{name}{RESET}  {DIM}{}{RESET}",
-                path.display()
-            );
-        }
-        blank();
-    }
-    Ok(())
-}
-
-fn prompt_new_password() -> Result<taolk::secret::Password, Box<dyn std::error::Error>> {
-    use cli_fmt::*;
-    use zeroize::Zeroize;
-    let password = rpassword::prompt_password(format!("  {YELLOW}Password:{RESET} "))?;
-    if password.is_empty() {
-        error("Password cannot be empty");
-        std::process::exit(1);
-    }
-    let mut confirm = rpassword::prompt_password(format!("  {YELLOW}Confirm:{RESET}  "))?;
-    if password != confirm {
-        confirm.zeroize();
-        error("Passwords do not match");
-        std::process::exit(1);
-    }
-    confirm.zeroize();
-    Ok(taolk::secret::Password::new(password))
-}
-
-fn run_config_command(action: ConfigAction) -> Result<(), Box<dyn std::error::Error>> {
-    match action {
-        ConfigAction::List => cmd_config_list(),
-        ConfigAction::Get { key: Some(key) } => cmd_config_get(&key),
-        ConfigAction::Get { key: None } => cmd_config_list(),
-        ConfigAction::Set { key, value } => cmd_config_set(&key, &value),
-        ConfigAction::Unset { key } => cmd_config_unset(&key),
-        ConfigAction::Edit => cmd_config_edit(),
-        ConfigAction::Path => cmd_config_path(),
-    }
-}
-
-fn cmd_config_list() -> Result<(), Box<dyn std::error::Error>> {
-    use cli_fmt::*;
-
-    let cfg = config::load();
-
-    header("\u{03C4}alk configuration");
-    blank();
-
-    let mut current_section = "";
-    for def in config::KEYS {
-        if def.section != current_section {
-            if !current_section.is_empty() {
-                blank();
-            }
-            current_section = def.section;
-            eprintln!("  {BOLD}{WHITE}[{current_section}]{RESET}");
-        }
-
-        let value = config::get_value(&cfg, def.key);
-        let user_set = config::is_user_set(def.key);
-        let padded_field = format!("{:<19}", def.field);
-
-        if user_set {
-            label_cyan(&padded_field, &value);
-        } else {
-            label_dim(&padded_field, &format!("{value}  (default)"));
-        }
-    }
-
-    blank();
-    hint(&format!("  {}", config::config_path().display()));
-    blank();
-    Ok(())
-}
-
-fn cmd_config_get(key: &str) -> Result<(), Box<dyn std::error::Error>> {
-    if config::lookup_key(key).is_none() {
-        unknown_key_error(key);
-    }
-    let cfg = config::load();
-    println!("{}", config::get_value(&cfg, key));
-    Ok(())
-}
-
-fn cmd_config_set(key: &str, values: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    use cli_fmt::*;
-
-    if config::lookup_key(key).is_none() {
-        unknown_key_error(key);
-    }
-
-    match config::set_key(key, values) {
-        Ok(display_val) => {
-            success(&format!("{key} = {display_val}"));
-            hint(&format!("  {}", config::config_path().display()));
-        }
-        Err(e) => {
-            error(&e.to_string());
-            std::process::exit(1);
-        }
-    }
-    Ok(())
-}
-
-fn cmd_config_unset(key: &str) -> Result<(), Box<dyn std::error::Error>> {
-    use cli_fmt::*;
-
-    if config::lookup_key(key).is_none() {
-        unknown_key_error(key);
-    }
-
-    match config::unset_key(key) {
-        Ok(default_val) => {
-            success(&format!("{key} reset to default ({default_val})"));
-            hint(&format!("  {}", config::config_path().display()));
-        }
-        Err(e) => {
-            error(&e.to_string());
-            std::process::exit(1);
-        }
-    }
-    Ok(())
-}
-
-fn cmd_config_edit() -> Result<(), Box<dyn std::error::Error>> {
-    use cli_fmt::*;
-
-    let path = config::config_path();
-    if !path.exists() {
-        config::save(&config::Config::default())
-            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-    }
-
-    let editor = std::env::var("VISUAL")
-        .or_else(|_| std::env::var("EDITOR"))
-        .unwrap_or_else(|_| {
-            error("$EDITOR is not set");
-            hint("  Set EDITOR or VISUAL environment variable");
-            std::process::exit(1);
-        });
-
-    let status = std::process::Command::new(&editor).arg(&path).status()?;
-    if !status.success() {
-        error(&format!("{editor} exited with {status}"));
-        std::process::exit(1);
-    }
-    Ok(())
-}
-
-fn cmd_config_path() -> Result<(), Box<dyn std::error::Error>> {
-    println!("{}", config::config_path().display());
-    Ok(())
-}
-
-fn unknown_key_error(key: &str) -> ! {
-    use cli_fmt::*;
-    error(&format!("Unknown key: {key}"));
-    if let Some(def) = config::suggest_key(key) {
-        hint(&format!(
-            "  Did you mean '{}'? ({})",
-            def.key, def.description
-        ));
-    }
-    hint("  Run 'taolk config list' to see all keys");
-    std::process::exit(1);
 }
 
 fn run_tui(
