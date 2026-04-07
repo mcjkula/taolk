@@ -1,0 +1,5 @@
+error[E0599]: no method named `clone` found for struct `Seed` in the current scope
+ --> tests/compile_fail/seed_clone.rs:3:18
+  |
+3 |     let _ = seed.clone();
+  |                  ^^^^^ method not found in `Seed`
