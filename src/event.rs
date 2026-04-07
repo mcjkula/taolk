@@ -64,4 +64,5 @@ pub enum Event {
     BalanceUpdated(u128),
     Status(String),
     Error(String),
+    CatchupComplete,
 }

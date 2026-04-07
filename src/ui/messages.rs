@@ -30,8 +30,14 @@ fn is_base58(b: u8) -> bool {
     BASE58_CHARS.contains(&b)
 }
 
-/// Render a body line with highlighting for URLs, SS58 addresses, block: and ext: references.
-fn render_body_line(text: &str, base_color: Color) -> Line<'static> {
+fn is_ss58_at(bytes: &[u8], pos: usize) -> bool {
+    pos + 48 <= bytes.len()
+        && bytes[pos] == b'5'
+        && bytes[pos..pos + 48].iter().all(|b| is_base58(*b))
+        && (pos + 48 == bytes.len() || !is_base58(bytes[pos + 48]))
+}
+
+fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let bytes = text.as_bytes();
     let mut pos = 0;
@@ -59,16 +65,26 @@ fn render_body_line(text: &str, base_color: Color) -> Line<'static> {
                 continue;
             }
 
-            // SS58: starts with '5', exactly 48 base58 chars, followed by boundary
-            if bytes[pos] == b'5'
-                && pos + 48 <= bytes.len()
-                && (pos + 48 == bytes.len() || bytes[pos + 48].is_ascii_whitespace())
-                && bytes[pos..pos + 48].iter().all(|b| is_base58(*b))
-            {
+            // @-mention
+            if bytes[pos] == b'@' && is_ss58_at(bytes, pos + 1) {
+                let is_self = &text[pos + 1..pos + 49] == my_ss58;
+                let color = if is_self { Color::Cyan } else { Color::Yellow };
+                spans.push(Span::styled(
+                    text[pos..pos + 49].to_string(),
+                    Style::default()
+                        .fg(color)
+                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                ));
+                pos += 49;
+                continue;
+            }
+
+            // Bare SS58
+            if is_ss58_at(bytes, pos) {
                 spans.push(Span::styled(
                     text[pos..pos + 48].to_string(),
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(Color::DarkGray)
                         .add_modifier(Modifier::UNDERLINED),
                 ));
                 pos += 48;
@@ -319,8 +335,13 @@ fn render_standalone(
                         .add_modifier(Modifier::ITALIC),
                 )]));
             } else {
+                let my_ss58 = app.session.ss58();
                 for text_line in msg.body.lines() {
-                    lines.push(render_body_line(&format!("   {text_line}"), Color::White));
+                    lines.push(render_body_line(
+                        &format!("   {text_line}"),
+                        Color::White,
+                        my_ss58,
+                    ));
                 }
             }
         }
@@ -744,6 +765,7 @@ fn render_messages(
     app: &App,
     width: usize,
 ) {
+    let my_ss58 = app.session.ss58();
     let mut last_date: Option<chrono::NaiveDate> = None;
     let mut last_sender: Option<&str> = None;
     let mut last_indent: usize = 7; // fallback
@@ -844,7 +866,7 @@ fn render_messages(
             for body_line in display_body.lines() {
                 let prefixed = format!("{:last_indent$}{body_line}", "");
                 for wrapped in wrap_text(&prefixed, width, last_indent) {
-                    lines.push(render_body_line(&wrapped, body_color));
+                    lines.push(render_body_line(&wrapped, body_color, my_ss58));
                 }
             }
         } else if same_sender && time_gap {
@@ -870,7 +892,7 @@ fn render_messages(
                 Span::styled(format!(" {time} "), Style::default().fg(Color::DarkGray)),
                 Span::styled(format!("{:pad$}", ""), Style::default()),
             ];
-            let rendered = render_body_line(&first_wrapped.0, body_color);
+            let rendered = render_body_line(&first_wrapped.0, body_color, my_ss58);
             for span in rendered.spans {
                 spans.push(span);
             }
@@ -882,13 +904,13 @@ fn render_messages(
                     width,
                     last_indent,
                 ) {
-                    lines.push(render_body_line(&wrapped, body_color));
+                    lines.push(render_body_line(&wrapped, body_color, my_ss58));
                 }
             }
             for body_line in msg.body.lines().skip(1) {
                 let prefixed = format!("{:last_indent$}{body_line}", "");
                 for wrapped in wrap_text(&prefixed, width, last_indent) {
-                    lines.push(render_body_line(&wrapped, body_color));
+                    lines.push(render_body_line(&wrapped, body_color, my_ss58));
                 }
             }
         } else {
@@ -935,7 +957,7 @@ fn render_messages(
                     Style::default().fg(name_color).add_modifier(Modifier::BOLD),
                 ),
             ];
-            let body_rendered = render_body_line(&first_wrapped.0, body_color);
+            let body_rendered = render_body_line(&first_wrapped.0, body_color, my_ss58);
             for span in body_rendered.spans {
                 first_spans.push(span);
             }
@@ -944,7 +966,7 @@ fn render_messages(
             // Overflow from first line wrap
             if let Some(overflow) = first_wrapped.1 {
                 for wrapped in wrap_text(&format!("{:indent$}{overflow}", ""), width, indent) {
-                    lines.push(render_body_line(&wrapped, body_color));
+                    lines.push(render_body_line(&wrapped, body_color, my_ss58));
                 }
             }
 
@@ -952,7 +974,7 @@ fn render_messages(
             for body_line in msg.body.lines().skip(1) {
                 let prefixed = format!("{:indent$}{body_line}", "");
                 for wrapped in wrap_text(&prefixed, width, indent) {
-                    lines.push(render_body_line(&wrapped, body_color));
+                    lines.push(render_body_line(&wrapped, body_color, my_ss58));
                 }
             }
         }

@@ -115,6 +115,46 @@ pub fn pubkey_from_ss58(address: &str) -> Option<Pubkey> {
     ss58_decode(address).ok()
 }
 
+/// True if `body` contains `@<my_ss58>` at a word boundary.
+pub fn body_mentions(body: &str, my_ss58: &str) -> bool {
+    let target = my_ss58.as_bytes();
+    if target.len() != 48 {
+        return false;
+    }
+    let bytes = body.as_bytes();
+    let window = 1 + target.len();
+    if bytes.len() < window {
+        return false;
+    }
+    for pos in 0..=(bytes.len() - window) {
+        if bytes[pos] != b'@' {
+            continue;
+        }
+        if pos > 0 && !bytes[pos - 1].is_ascii_whitespace() {
+            continue;
+        }
+        if &bytes[pos + 1..pos + window] != target {
+            continue;
+        }
+        let after = pos + window;
+        if after == bytes.len() || !is_base58_byte(bytes[after]) {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_base58_byte(b: u8) -> bool {
+    matches!(b,
+        b'1'..=b'9'
+        | b'A'..=b'H'
+        | b'J'..=b'N'
+        | b'P'..=b'Z'
+        | b'a'..=b'k'
+        | b'm'..=b'z'
+    )
+}
+
 /// Decode an SS58 address to a 32-byte public key.
 pub fn ss58_decode(address: &str) -> Result<Pubkey, String> {
     let decoded = bs58_decode(address).map_err(|_| "Invalid base58")?;

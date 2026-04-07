@@ -5,7 +5,8 @@ mod ui;
 
 // Shared modules from the library
 use taolk::{
-    chain, config, conversation, db, error, event, extrinsic, mirror, session, types, util, wallet,
+    audio, chain, config, conversation, db, error, event, extrinsic, mirror, session, types, util,
+    wallet,
 };
 
 use app::{App, Mode};
@@ -901,7 +902,8 @@ fn run_session(
         chain_info.clone(),
         db,
     );
-    let mut app = App::new(session);
+    let audio = audio::Audio::from_config(&cfg.notifications);
+    let mut app = App::new(session, audio);
     app.session.token_symbol = token_symbol;
     app.session.token_decimals = token_decimals;
     app.sidebar_width = cfg.ui.sidebar_width;
@@ -947,6 +949,8 @@ fn run_session(
                 mirror::sync(&url, 42, &sc, &pubkey, channels, 0, tx).await;
             });
         }
+    } else {
+        app.sound_armed = true;
     }
 
     app.set_status("Connected");
@@ -1001,8 +1005,10 @@ fn run_session(
                 };
                 let ts = DateTime::<Utc>::from_timestamp(timestamp as i64, 0).unwrap_or_default();
                 let sender_ss58 = util::ss58_short(&sender);
+                let is_mine = sender == app.session.pubkey();
+                let kind = ct & 0x0F;
 
-                match ct & 0x0F {
+                match kind {
                     0x00 | 0x01 => {
                         // Public (0x10) or Encrypted (0x11)
                         app.session.add_inbox_message(
@@ -1010,7 +1016,7 @@ fn run_session(
                             recipient,
                             ts,
                             body,
-                            ct & 0x0F,
+                            kind,
                             types::BlockRef {
                                 block: block_number,
                                 index: ext_index,
@@ -1036,6 +1042,18 @@ fn run_session(
                     }
                     _ => {}
                 }
+
+                if app.sound_armed && !is_mine {
+                    let viewing_destination = match kind {
+                        0x00 | 0x01 => app.view == app::View::Inbox,
+                        0x02 => matches!(app.view, app::View::Thread(i)
+                            if app.session.thread_index_of(&thread_ref) == Some(i)),
+                        _ => false,
+                    };
+                    if !viewing_destination {
+                        app.audio.play(audio::Sound::Dm);
+                    }
+                }
             }
             TuiEvent::Core(event::Event::NewChannelMessage {
                 sender_ss58,
@@ -1048,6 +1066,8 @@ fn run_session(
                 timestamp,
             }) => {
                 let ts = DateTime::<Utc>::from_timestamp(timestamp as i64, 0).unwrap_or_default();
+                let is_mine = sender_ss58 == util::ss58_short(&app.session.pubkey());
+                let mentioned = util::body_mentions(&body, app.session.ss58());
                 app.session.add_channel_message(
                     channel_ref,
                     conversation::NewMessage {
@@ -1060,6 +1080,18 @@ fn run_session(
                         ext_index,
                     },
                 );
+                if app.sound_armed && !is_mine {
+                    let viewing = matches!(app.view, app::View::Channel(i)
+                        if app.session.channel_index_of(&channel_ref) == Some(i));
+                    if !viewing {
+                        let sound = if mentioned {
+                            audio::Sound::Mention
+                        } else {
+                            audio::Sound::Ambient
+                        };
+                        app.audio.play(sound);
+                    }
+                }
             }
             TuiEvent::Core(event::Event::ChannelDiscovered {
                 name,
@@ -1092,6 +1124,8 @@ fn run_session(
                 timestamp,
             }) => {
                 let ts = DateTime::<Utc>::from_timestamp(timestamp as i64, 0).unwrap_or_default();
+                let is_mine = sender_ss58 == util::ss58_short(&app.session.pubkey());
+                let mentioned = util::body_mentions(&body, app.session.ss58());
                 app.session.add_group_message(
                     group_ref,
                     conversation::NewMessage {
@@ -1104,6 +1138,18 @@ fn run_session(
                         ext_index,
                     },
                 );
+                if app.sound_armed && !is_mine {
+                    let viewing = matches!(app.view, app::View::Group(i)
+                        if app.session.group_index_of(&group_ref) == Some(i));
+                    if !viewing {
+                        let sound = if mentioned {
+                            audio::Sound::Mention
+                        } else {
+                            audio::Sound::Ambient
+                        };
+                        app.audio.play(sound);
+                    }
+                }
             }
             TuiEvent::Core(event::Event::SubmitRemark { remark }) => {
                 let url = app.session.node_url.clone();
@@ -1212,6 +1258,9 @@ fn run_session(
             }
             TuiEvent::Core(event::Event::Status(msg)) => {
                 app.set_status(msg);
+            }
+            TuiEvent::Core(event::Event::CatchupComplete) => {
+                app.sound_armed = true;
             }
             TuiEvent::Core(event::Event::Error(e)) => {
                 if app.sending {

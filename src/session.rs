@@ -184,6 +184,18 @@ impl Session {
         &self.my_ss58
     }
 
+    pub fn thread_index_of(&self, r: &BlockRef) -> Option<usize> {
+        self.thread_index.get(r).copied()
+    }
+
+    pub fn channel_index_of(&self, r: &BlockRef) -> Option<usize> {
+        self.channel_index.get(r).copied()
+    }
+
+    pub fn group_index_of(&self, r: &BlockRef) -> Option<usize> {
+        self.group_index.get(r).copied()
+    }
+
     pub fn load_from_db(&mut self) {
         let (inbox, outbox) = self.db.load_inbox();
         self.inbox = inbox;
