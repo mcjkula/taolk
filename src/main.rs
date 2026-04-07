@@ -781,8 +781,11 @@ fn run_lock_screen(
             frame.render_widget(Paragraph::new(lines), area);
 
             if inserting {
-                let cursor_y = area.y + top_pad as u16 + 7 + 1 + 1 + 2 + 1 + 1;
-                let cursor_x = area.x + prompt_x_offset as u16 + prompt.len() as u16;
+                let cursor_y =
+                    area.y + u16::try_from(top_pad).unwrap_or(u16::MAX) + 7 + 1 + 1 + 2 + 1 + 1;
+                let cursor_x = area.x
+                    + u16::try_from(prompt_x_offset).unwrap_or(u16::MAX)
+                    + u16::try_from(prompt.len()).unwrap_or(u16::MAX);
                 if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
                     frame.set_cursor_position((cursor_x, cursor_y));
                 }
@@ -1002,7 +1005,8 @@ fn run_session(
                     Some(text) => text,
                     None => continue,
                 };
-                let ts = DateTime::<Utc>::from_timestamp(timestamp as i64, 0).unwrap_or_default();
+                let ts = DateTime::<Utc>::from_timestamp(i64::try_from(timestamp).unwrap_or(0), 0)
+                    .unwrap_or_default();
                 let sender_ss58 = util::ss58_short(&sender);
                 let is_mine = sender == app.session.pubkey();
                 let kind = ct & 0x0F;
@@ -1055,7 +1059,8 @@ fn run_session(
                 ext_index,
                 timestamp,
             }) => {
-                let ts = DateTime::<Utc>::from_timestamp(timestamp as i64, 0).unwrap_or_default();
+                let ts = DateTime::<Utc>::from_timestamp(i64::try_from(timestamp).unwrap_or(0), 0)
+                    .unwrap_or_default();
                 let is_mine = sender_ss58 == util::ss58_short(&app.session.pubkey());
                 let mentioned = util::body_mentions(&body, app.session.ss58());
                 app.session.peer_pubkeys.insert(sender_ss58.clone(), sender);
@@ -1112,7 +1117,8 @@ fn run_session(
                 ext_index,
                 timestamp,
             }) => {
-                let ts = DateTime::<Utc>::from_timestamp(timestamp as i64, 0).unwrap_or_default();
+                let ts = DateTime::<Utc>::from_timestamp(i64::try_from(timestamp).unwrap_or(0), 0)
+                    .unwrap_or_default();
                 let is_mine = sender_ss58 == util::ss58_short(&app.session.pubkey());
                 let mentioned = util::body_mentions(&body, app.session.ss58());
                 app.session.peer_pubkeys.insert(sender_ss58.clone(), sender);
@@ -1387,7 +1393,7 @@ fn handle_mouse(
         }
 
         if app.show_sidebar && x < sidebar_width {
-            let row = y.saturating_sub(1) as usize;
+            let row = usize::from(y.saturating_sub(1));
             app.select_sidebar_row(row);
         } else if y >= input_area_y && !app.sending {
             app.load_draft();

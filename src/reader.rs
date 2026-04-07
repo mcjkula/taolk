@@ -26,30 +26,30 @@ pub fn read_block(block: &Value, ctx: &ReadContext) {
         .and_then(|s| u32::from_str_radix(s.trim_start_matches("0x"), 16).ok())
         .unwrap_or(0);
 
-    let _ = ctx.tx.send(Event::BlockUpdate(block_number as u64));
+    let _ = ctx.tx.send(Event::BlockUpdate(u64::from(block_number)));
 
     let block_ts = extract_block_timestamp(extrinsics);
 
     for (ext_index, ext) in extrinsics.iter().enumerate() {
-        let ext_hex = match ext.as_str() {
-            Some(s) => s,
-            None => continue,
+        let Some(ext_hex) = ext.as_str() else {
+            continue;
         };
-        let ext_bytes = match hex::decode(ext_hex.trim_start_matches("0x")) {
-            Ok(b) => b,
-            Err(_) => continue,
+        let Ok(ext_bytes) = hex::decode(ext_hex.trim_start_matches("0x")) else {
+            continue;
         };
 
         let signer = extract_signer(&ext_bytes);
         let remark = extract_remark(&ext_bytes);
 
+        // SECURITY: Substrate blocks have far fewer than 65k extrinsics; saturate.
+        let ext_index_u16 = u16::try_from(ext_index).unwrap_or(u16::MAX);
         if let (Some(sender), Some(remark_data)) = (signer, remark) {
             process_remark(
                 &remark_data,
                 &sender,
                 ctx,
                 block_number,
-                ext_index as u16,
+                ext_index_u16,
                 block_ts,
             );
         }
@@ -198,23 +198,27 @@ fn decode_compact_u64(data: &[u8]) -> Option<(u64, usize)> {
     }
     let mode = data[0] & 0b11;
     match mode {
-        0b00 => Some(((data[0] >> 2) as u64, 1)),
+        // SECURITY: u8 >> 2 ⊆ 0..=63, fits in u64.
+        0b00 => Some((u64::from(data[0] >> 2), 1)),
         0b01 => {
             if data.len() < 2 {
                 return None;
             }
+            // SECURITY: u16 >> 2 ⊆ 0..=16383, fits in u64.
             let raw = u16::from_le_bytes([data[0], data[1]]);
-            Some(((raw >> 2) as u64, 2))
+            Some((u64::from(raw >> 2), 2))
         }
         0b10 => {
             if data.len() < 4 {
                 return None;
             }
+            // SECURITY: u32 >> 2, fits in u64.
             let raw = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-            Some(((raw >> 2) as u64, 4))
+            Some((u64::from(raw >> 2), 4))
         }
         _ => {
-            let bytes_following = ((data[0] >> 2) + 4) as usize;
+            // SECURITY: (u8 >> 2) + 4 ⊆ 4..=67, fits in usize on every target.
+            let bytes_following = usize::from(data[0] >> 2) + 4;
             if data.len() < 1 + bytes_following {
                 return None;
             }
@@ -232,20 +236,24 @@ fn decode_compact_prefix(data: &[u8]) -> Option<(usize, usize)> {
     }
     let mode = data[0] & 0b11;
     match mode {
-        0b00 => Some(((data[0] >> 2) as usize, 1)),
+        // SECURITY: u8 >> 2 ⊆ 0..=63, fits in usize on every target.
+        0b00 => Some((usize::from(data[0] >> 2), 1)),
         0b01 => {
             if data.len() < 2 {
                 return None;
             }
+            // SECURITY: u16 >> 2 ⊆ 0..=16383, fits in usize on every target.
             let raw = u16::from_le_bytes([data[0], data[1]]);
-            Some(((raw >> 2) as usize, 2))
+            Some((usize::from(raw >> 2), 2))
         }
         0b10 => {
             if data.len() < 4 {
                 return None;
             }
             let raw = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-            Some(((raw >> 2) as usize, 4))
+            // SECURITY: u32 >> 2 ⊆ 0..=2^30; usize::try_from is identity on
+            // 64-bit targets and fallible on 32-bit (refuse oversized prefix).
+            usize::try_from(raw >> 2).ok().map(|v| (v, 4))
         }
         _ => None,
     }

@@ -53,12 +53,13 @@ fn format_balance_inner(
 ) -> String {
     let display_symbol = if symbol == "TAO" { "\u{03C4}" } else { symbol };
     if decimals == 0 {
-        return format!("{} {display_symbol}", format_number(plancks as u64));
+        return format!("{} {display_symbol}", format_number(plancks));
     }
     let divisor = 10u128.pow(decimals);
     let whole = plancks / divisor;
     let frac = plancks % divisor;
-    let frac_str = format!("{:0>width$}", frac, width = decimals as usize);
+    let width = usize::try_from(decimals).unwrap_or(0);
+    let frac_str = format!("{:0>width$}", frac, width = width);
     let trimmed = match max_frac {
         Some(max) => {
             let capped = if frac_str.len() > max {
@@ -70,7 +71,7 @@ fn format_balance_inner(
         }
         None => frac_str.trim_end_matches('0'),
     };
-    let whole_fmt = format_number(whole as u64);
+    let whole_fmt = format_number(whole);
     if trimmed.is_empty() {
         format!("{whole_fmt}.0 {display_symbol}")
     } else {
@@ -83,13 +84,13 @@ pub fn format_fee(plancks: u128, decimals: u32, symbol: &str) -> String {
     let divisor = 10u128.pow(decimals);
     if plancks < divisor / 1000 {
         let rao_symbol = if symbol == "TAO" { "RAO" } else { symbol };
-        format!("{} {rao_symbol}", format_number(plancks as u64))
+        format!("{} {rao_symbol}", format_number(plancks))
     } else {
         format_balance(plancks, decimals, symbol)
     }
 }
 
-pub fn format_number(n: u64) -> String {
+pub fn format_number(n: u128) -> String {
     let s = n.to_string();
     let mut result = String::with_capacity(s.len() + s.len() / 3);
     for (i, c) in s.chars().enumerate() {
@@ -235,19 +236,24 @@ fn b64_encode(data: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
-        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let b0 = u32::from(chunk[0]);
+        let b1 = u32::from(chunk.get(1).copied().unwrap_or(0));
+        let b2 = u32::from(chunk.get(2).copied().unwrap_or(0));
         let n = (b0 << 16) | (b1 << 8) | b2;
-        out.push(ALPHABET[((n >> 18) & 0x3f) as usize] as char);
-        out.push(ALPHABET[((n >> 12) & 0x3f) as usize] as char);
+        // SECURITY: `& 0x3f` masks each index to 0..=63, always in bounds for the 64-byte ALPHABET.
+        let i0 = ((n >> 18) & 0x3f) as usize; // SECURITY: bounded 0..=63
+        let i1 = ((n >> 12) & 0x3f) as usize; // SECURITY: bounded 0..=63
+        let i2 = ((n >> 6) & 0x3f) as usize; // SECURITY: bounded 0..=63
+        let i3 = (n & 0x3f) as usize; // SECURITY: bounded 0..=63
+        out.push(char::from(ALPHABET[i0]));
+        out.push(char::from(ALPHABET[i1]));
         out.push(if chunk.len() > 1 {
-            ALPHABET[((n >> 6) & 0x3f) as usize] as char
+            char::from(ALPHABET[i2])
         } else {
             '='
         });
         out.push(if chunk.len() > 2 {
-            ALPHABET[(n & 0x3f) as usize] as char
+            char::from(ALPHABET[i3])
         } else {
             '='
         });
@@ -259,15 +265,18 @@ fn bs58_decode(input: &str) -> Result<Vec<u8>, ()> {
     const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
     let mut bytes = vec![0u8];
     for c in input.chars() {
-        let idx = ALPHABET.iter().position(|&a| a == c as u8).ok_or(())?;
+        // SECURITY: only ASCII chars in the ALPHABET; non-ASCII fails the position check.
+        let byte = u8::try_from(u32::from(c)).map_err(|_| ())?;
+        let idx = ALPHABET.iter().position(|&a| a == byte).ok_or(())?;
         let mut carry = idx;
         for b in bytes.iter_mut() {
-            carry += *b as usize * 58;
-            *b = (carry % 256) as u8;
+            carry += usize::from(*b) * 58;
+            // SECURITY: `carry % 256` ⊆ 0..=255, always fits in u8.
+            *b = u8::try_from(carry % 256).unwrap_or(0);
             carry /= 256;
         }
         while carry > 0 {
-            bytes.push((carry % 256) as u8);
+            bytes.push(u8::try_from(carry % 256).unwrap_or(0));
             carry /= 256;
         }
     }
@@ -290,7 +299,7 @@ fn bs58_encode(data: &[u8]) -> String {
     }
     let mut digits = vec![0u32];
     for &byte in data {
-        let mut carry = byte as u32;
+        let mut carry = u32::from(byte);
         for d in digits.iter_mut() {
             carry += *d * 256;
             *d = carry % 58;
@@ -304,13 +313,14 @@ fn bs58_encode(data: &[u8]) -> String {
     let mut result = String::new();
     for &b in data {
         if b == 0 {
-            result.push(ALPHABET[0] as char);
+            result.push(char::from(ALPHABET[0]));
         } else {
             break;
         }
     }
     for &d in digits.iter().rev() {
-        result.push(ALPHABET[d as usize] as char);
+        let idx = d as usize; // SECURITY: digits are computed `% 58`, always in 0..=57.
+        result.push(char::from(ALPHABET[idx]));
     }
     result
 }

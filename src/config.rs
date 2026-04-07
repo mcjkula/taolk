@@ -284,11 +284,14 @@ pub fn set_key(key: &str, raw: &[String]) -> Result<String, ConfigError> {
         }
         "security.lock_timeout" => {
             let v: u64 = parse_val(raw, "a number")?;
-            toml::Value::Integer(v as i64)
+            toml::Value::Integer(i64::try_from(v).map_err(|_| ConfigError::InvalidValue {
+                expected: "0..=i64::MAX".into(),
+                got: v.to_string(),
+            })?)
         }
         "ui.sidebar_width" => {
             let v: u16 = parse_val(raw, "a number (0-65535)")?;
-            toml::Value::Integer(v as i64)
+            toml::Value::Integer(i64::from(v))
         }
         "ui.mouse" => toml::Value::Boolean(parse_bool(raw)?),
         "notifications.enabled"
@@ -303,7 +306,7 @@ pub fn set_key(key: &str, raw: &[String]) -> Result<String, ConfigError> {
                     got: v.to_string(),
                 });
             }
-            toml::Value::Integer(v as i64)
+            toml::Value::Integer(i64::from(v))
         }
         _ => return Err(ConfigError::UnknownKey(key.into())),
     };

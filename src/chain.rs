@@ -94,7 +94,7 @@ async fn fetch_extrinsic_inner(
 
     if let Some(exts) = block["extrinsics"].as_array() {
         let block_ts = reader::extract_block_timestamp(exts);
-        if let Some(ext) = exts.get(ext_index as usize)
+        if let Some(ext) = exts.get(usize::from(ext_index))
             && let Some(ext_hex) = ext.as_str()
         {
             let ctx = reader::ReadContext {

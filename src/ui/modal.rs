@@ -14,11 +14,11 @@ pub fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
 }
 
 pub fn vertical_pad(content_height: usize, area_height: u16) -> usize {
-    (area_height as usize).saturating_sub(content_height) / 2
+    usize::from(area_height).saturating_sub(content_height) / 2
 }
 
 pub fn horizontal_pad(text_width: usize, area_width: u16) -> String {
-    " ".repeat((area_width as usize).saturating_sub(text_width) / 2)
+    " ".repeat(usize::from(area_width).saturating_sub(text_width) / 2)
 }
 
 pub fn centered_line(text: &str, area_width: u16, style: Style) -> Line<'static> {

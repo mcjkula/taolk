@@ -109,13 +109,15 @@ pub fn build_remark_extrinsic(
     signing: &crate::secret::SigningKey,
     nonce: u32,
     chain_info: &ChainInfo,
-) -> Vec<u8> {
+) -> Result<Vec<u8>, ChainError> {
     let account_id = *signing.public_key();
 
     let mut call_data = Vec::new();
     call_data.push(PALLET_SYSTEM);
     call_data.push(CALL_REMARK_WITH_EVENT);
-    Compact(remark.len() as u32).encode_to(&mut call_data);
+    let remark_len = u32::try_from(remark.len())
+        .map_err(|_| ChainError::MessageTooLong { len: remark.len() })?;
+    Compact(remark_len).encode_to(&mut call_data);
     call_data.extend_from_slice(remark);
 
     let tip: u8 = 0x00;
@@ -156,10 +158,14 @@ pub fn build_remark_extrinsic(
     extrinsic_payload.extend_from_slice(&call_data);
 
     let mut full = Vec::new();
-    Compact(extrinsic_payload.len() as u32).encode_to(&mut full);
+    let payload_len =
+        u32::try_from(extrinsic_payload.len()).map_err(|_| ChainError::MessageTooLong {
+            len: extrinsic_payload.len(),
+        })?;
+    Compact(payload_len).encode_to(&mut full);
     full.extend_from_slice(&extrinsic_payload);
 
-    full
+    Ok(full)
 }
 
 async fn refresh_signing_params(
@@ -267,11 +273,13 @@ pub async fn estimate_fee(
     let nonce_raw = nonce_result.as_u64().ok_or(ChainError::BadShape)?;
     let nonce = u32::try_from(nonce_raw).map_err(|_| ChainError::SpecVersionOverflow(nonce_raw))?;
 
-    let ext = build_remark_extrinsic(remark, signing, nonce, &chain_info);
+    let ext = build_remark_extrinsic(remark, signing, nonce, &chain_info)?;
 
     let mut params = Vec::new();
     params.extend_from_slice(&ext);
-    (ext.len() as u32).encode_to(&mut params);
+    let ext_len =
+        u32::try_from(ext.len()).map_err(|_| ChainError::MessageTooLong { len: ext.len() })?;
+    ext_len.encode_to(&mut params);
 
     let params_hex = format!("0x{}", hex::encode(&params));
     let req = json!({
@@ -324,14 +332,17 @@ pub async fn fetch_token_info(node_url: &str) -> Result<(String, u32), ChainErro
         })
         .unwrap_or("UNIT")
         .to_string();
-    let decimals = result["tokenDecimals"]
+    let decimals_raw = result["tokenDecimals"]
         .as_u64()
         .or_else(|| {
             result["tokenDecimals"]
                 .as_array()
                 .and_then(|a| a.first()?.as_u64())
         })
-        .unwrap_or(0) as u32;
+        .unwrap_or(0);
+    // SECURITY: token decimal counts are bounded to ~18 in practice; saturating
+    // to u32::MAX on absurd values is fine for display purposes.
+    let decimals = u32::try_from(decimals_raw).unwrap_or(u32::MAX);
 
     Ok((symbol, decimals))
 }
@@ -404,7 +415,7 @@ pub async fn submit_remark(
     let nonce_raw = nonce_result.as_u64().ok_or(ChainError::BadShape)?;
     let nonce = u32::try_from(nonce_raw).map_err(|_| ChainError::SpecVersionOverflow(nonce_raw))?;
 
-    let ext = build_remark_extrinsic(remark, signing, nonce, &chain_info);
+    let ext = build_remark_extrinsic(remark, signing, nonce, &chain_info)?;
     let hex = format!("0x{}", hex::encode(&ext));
     let watch_req =
         json!({"jsonrpc":"2.0","id":2,"method":"author_submitAndWatchExtrinsic","params":[hex]});
@@ -453,7 +464,8 @@ fn scale_compact_len(data: &[u8], offset: usize) -> Result<usize, ChainError> {
         0b01 => Ok(2),
         0b10 => Ok(4),
         0b11 => {
-            let extra = (data[offset] >> 2) as usize + 4;
+            // SECURITY: `>> 2` of a u8 yields 0..=63, fits in usize on every target.
+            let extra = usize::from(data[offset] >> 2) + 4;
             Ok(1 + extra)
         }
         _ => unreachable!(),

@@ -20,7 +20,7 @@ const SENDER_COLORS: &[Color] = &[
 
 fn sender_color(ss58: &str) -> Color {
     let hash: u8 = ss58.bytes().fold(0u8, |acc, b| acc.wrapping_add(b));
-    SENDER_COLORS[hash as usize % SENDER_COLORS.len()]
+    SENDER_COLORS[usize::from(hash) % SENDER_COLORS.len()]
 }
 
 const BASE58_CHARS: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -166,7 +166,7 @@ fn wrap_text(text: &str, max_width: usize, indent: usize) -> Vec<String> {
         };
         first = false;
 
-        if remaining.len() <= width + indent * (!result.is_empty() as usize) {
+        if remaining.len() <= width + indent * usize::from(!result.is_empty()) {
             if result.is_empty() {
                 result.push(remaining);
             } else {
@@ -279,7 +279,7 @@ fn render_standalone(
     area: Rect,
 ) {
     let mut lines: Vec<Line> = vec![
-        header_line(title, "", area.width as usize),
+        header_line(title, "", usize::from(area.width)),
         separator(area.width),
     ];
 
@@ -391,7 +391,7 @@ fn render_thread(frame: &mut Frame, app: &App, thread_idx: usize, area: Rect) {
         None => return,
     };
 
-    let w = area.width as usize;
+    let w = usize::from(area.width);
     let th_block = thread.thread_ref.block;
     let th_index = thread.thread_ref.index;
     let id_str = if thread.thread_ref.is_zero() {
@@ -427,7 +427,7 @@ fn render_thread(frame: &mut Frame, app: &App, thread_idx: usize, area: Rect) {
         &mut lines,
         &thread.messages,
         app,
-        area.width as usize,
+        usize::from(area.width),
         &mut pending_clicks,
     );
     render_pending(&mut lines, app, View::Thread(thread_idx));
@@ -441,7 +441,7 @@ fn render_channel(frame: &mut Frame, app: &App, chan_idx: usize, area: Rect) {
         None => return,
     };
 
-    let w = area.width as usize;
+    let w = usize::from(area.width);
     let ref_block = channel.channel_ref.block;
     let ref_index = channel.channel_ref.index;
     let id_str = format!("{}:{}", ref_block, ref_index);
@@ -463,7 +463,7 @@ fn render_channel(frame: &mut Frame, app: &App, chan_idx: usize, area: Rect) {
     ])];
 
     if !channel.description.is_empty() {
-        let desc_max = (area.width as usize).saturating_sub(3);
+        let desc_max = (usize::from(area.width)).saturating_sub(3);
         lines.push(Line::from(vec![Span::styled(
             format!(" {} ", truncate(&channel.description, desc_max)),
             Style::default().fg(Color::DarkGray),
@@ -477,7 +477,7 @@ fn render_channel(frame: &mut Frame, app: &App, chan_idx: usize, area: Rect) {
         &mut lines,
         &channel.messages,
         app,
-        area.width as usize,
+        usize::from(area.width),
         &mut pending_clicks,
     );
     render_pending(&mut lines, app, View::Channel(chan_idx));
@@ -491,7 +491,7 @@ fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
         None => return,
     };
 
-    let w = area.width as usize;
+    let w = usize::from(area.width);
     let ref_block = group.group_ref.block;
     let ref_index = group.group_ref.index;
     let id_str = if group.group_ref.is_zero() {
@@ -566,7 +566,7 @@ fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
         &mut lines,
         &group.messages,
         app,
-        area.width as usize,
+        usize::from(area.width),
         &mut pending_clicks,
     );
     render_pending(&mut lines, app, View::Group(group_idx));
@@ -580,7 +580,7 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
         header_line(
             "Channels",
             &format!("{count} available"),
-            area.width as usize,
+            usize::from(area.width),
         ),
         separator(area.width),
     ];
@@ -625,7 +625,7 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
         ]));
 
         if !info.description.is_empty() {
-            let desc_max = (area.width as usize).saturating_sub(5);
+            let desc_max = (usize::from(area.width)).saturating_sub(5);
             lines.push(Line::from(vec![
                 Span::raw("    "),
                 Span::styled(
@@ -642,7 +642,7 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
 fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
     let contacts = app.filtered_contacts();
     let total = app.session.known_contacts().len();
-    let w = area.width as usize;
+    let w = usize::from(area.width);
 
     let mut lines: Vec<Line> = vec![
         header_line("Contacts", &format!("{total} known"), w),
@@ -686,7 +686,7 @@ fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
 fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
     let senders = &app.picker_senders;
     let total = senders.len();
-    let w = area.width as usize;
+    let w = usize::from(area.width);
 
     let mut lines: Vec<Line> = vec![
         header_line("Copy SS58", &format!("{total} senders"), w),
@@ -735,7 +735,7 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
     let contacts = app.filtered_contacts();
     let total = app.session.known_contacts().len();
     let selected_count = app.pending_group_members.len();
-    let w = area.width as usize;
+    let w = usize::from(area.width);
 
     let mut lines: Vec<Line> = vec![
         header_line(
@@ -910,7 +910,7 @@ fn render_messages(
                 pending_clicks.push((
                     lines.len(),
                     7,
-                    7 + name.len() as u16,
+                    7 + u16::try_from(name.len()).unwrap_or(u16::MAX),
                     msg.sender_ss58.clone(),
                 ));
             }
@@ -1015,7 +1015,7 @@ fn render_messages(
                 pending_clicks.push((
                     lines.len(),
                     7,
-                    7 + name.len() as u16,
+                    7 + u16::try_from(name.len()).unwrap_or(u16::MAX),
                     msg.sender_ss58.clone(),
                 ));
             }
@@ -1068,7 +1068,7 @@ fn header_line(title: &str, right: &str, width: usize) -> Line<'static> {
 
 fn separator(width: u16) -> Line<'static> {
     Line::styled(
-        "\u{2500}".repeat(width as usize),
+        "\u{2500}".repeat(usize::from(width)),
         Style::default().fg(Color::DarkGray),
     )
 }
@@ -1078,7 +1078,7 @@ fn dim(text: &str) -> Line<'static> {
 }
 
 fn render_scrolled(frame: &mut ratatui::Frame, lines: Vec<Line<'_>>, scroll: usize, area: Rect) {
-    let visible = area.height as usize;
+    let visible = usize::from(area.height);
     let bottom = lines.len().saturating_sub(visible);
     let start = bottom.saturating_sub(scroll);
     let end = (start + visible).min(lines.len());
@@ -1092,14 +1092,14 @@ fn record_sender_clicks(
     scroll: usize,
     area: Rect,
 ) {
-    let visible = area.height as usize;
+    let visible = usize::from(area.height);
     let bottom = lines_len.saturating_sub(visible);
     let start = bottom.saturating_sub(scroll);
     let end = (start + visible).min(lines_len);
     let mut regions = app.sender_click_regions.borrow_mut();
     for (line_idx, c0, c1, ss58) in pending {
         if *line_idx >= start && *line_idx < end {
-            let row = area.y + (*line_idx - start) as u16;
+            let row = area.y + u16::try_from(*line_idx - start).unwrap_or(u16::MAX);
             regions.push((row, area.x + *c0, area.x + *c1, ss58.clone()));
         }
     }

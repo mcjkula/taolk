@@ -56,7 +56,7 @@ fn read_extrinsic_emits_event_for_samp_remark() {
 
     // Alice sends a public message to Bob
     let remark = samp::encode_public(&bob_pubkey.0, b"hello bob");
-    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_sk, 0, &ci());
+    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_sk, 0, &ci()).unwrap();
     let hex = ext_to_hex(&ext);
 
     // Bob reads the extrinsic
@@ -99,7 +99,7 @@ fn read_extrinsic_ignores_non_samp_remark() {
 
     // Build an extrinsic with a non-SAMP remark
     let remark = b"not a samp message";
-    let ext = extrinsic::build_remark_extrinsic(remark, &alice_sk, 0, &ci());
+    let ext = extrinsic::build_remark_extrinsic(remark, &alice_sk, 0, &ci()).unwrap();
     let hex = ext_to_hex(&ext);
 
     let (tx, rx) = mpsc::channel();
@@ -194,7 +194,7 @@ fn read_extrinsic_decrypts_for_recipient() {
         &encrypted_content,
     );
 
-    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_sk, 0, &ci());
+    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_sk, 0, &ci()).unwrap();
     let hex = ext_to_hex(&ext);
 
     // Bob reads
@@ -254,7 +254,7 @@ fn read_extrinsic_skips_message_for_wrong_recipient() {
         &encrypted_content,
     );
 
-    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_sk, 0, &ci());
+    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_sk, 0, &ci()).unwrap();
     let hex = ext_to_hex(&ext);
 
     // Charlie tries to read (should not match -- view tag mismatch filters it)

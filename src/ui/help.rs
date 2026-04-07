@@ -69,7 +69,10 @@ pub const KEYBINDS: &[(&str, &[(&str, &str)])] = &[
 
 pub fn render(frame: &mut Frame, area: Rect) {
     let content = build_lines();
-    let want_h = (content.len() as u16 + 4).min(area.height);
+    let want_h = u16::try_from(content.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(4)
+        .min(area.height);
     let want_w = 64.min(area.width);
     let rect = super::modal::centered_rect(area, want_w, want_h);
 

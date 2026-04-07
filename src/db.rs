@@ -219,7 +219,8 @@ impl Db {
         let encrypted = self.encrypt_draft(body, kind, block, index);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
+            .ok()
+            .and_then(|d| i64::try_from(d.as_secs()).ok())
             .unwrap_or(0);
         let _ = self.conn.execute(
             "INSERT INTO drafts (kind, ref_block, ref_index, body, updated_at)
@@ -277,7 +278,7 @@ impl Db {
         let _ = self.conn.execute(
             "INSERT OR IGNORE INTO inbox (peer_ss58, timestamp, body, content_type, is_mine, block_number, ext_index)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![msg.peer_ss58, msg.timestamp.timestamp(), encrypted, msg.content_type, msg.is_mine as i32, msg.block_number, msg.ext_index],
+            params![msg.peer_ss58, msg.timestamp.timestamp(), encrypted, msg.content_type, i32::from(msg.is_mine), msg.block_number, msg.ext_index],
         );
     }
 
@@ -296,7 +297,7 @@ impl Db {
               reply_to_block, reply_to_index, continues_block, continues_index, block_number, ext_index)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![thread_ref.block, thread_ref.index, peer_ss58, msg.sender_ss58, msg.timestamp.timestamp(),
-                    encrypted, msg.is_mine as i32, msg.reply_to.block, msg.reply_to.index,
+                    encrypted, i32::from(msg.is_mine), msg.reply_to.block, msg.reply_to.index,
                     msg.continues.block, msg.continues.index, block_number, ext_index],
         );
     }
@@ -603,7 +604,7 @@ impl Db {
               reply_to_block, reply_to_index, continues_block, continues_index, block_number, ext_index)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![group_ref.block, group_ref.index, msg.sender_ss58, msg.timestamp.timestamp(),
-                    encrypted, msg.is_mine as i32, msg.reply_to.block, msg.reply_to.index,
+                    encrypted, i32::from(msg.is_mine), msg.reply_to.block, msg.reply_to.index,
                     msg.continues.block, msg.continues.index, block_number, ext_index],
         );
     }
@@ -683,7 +684,7 @@ impl Db {
               reply_to_block, reply_to_index, continues_block, continues_index, block_number, ext_index)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![channel_ref.block, channel_ref.index, msg.sender_ss58, msg.timestamp.timestamp(),
-                    encrypted, msg.is_mine as i32, msg.reply_to.block, msg.reply_to.index,
+                    encrypted, i32::from(msg.is_mine), msg.reply_to.block, msg.reply_to.index,
                     msg.continues.block, msg.continues.index, block_number, ext_index],
         );
     }

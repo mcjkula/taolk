@@ -140,13 +140,13 @@ impl App {
 
     pub fn spinner_1(&self) -> char {
         const FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-        FRAMES[self.frame as usize % FRAMES.len()]
+        FRAMES[usize::try_from(self.frame).unwrap_or(0) % FRAMES.len()]
     }
 
     pub fn spinner_5(&self) -> &'static str {
         const POS: &[&str] = &["⠿⠒⠒⠒⠒", "⠒⠿⠒⠒⠒", "⠒⠒⠿⠒⠒", "⠒⠒⠒⠿⠒", "⠒⠒⠒⠒⠿"];
         const EASE: &[usize] = &[0, 0, 1, 2, 3, 4, 4, 3, 2, 1];
-        POS[EASE[self.frame as usize % EASE.len()]]
+        POS[EASE[usize::try_from(self.frame).unwrap_or(0) % EASE.len()]]
     }
 
     pub fn spinner_16(&self) -> &'static str {
@@ -172,7 +172,7 @@ impl App {
             0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 15, 15, 14, 13, 12, 11, 10,
             9, 8, 7, 6, 5, 4, 3, 2, 1,
         ];
-        POS[EASE[self.frame as usize % EASE.len()]]
+        POS[EASE[usize::try_from(self.frame).unwrap_or(0) % EASE.len()]]
     }
 
     pub fn is_busy(&self) -> bool {

@@ -72,7 +72,7 @@ fn visible_input(
     };
 
     let visible = &text[start..end];
-    let cursor_x = (cursor - start) as u16;
+    let cursor_x = u16::try_from(cursor - start).unwrap_or(u16::MAX);
 
     let mut spans: Vec<Span<'static>> = Vec::new();
 
@@ -157,10 +157,10 @@ fn render_single_input(
             Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
         ]);
         frame.render_widget(
-            Paragraph::new(vec![sep, key_hints(area.width as usize), input_line]),
+            Paragraph::new(vec![sep, key_hints(usize::from(area.width)), input_line]),
             area,
         );
-        let cursor_x = area.x + prompt_width as u16;
+        let cursor_x = area.x + u16::try_from(prompt_width).unwrap_or(u16::MAX);
         let cursor_y = area.y + 2;
         if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
             frame.set_cursor_position((cursor_x, cursor_y));
@@ -168,7 +168,7 @@ fn render_single_input(
         return;
     }
 
-    let avail = (area.width as usize).saturating_sub(prompt_width + 1);
+    let avail = (usize::from(area.width)).saturating_sub(prompt_width + 1);
     let counter_width = limit.map_or(0, |l| format!(" {}/{}", app.input.len(), l).len());
     let text_width = avail.saturating_sub(counter_width);
     let (text_spans, cursor_off) = visible_input(&app.input, app.cursor_pos, text_width, limit);
@@ -177,11 +177,11 @@ fn render_single_input(
     spans.extend(text_spans);
     let input_line = Line::from(spans);
     frame.render_widget(
-        Paragraph::new(vec![sep, key_hints(area.width as usize), input_line]),
+        Paragraph::new(vec![sep, key_hints(usize::from(area.width)), input_line]),
         area,
     );
 
-    let cursor_x = area.x + prompt_width as u16 + cursor_off;
+    let cursor_x = area.x + u16::try_from(prompt_width).unwrap_or(u16::MAX) + cursor_off;
     let cursor_y = area.y + 2;
     if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
         frame.set_cursor_position((cursor_x, cursor_y));
@@ -217,7 +217,7 @@ fn cursor_line_col(text: &str, byte_pos: usize) -> (usize, usize) {
 fn render_compose_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) {
     let prompt = "> ";
     let prompt_width: usize = 3; // " > "
-    let w = area.width as usize;
+    let w = usize::from(area.width);
     let hints = compose_hints(w, app.input.contains('\n'));
 
     if app.input.is_empty() {
@@ -242,7 +242,7 @@ fn render_compose_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect)
             Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
         ]);
         frame.render_widget(Paragraph::new(vec![sep, hints, input_line]), area);
-        let cursor_x = area.x + prompt_width as u16;
+        let cursor_x = area.x + u16::try_from(prompt_width).unwrap_or(u16::MAX);
         let cursor_y = area.y + 2;
         if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
             frame.set_cursor_position((cursor_x, cursor_y));
@@ -255,7 +255,7 @@ fn render_compose_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect)
     let total_lines = lines_vec.len();
     let (cursor_line, cursor_col) = cursor_line_col(&app.input, app.cursor_pos);
 
-    let max_visible = (area.height as usize).saturating_sub(2);
+    let max_visible = (usize::from(area.height)).saturating_sub(2);
     let max_visible = max_visible.max(1);
 
     let scroll_start = if cursor_line >= max_visible {
@@ -301,8 +301,8 @@ fn render_compose_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect)
         avail,
         None,
     );
-    let cursor_x = area.x + prompt_width as u16 + cursor_off;
-    let cursor_y = area.y + 2 + visible_cursor_row as u16;
+    let cursor_x = area.x + u16::try_from(prompt_width).unwrap_or(u16::MAX) + cursor_off;
+    let cursor_y = area.y + 2 + u16::try_from(visible_cursor_row).unwrap_or(u16::MAX);
     if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
         frame.set_cursor_position((cursor_x, cursor_y));
     }
@@ -310,7 +310,7 @@ fn render_compose_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect)
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let sep = Line::styled(
-        "\u{2500}".repeat(area.width as usize),
+        "\u{2500}".repeat(usize::from(area.width)),
         Style::default().fg(Color::DarkGray),
     );
 
@@ -351,7 +351,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                     return;
                 };
                 let prefix_len = 31; // " [p] public  [e] encrypted  to "
-                let ss58_max = (area.width as usize).saturating_sub(prefix_len);
+                let ss58_max = (usize::from(area.width)).saturating_sub(prefix_len);
                 let selector = Line::from(vec![
                     Span::raw(" "),
                     Span::styled("[p] ", Style::default().fg(Color::Cyan)),
@@ -365,7 +365,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 ]);
                 let type_hints = render_hints(
                     &[("p", "public"), ("e", "encrypted"), ("Esc", "cancel")],
-                    area.width as usize,
+                    usize::from(area.width),
                 );
                 frame.render_widget(Paragraph::new(vec![sep, type_hints, selector]), area);
             }
@@ -390,7 +390,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 } else {
                     format!("  #{name} -- {desc}")
                 };
-                let max = area.width as usize - 2;
+                let max = usize::from(area.width) - 2;
                 let s = if text.len() > max {
                     format!("{}\u{2026}", &text[..max.saturating_sub(1)])
                 } else {
@@ -399,7 +399,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 (s, false)
             } else if let Some(text) = &app.pending_text {
                 let first = text.lines().next().unwrap_or("");
-                let max = (area.width as usize).saturating_sub(16); // room for byte count
+                let max = (usize::from(area.width)).saturating_sub(16); // room for byte count
                 let display = if first.len() > max {
                     format!("\"{}\u{2026}\"", &first[..max.saturating_sub(3)])
                 } else {
@@ -439,7 +439,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         Mode::Normal => {
             let input_line = if let Some(draft) = app.current_draft() {
                 let suffix = "  [i to continue]";
-                let avail = (area.width as usize).saturating_sub(4 + suffix.len()); // " > " + suffix
+                let avail = (usize::from(area.width)).saturating_sub(4 + suffix.len()); // " > " + suffix
                 let draft_str = draft.to_string();
                 let visible = fit(&draft_str, avail);
                 Line::from(vec![
@@ -449,7 +449,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                     Span::styled(suffix, Style::default().fg(Color::Cyan)),
                 ])
             } else {
-                let w = area.width as usize;
+                let w = usize::from(area.width);
                 match app.view {
                     crate::app::View::Thread(_) | crate::app::View::Channel(_) => render_hints(
                         &[
@@ -480,7 +480,9 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                                 Paragraph::new(vec![sep, id_hints, input_line]),
                                 area,
                             );
-                            let cursor_x = area.x + prompt.len() as u16 + cursor_off;
+                            let cursor_x = area.x
+                                + u16::try_from(prompt.len()).unwrap_or(u16::MAX)
+                                + cursor_off;
                             let cursor_y = area.y + 2;
                             if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
                                 frame.set_cursor_position((cursor_x, cursor_y));
@@ -518,19 +520,19 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                     ("Enter", "copy"),
                     ("Esc", "cancel"),
                 ],
-                area.width as usize,
+                usize::from(area.width),
             );
             frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), hints]), area);
         }
         Mode::Help => {
-            let hints = render_hints(&[("any key", "close")], area.width as usize);
+            let hints = render_hints(&[("any key", "close")], usize::from(area.width));
             frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), hints]), area);
         }
     }
 }
 
 fn render_picker_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) {
-    let w = area.width as usize;
+    let w = usize::from(area.width);
 
     if app.input.is_empty() {
         let hints = render_hints(
@@ -567,7 +569,7 @@ fn render_picker_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
 }
 
 fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) {
-    let w = area.width as usize;
+    let w = usize::from(area.width);
     let selected_count = app.pending_group_members.len();
 
     if app.input.is_empty() {
@@ -597,7 +599,8 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area:
             ),
         ]);
         frame.render_widget(Paragraph::new(vec![sep, hints, prompt]), area);
-        let cursor_x = area.x + (format!(" Members ({selected_count}): ").len() as u16);
+        let cursor_x = area.x
+            + u16::try_from(format!(" Members ({selected_count}): ").len()).unwrap_or(u16::MAX);
         let cursor_y = area.y + 2;
         if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
             frame.set_cursor_position((cursor_x, cursor_y));
@@ -614,7 +617,7 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area:
         spans.extend(text_spans);
         let input_line = Line::from(spans);
         frame.render_widget(Paragraph::new(vec![sep, hints, input_line]), area);
-        let cursor_x = area.x + (prompt_str.len() as u16) + cursor_off;
+        let cursor_x = area.x + u16::try_from(prompt_str.len()).unwrap_or(u16::MAX) + cursor_off;
         let cursor_y = area.y + 2;
         if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
             frame.set_cursor_position((cursor_x, cursor_y));

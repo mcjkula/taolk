@@ -32,8 +32,8 @@ fn build_remark_stable_length() {
     let ci = test_chain_info();
     let remark = b"hello";
 
-    let a = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci);
-    let b = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci);
+    let a = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci).unwrap();
+    let b = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci).unwrap();
 
     assert_eq!(a.len(), b.len());
 }
@@ -48,8 +48,8 @@ fn build_remark_different_nonces() {
     let ci = test_chain_info();
     let remark = b"hello";
 
-    let a = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci);
-    let b = extrinsic::build_remark_extrinsic(remark, &sk, 1, &ci);
+    let a = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci).unwrap();
+    let b = extrinsic::build_remark_extrinsic(remark, &sk, 1, &ci).unwrap();
 
     assert_ne!(a, b);
 }
@@ -64,7 +64,7 @@ fn build_remark_contains_payload() {
     let ci = test_chain_info();
     let remark = b"unique-payload-marker";
 
-    let ext = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci);
+    let ext = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci).unwrap();
 
     let found = ext.windows(remark.len()).any(|w| w == remark);
     assert!(
@@ -83,7 +83,7 @@ fn build_remark_starts_with_length_prefix() {
     let ci = test_chain_info();
     let remark = b"test";
 
-    let ext = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci);
+    let ext = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci).unwrap();
 
     // Decode compact length from first byte(s)
     let (prefix_len, encoded_len) = decode_compact(&ext);
@@ -106,7 +106,7 @@ fn build_remark_system_pallet() {
     let ci = test_chain_info();
     let remark = b"pallet-test";
 
-    let ext = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci);
+    let ext = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci).unwrap();
 
     // Layout after compact length prefix:
     // 0x84 (signed flag) | 0x00 (addr type) | account_id(32) | 0x01 (sig type) | sig(64)
@@ -145,7 +145,7 @@ fn build_remark_immortal_era() {
     let ci = test_chain_info();
     let remark = b"era-test";
 
-    let ext = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci);
+    let ext = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci).unwrap();
 
     let (prefix_len, _) = decode_compact(&ext);
     let payload = &ext[prefix_len..];

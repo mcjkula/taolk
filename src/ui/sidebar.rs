@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem};
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    let max_name = area.width.saturating_sub(8) as usize;
+    let max_name = usize::from(area.width.saturating_sub(8));
     let mut items: Vec<ListItem> = Vec::new();
 
     let inbox_selected = app.view == View::Inbox;

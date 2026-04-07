@@ -94,15 +94,18 @@ impl ErrorTable {
     fn maybe_translate_module(&self, s: &str) -> Option<String> {
         let start = s.find("Module")?;
         let tail = &s[start..];
-        let idx = parse_after(tail, "index:")?;
-        let err = parse_first_byte_after(tail, "error:")?;
-        self.humanize(idx as u8, err as u8)
+        let idx = u8::try_from(parse_after(tail, "index:")?).ok()?;
+        let err = u8::try_from(parse_first_byte_after(tail, "error:")?).ok()?;
+        self.humanize(idx, err)
     }
 
     fn build(registry: &[TypeShape], pallets: &[PalletErrorRef]) -> Self {
         let mut by_idx = HashMap::new();
         for p in pallets {
-            if let Some(TypeShape::Variant(variants)) = registry.get(p.error_ty as usize) {
+            if let Some(TypeShape::Variant(variants)) = usize::try_from(p.error_ty)
+                .ok()
+                .and_then(|i| registry.get(i))
+            {
                 for (variant_idx, variant_name, doc) in variants {
                     by_idx.insert(
                         (p.pallet_idx, *variant_idx),
@@ -265,9 +268,8 @@ impl TypeShape {
 }
 
 fn type_at(registry: &[TypeShape], id: u32) -> Result<&TypeShape, MetadataError> {
-    registry
-        .get(id as usize)
-        .ok_or(MetadataError::TypeIdMissing(id))
+    let idx = usize::try_from(id).map_err(|_| MetadataError::TypeIdMissing(id))?;
+    registry.get(idx).ok_or(MetadataError::TypeIdMissing(id))
 }
 
 fn byte_size(registry: &[TypeShape], id: u32) -> Result<usize, MetadataError> {
@@ -276,7 +278,12 @@ fn byte_size(registry: &[TypeShape], id: u32) -> Result<usize, MetadataError> {
         TypeShape::Composite(fields) => fields
             .iter()
             .try_fold(0, |sum, (_, t)| Ok(sum + byte_size(registry, *t)?)),
-        TypeShape::Array { len, inner } => Ok((*len as usize) * byte_size(registry, *inner)?),
+        TypeShape::Array { len, inner } => {
+            // SECURITY: SCALE Array len comes from V14 metadata; bounded by Substrate runtime.
+            let len_usize =
+                usize::try_from(*len).map_err(|_| MetadataError::TypeIdMissing(*len))?;
+            Ok(len_usize * byte_size(registry, *inner)?)
+        }
         TypeShape::Tuple(ids) => ids
             .iter()
             .try_fold(0, |sum, t| Ok(sum + byte_size(registry, *t)?)),
@@ -286,7 +293,7 @@ fn byte_size(registry: &[TypeShape], id: u32) -> Result<usize, MetadataError> {
 
 fn read_registry<I: Input>(input: &mut I) -> Result<Vec<TypeShape>, MetadataError> {
     let n = compact(input)?;
-    let mut registry = Vec::with_capacity(n as usize);
+    let mut registry = Vec::with_capacity(usize::try_from(n).unwrap_or(0));
     for expected in 0..n {
         let id = compact(input)?;
         if id != expected {
@@ -309,7 +316,7 @@ fn read_type_def<I: Input>(input: &mut I) -> Result<TypeShape, MetadataError> {
             // We capture (index, name, first_doc_line) for the pallet error path;
             // field shapes are decoded-and-dropped to keep stream sync.
             let n = compact(input)?;
-            let mut variants = Vec::with_capacity(n as usize);
+            let mut variants = Vec::with_capacity(usize::try_from(n).unwrap_or(0));
             for _ in 0..n {
                 let name = String::decode(input).map_err(scale)?;
                 let _ = read_fields(input)?;
@@ -336,7 +343,7 @@ fn read_type_def<I: Input>(input: &mut I) -> Result<TypeShape, MetadataError> {
         4 => {
             // Tuple { fields: Vec<type_id> }
             let n = compact(input)?;
-            let mut ids = Vec::with_capacity(n as usize);
+            let mut ids = Vec::with_capacity(usize::try_from(n).unwrap_or(0));
             for _ in 0..n {
                 ids.push(compact(input)?);
             }
@@ -360,7 +367,7 @@ fn read_type_def<I: Input>(input: &mut I) -> Result<TypeShape, MetadataError> {
 
 fn read_fields<I: Input>(input: &mut I) -> Result<Vec<(String, u32)>, MetadataError> {
     let n = compact(input)?;
-    let mut fields = Vec::with_capacity(n as usize);
+    let mut fields = Vec::with_capacity(usize::try_from(n).unwrap_or(0));
     for _ in 0..n {
         // Field { name: Option<String>, ty: Compact<u32>, type_name: Option<String>, docs }
         let name = <Option<String>>::decode(input)

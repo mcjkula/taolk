@@ -168,7 +168,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     };
     let balance_span = Span::styled(&balance_str, Style::default().fg(balance_color));
 
-    let block_str = format!(" #{} ", format_number(app.session.block_number));
+    let block_str = format!(" #{} ", format_number(u128::from(app.session.block_number)));
     let block_fresh = app.frame.wrapping_sub(app.block_changed_at) < highlight_frames;
     let block_color = if block_fresh {
         Color::White
@@ -179,14 +179,20 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
     let chain = chain_pill(&app.session.chain_info.chain_name);
     let reconnect = reconnect_pill(app.connection);
-    let chain_width = chain.width() as u16;
-    let reconnect_width = reconnect.as_ref().map_or(0, |s| s.width() as u16);
+    // SECURITY: span widths are bounded by terminal width; saturate to u16::MAX.
+    let chain_width = u16::try_from(chain.width()).unwrap_or(u16::MAX);
+    let reconnect_width = reconnect
+        .as_ref()
+        .map_or(0, |s| u16::try_from(s.width()).unwrap_or(u16::MAX));
 
-    let right_width = balance_str.len() as u16 + block_str.len() as u16 + reconnect_width;
-    let mode_width = mode.width() as u16;
-    let max_status = area
-        .width
-        .saturating_sub(chain_width + mode_width + right_width + 1) as usize;
+    let right_width = u16::try_from(balance_str.len()).unwrap_or(u16::MAX)
+        + u16::try_from(block_str.len()).unwrap_or(u16::MAX)
+        + reconnect_width;
+    let mode_width = u16::try_from(mode.width()).unwrap_or(u16::MAX);
+    let max_status = usize::from(
+        area.width
+            .saturating_sub(chain_width + mode_width + right_width + 1),
+    );
     let status_span = if status_span.width() > max_status {
         let content = status_span.content.to_string();
         let truncated = if max_status > 2 {
@@ -198,9 +204,9 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         status_span
     };
-    let used = chain_width + mode_width + status_span.width() as u16;
+    let used = chain_width + mode_width + u16::try_from(status_span.width()).unwrap_or(u16::MAX);
     let padding = area.width.saturating_sub(used + right_width);
-    let pad_span = Span::raw(" ".repeat(padding as usize));
+    let pad_span = Span::raw(" ".repeat(usize::from(padding)));
 
     let mut spans = vec![chain, mode, status_span, pad_span];
     if let Some(rc) = reconnect {

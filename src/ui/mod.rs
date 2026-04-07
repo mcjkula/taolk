@@ -60,7 +60,8 @@ fn render_main_panel(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         1
     };
-    let input_height = (text_lines + 2) as u16; // +2 for separator + hints
+    // SECURITY: text_lines clamped to [1, 4] above; +2 fits in u16.
+    let input_height = u16::try_from(text_lines + 2).unwrap_or(6);
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
