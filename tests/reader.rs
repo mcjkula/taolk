@@ -1,34 +1,16 @@
+mod common;
+
+use common::{signing_from_seed as signing, test_chain_info as ci};
 use std::sync::mpsc;
 use taolk::event::Event;
-use taolk::extrinsic::{self, ChainInfo};
-use taolk::metadata::AccountInfoLayout;
+use taolk::extrinsic;
 use taolk::reader::{self, ReadContext};
-use taolk::secret::{Seed, SigningKey};
 use taolk::types::Pubkey;
-
-fn signing(seed: &[u8; 32]) -> SigningKey {
-    Seed::from_bytes(*seed).derive_signing_key()
-}
-
-fn ci() -> ChainInfo {
-    ChainInfo {
-        genesis_hash: [0; 32],
-        spec_version: 1,
-        tx_version: 1,
-        account_info_layout: AccountInfoLayout {
-            free_offset: 16,
-            free_width: 8,
-        },
-        errors: Default::default(),
-        chain_name: "test".into(),
-    }
-}
 
 fn ext_to_hex(ext_bytes: &[u8]) -> String {
     format!("0x{}", hex::encode(ext_bytes))
 }
 
-/// Build a ReadContext targeting the given seed/pubkey, returning the context and receiver.
 fn make_ctx<'a>(
     seed: &'a [u8; 32],
     pubkey: &'a Pubkey,

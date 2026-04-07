@@ -1,11 +1,10 @@
+mod common;
+
 use chrono::Utc;
+use common::test_db;
 use taolk::conversation::{InboxMessage, ThreadMessage};
 use taolk::db::Db;
 use taolk::types::{BlockRef, Pubkey};
-
-fn test_db() -> Db {
-    Db::open_in_memory(&[0xAA; 32]).unwrap()
-}
 
 fn make_thread_msg(body: &str, is_mine: bool, block_number: u32, ext_index: u16) -> ThreadMessage {
     ThreadMessage {

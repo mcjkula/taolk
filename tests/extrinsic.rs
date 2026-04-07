@@ -1,23 +1,11 @@
-use taolk::extrinsic::{self, ChainInfo};
-use taolk::metadata::AccountInfoLayout;
-use taolk::secret::{Seed, SigningKey};
+mod common;
+
+use common::{ALICE_SEED, signing_from_seed, test_chain_info};
+use taolk::extrinsic;
+use taolk::secret::SigningKey;
 
 fn test_signing() -> SigningKey {
-    Seed::from_bytes([0xAA; 32]).derive_signing_key()
-}
-
-fn test_chain_info() -> ChainInfo {
-    ChainInfo {
-        genesis_hash: [0; 32],
-        spec_version: 1,
-        tx_version: 1,
-        account_info_layout: AccountInfoLayout {
-            free_offset: 16,
-            free_width: 8,
-        },
-        errors: Default::default(),
-        chain_name: "test".into(),
-    }
+    signing_from_seed(&ALICE_SEED)
 }
 
 // ---------------------------------------------------------------------------

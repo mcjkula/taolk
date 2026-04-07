@@ -1,45 +1,7 @@
-use taolk::db::Db;
-use taolk::extrinsic::ChainInfo;
-use taolk::metadata::AccountInfoLayout;
-use taolk::secret::{Seed, SigningKey};
-use taolk::session::Session;
-use taolk::types::{BlockRef, Pubkey};
-use zeroize::Zeroizing;
+mod common;
 
-const SEED: [u8; 32] = [0xCC; 32];
-
-fn signing_from_seed(seed: &[u8; 32]) -> SigningKey {
-    Seed::from_bytes(*seed).derive_signing_key()
-}
-
-fn ci() -> ChainInfo {
-    ChainInfo {
-        genesis_hash: [0; 32],
-        spec_version: 1,
-        tx_version: 1,
-        account_info_layout: AccountInfoLayout {
-            free_offset: 16,
-            free_width: 8,
-        },
-        errors: Default::default(),
-        chain_name: "test".into(),
-    }
-}
-
-fn make_session() -> Session {
-    let db = Db::open_in_memory(&SEED).unwrap();
-    Session::new(
-        signing_from_seed(&SEED),
-        Zeroizing::new(SEED),
-        "ws://test".into(),
-        ci(),
-        db,
-    )
-}
-
-fn other_pubkey() -> Pubkey {
-    signing_from_seed(&[0xDD; 32]).public_key()
-}
+use common::{charlie_session as make_session, dave_pubkey as other_pubkey};
+use taolk::types::BlockRef;
 
 // ---------------------------------------------------------------------------
 // known_contacts after creating a thread

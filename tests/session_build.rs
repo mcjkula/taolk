@@ -1,49 +1,16 @@
-use taolk::db::Db;
-use taolk::extrinsic::ChainInfo;
-use taolk::metadata::AccountInfoLayout;
-use taolk::secret::{Seed, SigningKey};
-use taolk::session::Session;
+mod common;
+
+use common::{ALICE_SEED, alice_session};
 use taolk::types::{BlockRef, Pubkey};
-use zeroize::Zeroizing;
 
-const ALICE_SEED: [u8; 32] = [0xAA; 32];
-const BOB_SEED: [u8; 32] = [0xBB; 32];
-
-fn signing_from_seed(seed: &[u8; 32]) -> SigningKey {
-    Seed::from_bytes(*seed).derive_signing_key()
-}
-
-fn ci() -> ChainInfo {
-    ChainInfo {
-        genesis_hash: [0; 32],
-        spec_version: 1,
-        tx_version: 1,
-        account_info_layout: AccountInfoLayout {
-            free_offset: 16,
-            free_width: 8,
-        },
-        errors: Default::default(),
-        chain_name: "test".into(),
-    }
-}
-
-fn alice_session() -> Session {
-    let db = Db::open_in_memory(&ALICE_SEED).unwrap();
-    Session::new(
-        signing_from_seed(&ALICE_SEED),
-        Zeroizing::new(ALICE_SEED),
-        "ws://test".into(),
-        ci(),
-        db,
-    )
-}
+const BOB_SAMP_SEED: [u8; 32] = [0xBB; 32];
 
 fn bob_scalar() -> curve25519_dalek::scalar::Scalar {
-    samp::sr25519_signing_scalar(&BOB_SEED)
+    samp::sr25519_signing_scalar(&BOB_SAMP_SEED)
 }
 
 fn bob_pubkey() -> Pubkey {
-    Pubkey(samp::public_from_seed(&BOB_SEED))
+    Pubkey(samp::public_from_seed(&BOB_SAMP_SEED))
 }
 
 // ---------------------------------------------------------------------------
@@ -156,7 +123,7 @@ fn build_channel_message_roundtrip() {
 fn build_group_create_decryptable() {
     let session = alice_session();
     let alice_pk = samp::public_from_seed(&ALICE_SEED);
-    let bob_pk = samp::public_from_seed(&BOB_SEED);
+    let bob_pk = samp::public_from_seed(&BOB_SAMP_SEED);
     let members = vec![Pubkey(alice_pk), Pubkey(bob_pk)];
 
     let remark = session.build_group_create(&members, "group hello").unwrap();

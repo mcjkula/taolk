@@ -1,58 +1,17 @@
-use chrono::Utc;
+mod common;
+
+use common::{
+    BOB_SEED, bob_pubkey as bob_pub, bob_session, br, now, signing_from_seed, test_chain_info as ci,
+};
 use taolk::conversation::NewMessage;
 use taolk::db::Db;
-use taolk::extrinsic::ChainInfo;
-use taolk::metadata::AccountInfoLayout;
-use taolk::secret::{Seed, SigningKey};
 use taolk::session::Session;
-use taolk::types::{BlockRef, Pubkey};
+use taolk::types::Pubkey;
 use taolk::util;
 use zeroize::Zeroizing;
 
 const ALICE_PUB: Pubkey = Pubkey([1u8; 32]);
 const CHARLIE_PUB: Pubkey = Pubkey([3u8; 32]);
-const BOB_SEED: [u8; 32] = [2u8; 32];
-
-fn signing_from_seed(seed: &[u8; 32]) -> SigningKey {
-    Seed::from_bytes(*seed).derive_signing_key()
-}
-
-fn bob_pub() -> Pubkey {
-    signing_from_seed(&BOB_SEED).public_key()
-}
-
-fn ci() -> ChainInfo {
-    ChainInfo {
-        genesis_hash: [0; 32],
-        spec_version: 1,
-        tx_version: 1,
-        account_info_layout: AccountInfoLayout {
-            free_offset: 16,
-            free_width: 8,
-        },
-        errors: Default::default(),
-        chain_name: "test".into(),
-    }
-}
-
-fn bob_session() -> Session {
-    let db = Db::open_in_memory(&BOB_SEED).unwrap();
-    Session::new(
-        signing_from_seed(&BOB_SEED),
-        Zeroizing::new(BOB_SEED),
-        "ws://test".into(),
-        ci(),
-        db,
-    )
-}
-
-fn now() -> chrono::DateTime<Utc> {
-    Utc::now()
-}
-
-fn br(block: u32, index: u16) -> BlockRef {
-    BlockRef { block, index }
-}
 
 // ---------------------------------------------------------------------------
 // Thread identity: messages with same thread_ref -> one thread
