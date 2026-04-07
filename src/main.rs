@@ -1893,3 +1893,64 @@ fn handle_confirm_key(
         _ => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_clap_derive_is_well_formed() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn parse_channel_ref_valid() {
+        let r = parse_channel_ref("12345:7").unwrap();
+        assert_eq!(r.block, 12345);
+        assert_eq!(r.index, 7);
+    }
+
+    #[test]
+    fn parse_channel_ref_zero() {
+        let r = parse_channel_ref("0:0").unwrap();
+        assert_eq!(r.block, 0);
+        assert_eq!(r.index, 0);
+    }
+
+    #[test]
+    fn parse_channel_ref_missing_colon() {
+        assert!(parse_channel_ref("12345").is_err());
+    }
+
+    #[test]
+    fn parse_channel_ref_too_many_colons() {
+        assert!(parse_channel_ref("1:2:3").is_err());
+    }
+
+    #[test]
+    fn parse_channel_ref_empty() {
+        assert!(parse_channel_ref("").is_err());
+    }
+
+    #[test]
+    fn parse_channel_ref_non_numeric_block() {
+        assert!(parse_channel_ref("foo:0").is_err());
+    }
+
+    #[test]
+    fn parse_channel_ref_non_numeric_index() {
+        assert!(parse_channel_ref("0:bar").is_err());
+    }
+
+    #[test]
+    fn parse_channel_ref_block_overflow() {
+        let s = format!("{}:0", u64::MAX);
+        assert!(parse_channel_ref(&s).is_err());
+    }
+
+    #[test]
+    fn parse_channel_ref_index_overflow() {
+        assert!(parse_channel_ref("100:99999").is_err());
+    }
+}

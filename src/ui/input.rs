@@ -617,3 +617,86 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area:
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fit_short_string_unchanged() {
+        assert_eq!(fit("hi", 10), "hi");
+    }
+
+    #[test]
+    fn fit_truncates_with_ellipsis() {
+        assert_eq!(fit("hello world", 6), "hello\u{2026}");
+    }
+
+    #[test]
+    fn fit_max_zero_returns_ellipsis() {
+        assert_eq!(fit("hello", 0), "\u{2026}");
+    }
+
+    #[test]
+    fn fit_max_one_returns_ellipsis() {
+        assert_eq!(fit("hello", 1), "\u{2026}");
+    }
+
+    #[test]
+    fn cursor_line_col_first_line() {
+        assert_eq!(cursor_line_col("hello world", 5), (0, 5));
+    }
+
+    #[test]
+    fn cursor_line_col_after_newline() {
+        assert_eq!(cursor_line_col("foo\nbar", 5), (1, 1));
+    }
+
+    #[test]
+    fn cursor_line_col_at_newline() {
+        assert_eq!(cursor_line_col("foo\nbar", 4), (1, 0));
+    }
+
+    #[test]
+    fn cursor_line_col_third_line() {
+        assert_eq!(cursor_line_col("a\nb\nc", 4), (2, 0));
+    }
+
+    #[test]
+    fn cursor_line_col_byte_past_end_clamps() {
+        let (line, _) = cursor_line_col("foo", 99);
+        assert_eq!(line, 0);
+    }
+
+    #[test]
+    fn visible_input_empty_returns_empty_spans() {
+        let (spans, cursor_x) = visible_input("", 0, 10, None);
+        assert!(spans.is_empty());
+        assert_eq!(cursor_x, 0);
+    }
+
+    #[test]
+    fn visible_input_short_text_no_scroll() {
+        let (spans, cursor_x) = visible_input("hello", 5, 20, None);
+        assert!(!spans.is_empty());
+        assert_eq!(cursor_x, 5);
+    }
+
+    #[test]
+    fn visible_input_under_limit_no_red_span() {
+        let (spans, _) = visible_input("hi", 0, 20, Some(10));
+        assert_eq!(spans.len(), 2);
+    }
+
+    #[test]
+    fn visible_input_over_limit_appends_counter() {
+        let (spans, _) = visible_input("toolongtoolong", 0, 20, Some(5));
+        assert!(spans.len() >= 2);
+    }
+
+    #[test]
+    fn visible_input_scrolls_when_text_exceeds_width() {
+        let (spans, _) = visible_input("0123456789ABCDEF", 15, 8, None);
+        assert!(!spans.is_empty());
+    }
+}

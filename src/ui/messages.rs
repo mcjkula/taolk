@@ -1104,3 +1104,97 @@ fn record_sender_clicks(
 }
 
 use taolk::util::truncate;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sender_color_is_deterministic_for_same_input() {
+        let a = sender_color("5FHneW46xGXgs5AUiveU4sbTyGBzmstUspZC92UhjJM694ty");
+        let b = sender_color("5FHneW46xGXgs5AUiveU4sbTyGBzmstUspZC92UhjJM694ty");
+        // Color is Copy + PartialEq via ratatui.
+        assert_eq!(format!("{a:?}"), format!("{b:?}"));
+    }
+
+    #[test]
+    fn sender_color_returns_one_of_palette() {
+        let c = sender_color("anything");
+        assert!(
+            SENDER_COLORS
+                .iter()
+                .any(|p| format!("{p:?}") == format!("{c:?}"))
+        );
+    }
+
+    #[test]
+    fn is_base58_accepts_alphabet() {
+        assert!(is_base58(b'1'));
+        assert!(is_base58(b'A'));
+        assert!(is_base58(b'z'));
+    }
+
+    #[test]
+    fn is_base58_rejects_zero_and_capital_o() {
+        assert!(!is_base58(b'0'));
+        assert!(!is_base58(b'O'));
+        assert!(!is_base58(b'I'));
+        assert!(!is_base58(b'l'));
+    }
+
+    #[test]
+    fn is_ss58_at_finds_at_zero() {
+        let ss58 = "5FHneW46xGXgs5AUiveU4sbTyGBzmstUspZC92UhjJM694ty";
+        assert_eq!(ss58.len(), 48);
+        assert!(is_ss58_at(ss58.as_bytes(), 0));
+    }
+
+    #[test]
+    fn is_ss58_at_rejects_non_5_prefix() {
+        let bad = "1FHneW46xGXgs5AUiveU4sbTyGBzmstUspZC92UhjJM694ty";
+        assert!(!is_ss58_at(bad.as_bytes(), 0));
+    }
+
+    #[test]
+    fn is_ss58_at_rejects_short_buffer() {
+        assert!(!is_ss58_at(b"5short", 0));
+    }
+
+    #[test]
+    fn wrap_text_short_returns_single_line() {
+        let lines = wrap_text("hello", 80, 0);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0], "hello");
+    }
+
+    #[test]
+    fn wrap_text_long_text_wraps_at_word_boundary() {
+        let lines = wrap_text("the quick brown fox", 10, 0);
+        assert!(lines.len() >= 2);
+        for line in &lines {
+            assert!(line.len() <= 12, "line too long: {line:?}");
+        }
+    }
+
+    #[test]
+    fn wrap_text_no_spaces_hard_breaks() {
+        let lines = wrap_text("aaaaaaaaaaaaaaaa", 5, 0);
+        assert!(lines.len() >= 2);
+    }
+
+    #[test]
+    fn wrap_text_continuation_lines_are_indented() {
+        let lines = wrap_text("the quick brown fox jumps over", 10, 4);
+        assert!(lines.len() >= 2);
+        for line in lines.iter().skip(1) {
+            assert!(line.starts_with("    "), "expected indent on: {line:?}");
+        }
+    }
+
+    #[test]
+    fn wrap_text_empty_returns_single_empty() {
+        let lines = wrap_text("", 80, 0);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0], "");
+    }
+}
