@@ -249,13 +249,13 @@ fn cmd_wallet_create(
     blank();
 
     let password = match cli_password {
-        Some(p) => zeroize::Zeroizing::new(p),
+        Some(p) => taolk::secret::Password::new(p),
         None => prompt_new_password()?,
     };
 
-    let mnemonic = wallet::generate_mnemonic();
-    let mut seed = wallet::seed_from_mnemonic(&mnemonic);
-    let words: Vec<&str> = mnemonic.words().collect();
+    let phrase = taolk::secret::Phrase::generate()?;
+    let seed = taolk::secret::Seed::from_phrase(&phrase);
+    let words: Vec<&str> = phrase.words().split_whitespace().collect();
     let canonical_phrase = words.join(" ");
 
     blank();
@@ -288,7 +288,6 @@ fn cmd_wallet_create(
         }
         attempts_left -= 1;
         if attempts_left == 0 {
-            zeroize::Zeroize::zeroize(&mut seed);
             error("Recovery phrase did not match after 3 attempts. Wallet not created.");
             hint("  Re-run `taolk wallet create` and copy the phrase carefully.");
             std::process::exit(1);
@@ -301,10 +300,7 @@ fn cmd_wallet_create(
 
     wallet::create(wallet_name, &password, &seed)?;
 
-    let msk = MiniSecretKey::from_bytes(&seed).unwrap();
-    let kp = msk.expand_to_keypair(ExpansionMode::Ed25519);
-    let address = util::ss58_from_pubkey(&types::Pubkey(kp.public.to_bytes()));
-    zeroize::Zeroize::zeroize(&mut seed);
+    let address = util::ss58_from_pubkey(&seed.derive_signing_key().public_key());
 
     blank();
     success("Wallet created");
@@ -342,26 +338,23 @@ fn cmd_wallet_import(
     ));
     blank();
 
-    let mut seed = if let Some(phrase) = mnemonic {
-        let m = wallet::parse_mnemonic(&phrase)?;
-        wallet::seed_from_mnemonic(&m)
+    let seed = if let Some(phrase) = mnemonic {
+        let p = taolk::secret::Phrase::parse(&phrase)?;
+        taolk::secret::Seed::from_phrase(&p)
     } else if let Some(hex) = seed_hex {
-        wallet::seed_from_hex(&hex)?
+        taolk::secret::Seed::from_hex(&hex)?
     } else {
         error("Provide --mnemonic or --seed");
         std::process::exit(1);
     };
 
     let password = match cli_password {
-        Some(p) => zeroize::Zeroizing::new(p),
+        Some(p) => taolk::secret::Password::new(p),
         None => prompt_new_password()?,
     };
     wallet::create(wallet_name, &password, &seed)?;
 
-    let msk = MiniSecretKey::from_bytes(&seed).unwrap();
-    let kp = msk.expand_to_keypair(ExpansionMode::Ed25519);
-    let address = util::ss58_from_pubkey(&types::Pubkey(kp.public.to_bytes()));
-    zeroize::Zeroize::zeroize(&mut seed);
+    let address = util::ss58_from_pubkey(&seed.derive_signing_key().public_key());
 
     blank();
     success("Wallet imported");
@@ -395,7 +388,7 @@ fn cmd_wallet_list() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn prompt_new_password() -> Result<zeroize::Zeroizing<String>, Box<dyn std::error::Error>> {
+fn prompt_new_password() -> Result<taolk::secret::Password, Box<dyn std::error::Error>> {
     use cli_fmt::*;
     use zeroize::Zeroize;
     let password = rpassword::prompt_password(format!("  {YELLOW}Password:{RESET} "))?;
@@ -410,7 +403,7 @@ fn prompt_new_password() -> Result<zeroize::Zeroizing<String>, Box<dyn std::erro
         std::process::exit(1);
     }
     confirm.zeroize();
-    Ok(zeroize::Zeroizing::new(password))
+    Ok(taolk::secret::Password::new(password))
 }
 
 fn run_config_command(action: ConfigAction) -> Result<(), Box<dyn std::error::Error>> {
@@ -593,7 +586,7 @@ fn run_tui(
         let exit = run_session(
             &mut terminal,
             &events,
-            &seed,
+            seed.as_bytes(),
             &wallet_name,
             node_url,
             mirror_urls,
@@ -623,7 +616,7 @@ enum SessionExit {
     SwitchWallet,
 }
 
-type UnlockResult = Option<(String, zeroize::Zeroizing<[u8; 32]>)>;
+type UnlockResult = Option<(String, taolk::secret::Seed)>;
 
 fn run_lock_screen(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
@@ -799,7 +792,10 @@ fn run_lock_screen(
 
         match events.next()? {
             TuiEvent::Key(key) if inserting => match key.code {
-                KeyCode::Enter => match wallet::open(&current_wallet, &password) {
+                KeyCode::Enter => match wallet::open(
+                    &current_wallet,
+                    &taolk::secret::Password::new((*password).clone()),
+                ) {
                     Ok(new_seed) => {
                         password.clear();
                         return Ok(Some((current_wallet, new_seed)));

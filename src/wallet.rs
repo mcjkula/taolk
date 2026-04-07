@@ -1,12 +1,11 @@
 use argon2::Argon2;
-use bip39::Mnemonic;
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce};
-use hmac::Hmac;
-use sha2::Sha512;
 use std::fmt;
 use std::path::PathBuf;
 use zeroize::Zeroize;
+
+use crate::secret::{Password, Seed};
 
 const WALLET_VERSION: u8 = 0x01;
 const WALLET_FILE_LEN: usize = 93; // 1 + 32 + 12 + 48
@@ -69,58 +68,31 @@ pub fn list_wallets() -> Vec<String> {
     names
 }
 
-pub fn generate_mnemonic() -> Mnemonic {
-    let mut entropy = [0u8; 16];
-    getrandom::fill(&mut entropy).expect("getrandom");
-    let mnemonic = Mnemonic::from_entropy(&entropy).expect("mnemonic from entropy");
-    entropy.zeroize();
-    mnemonic
-}
-
-pub fn parse_mnemonic(phrase: &str) -> Result<Mnemonic, String> {
-    Mnemonic::parse_normalized(phrase).map_err(|e| format!("Invalid mnemonic: {e}"))
-}
-
-pub fn seed_from_mnemonic(mnemonic: &Mnemonic) -> [u8; 32] {
-    let mut entropy = mnemonic.to_entropy();
-    let mut seed = [0u8; 64];
-    pbkdf2::pbkdf2::<Hmac<Sha512>>(&entropy, b"mnemonic", 2048, &mut seed).expect("pbkdf2");
-    entropy.zeroize();
-    let mut mini_secret = [0u8; 32];
-    mini_secret.copy_from_slice(&seed[..32]);
-    seed.zeroize();
-    mini_secret
-}
-
-pub fn seed_from_hex(hex_str: &str) -> Result<[u8; 32], String> {
-    let bytes =
-        hex::decode(hex_str.trim_start_matches("0x")).map_err(|e| format!("Invalid hex: {e}"))?;
-    bytes
-        .try_into()
-        .map_err(|_| "Seed must be 32 bytes (64 hex chars)".to_string())
-}
-
-fn derive_key(password: &str, salt: &[u8; SALT_LEN]) -> [u8; 32] {
+fn derive_key(password: &Password, salt: &[u8; SALT_LEN]) -> [u8; 32] {
     let argon2 = Argon2::new(
         argon2::Algorithm::Argon2id,
         argon2::Version::V0x13,
+        // SECURITY: Params::new only fails for invalid combinations of memory/iterations/parallelism;
+        // these are constants chosen to be valid.
         argon2::Params::new(65536, 3, 1, Some(32)).expect("constant argon2 params"),
     );
     let mut key = [0u8; 32];
+    // SECURITY: hash_password_into only fails on output length mismatch with Params::output_len;
+    // we set both to 32.
     argon2
-        .hash_password_into(password.as_bytes(), salt, &mut key)
-        .expect("argon2 hash");
+        .hash_password_into(password.as_str().as_bytes(), salt, &mut key)
+        .expect("argon2 hash with matched output length");
     key
 }
 
-pub fn create(name: &str, password: &str, seed: &[u8; 32]) -> Result<(), WalletError> {
+pub fn create(name: &str, password: &Password, seed: &Seed) -> Result<(), WalletError> {
     create_at(&wallet_path(name), password, seed)
 }
 
 pub fn create_at(
     path: &std::path::Path,
-    password: &str,
-    seed: &[u8; 32],
+    password: &Password,
+    seed: &Seed,
 ) -> Result<(), WalletError> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -132,15 +104,20 @@ pub fn create_at(
     }
 
     let mut salt = [0u8; SALT_LEN];
-    getrandom::fill(&mut salt).expect("getrandom");
+    // SECURITY: getrandom only fails when the OS RNG is unavailable; treat as fatal at create-time.
+    getrandom::fill(&mut salt).expect("OS RNG available at wallet create");
     let mut nonce_bytes = [0u8; NONCE_LEN];
-    getrandom::fill(&mut nonce_bytes).expect("getrandom");
+    getrandom::fill(&mut nonce_bytes).expect("OS RNG available at wallet create");
 
     let mut key = derive_key(password, &salt);
     let cipher = ChaCha20Poly1305::new((&key).into());
     key.zeroize();
     let nonce = Nonce::from_slice(&nonce_bytes);
-    let ciphertext = cipher.encrypt(nonce, seed.as_slice()).expect("encryption");
+    // SECURITY: encrypt only fails if the AEAD invariants are violated, which is unreachable
+    // for ChaCha20-Poly1305 with a 32-byte key, 12-byte nonce, and bounded plaintext.
+    let ciphertext = cipher
+        .encrypt(nonce, seed.as_bytes().as_slice())
+        .expect("ChaCha20-Poly1305 encrypt with valid key+nonce");
 
     let mut file_data = Vec::with_capacity(WALLET_FILE_LEN);
     file_data.push(WALLET_VERSION);
@@ -157,14 +134,11 @@ pub fn create_at(
     Ok(())
 }
 
-pub fn open(name: &str, password: &str) -> Result<zeroize::Zeroizing<[u8; 32]>, WalletError> {
+pub fn open(name: &str, password: &Password) -> Result<Seed, WalletError> {
     open_at(&wallet_path(name), password)
 }
 
-pub fn open_at(
-    path: &std::path::Path,
-    password: &str,
-) -> Result<zeroize::Zeroizing<[u8; 32]>, WalletError> {
+pub fn open_at(path: &std::path::Path, password: &Password) -> Result<Seed, WalletError> {
     let data = std::fs::read(path)?;
     if data.len() != WALLET_FILE_LEN || data[0] != WALLET_VERSION {
         return Err(WalletError::CorruptFile);
@@ -186,8 +160,8 @@ pub fn open_at(
         .decrypt(nonce, ciphertext)
         .map_err(|_| WalletError::WrongPassword)?;
 
-    let mut seed = [0u8; 32];
-    seed.copy_from_slice(&plaintext);
+    let mut bytes = [0u8; 32];
+    bytes.copy_from_slice(&plaintext);
     plaintext.zeroize();
-    Ok(zeroize::Zeroizing::new(seed))
+    Ok(Seed::from_bytes(bytes))
 }

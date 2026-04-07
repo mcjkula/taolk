@@ -70,9 +70,16 @@ impl Seed {
         }
     }
 
-    #[allow(dead_code)] // consumed by wallet/db in commit 2
-    pub(crate) fn as_bytes(&self) -> &[u8; 32] {
+    pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
+    }
+
+    pub fn ct_eq(&self, other: &Self) -> bool {
+        let mut diff = 0u8;
+        for i in 0..32 {
+            diff |= self.0[i] ^ other.0[i];
+        }
+        diff == 0
     }
 }
 
@@ -81,8 +88,7 @@ impl Password {
         Self(Zeroizing::new(s))
     }
 
-    #[allow(dead_code)] // consumed by wallet in commit 2
-    pub(crate) fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 }
@@ -119,8 +125,7 @@ impl SigningKey {
         Pubkey(self.inner.public.to_bytes())
     }
 
-    #[allow(dead_code)] // consumed by extrinsic.rs in commit 3
-    pub(crate) fn keypair(&self) -> &schnorrkel::Keypair {
+    pub fn keypair(&self) -> &schnorrkel::Keypair {
         &self.inner
     }
 }
