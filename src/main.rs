@@ -1062,6 +1062,7 @@ fn run_session(
                 let is_mine = sender_ss58 == util::ss58_short(&app.session.pubkey());
                 let mentioned = util::body_mentions(&body, app.session.ss58());
                 app.session.peer_pubkeys.insert(sender_ss58.clone(), sender);
+                app.session.db.upsert_peer(&sender_ss58, &sender);
                 app.session.add_channel_message(
                     channel_ref,
                     conversation::NewMessage {
@@ -1118,6 +1119,7 @@ fn run_session(
                 let is_mine = sender_ss58 == util::ss58_short(&app.session.pubkey());
                 let mentioned = util::body_mentions(&body, app.session.ss58());
                 app.session.peer_pubkeys.insert(sender_ss58.clone(), sender);
+                app.session.db.upsert_peer(&sender_ss58, &sender);
                 app.session.add_group_message(
                     group_ref,
                     conversation::NewMessage {
