@@ -7,6 +7,8 @@
 use parity_scale_codec::{Compact, Decode, Error as CodecError, Input};
 use std::collections::HashMap;
 
+pub use crate::error::MetadataError;
+
 const METADATA_MAGIC: u32 = 0x6174_656d; // "meta"
 
 #[derive(Clone, Debug)]
@@ -34,16 +36,20 @@ pub struct Metadata {
 }
 
 impl Metadata {
-    pub fn from_runtime_metadata(bytes: &[u8]) -> Result<Self, String> {
+    pub fn from_runtime_metadata(bytes: &[u8]) -> Result<Self, MetadataError> {
         let input = &mut &bytes[..];
 
         let magic = u32::decode(input).map_err(scale)?;
         if magic != METADATA_MAGIC {
-            return Err(format!("metadata magic mismatch: 0x{magic:08x}"));
+            return Err(MetadataError::Scale(format!(
+                "metadata magic mismatch: 0x{magic:08x}"
+            )));
         }
         let version = u8::decode(input).map_err(scale)?;
         if version != 14 {
-            return Err(format!("metadata version {version} unsupported (need V14)"));
+            return Err(MetadataError::Scale(format!(
+                "metadata version {version} unsupported (need V14)"
+            )));
         }
 
         let registry = read_registry(input)?;
@@ -167,20 +173,20 @@ fn parse_first_byte_after(haystack: &str, needle: &str) -> Option<u32> {
 }
 
 impl AccountInfoLayout {
-    pub fn decode_free(&self, account_info: &[u8]) -> Result<u128, String> {
+    pub fn decode_free(&self, account_info: &[u8]) -> Result<u128, MetadataError> {
         let end = self.free_offset + self.free_width;
         if account_info.len() < end {
-            return Err(format!(
-                "AccountInfo storage truncated: have {} bytes, need {end}",
-                account_info.len()
-            ));
+            return Err(MetadataError::AccountInfoShort {
+                need: end,
+                got: account_info.len(),
+            });
         }
         let mut buf = [0u8; 16];
         buf[..self.free_width].copy_from_slice(&account_info[self.free_offset..end]);
         Ok(u128::from_le_bytes(buf))
     }
 
-    fn resolve(registry: &[TypeShape], account_info_id: u32) -> Result<Self, String> {
+    fn resolve(registry: &[TypeShape], account_info_id: u32) -> Result<Self, MetadataError> {
         let mut offset = 0;
         for (name, ty) in type_at(registry, account_info_id)?.composite("AccountInfo")? {
             if name == "data" {
@@ -195,11 +201,11 @@ impl AccountInfoLayout {
                     }
                     inner += byte_size(registry, *dt)?;
                 }
-                return Err("AccountData.free not found".into());
+                return Err(MetadataError::StorageNotFound("AccountData.free"));
             }
             offset += byte_size(registry, *ty)?;
         }
-        Err("AccountInfo.data not found".into())
+        Err(MetadataError::AccountInfoMissing)
     }
 }
 
@@ -234,31 +240,37 @@ struct PalletWalkResult {
 }
 
 impl TypeShape {
-    fn composite(&self, ctx: &'static str) -> Result<&[(String, u32)], String> {
+    fn composite(&self, ctx: &'static str) -> Result<&[(String, u32)], MetadataError> {
         match self {
             Self::Composite(fields) => Ok(fields),
-            _ => Err(format!("{ctx} is not a composite")),
+            _ => Err(MetadataError::Shape {
+                ctx,
+                kind: "composite",
+            }),
         }
     }
 
-    fn unsigned_int_width(&self, ctx: &'static str) -> Result<usize, String> {
+    fn unsigned_int_width(&self, ctx: &'static str) -> Result<usize, MetadataError> {
         match self {
             Self::Primitive {
                 width,
                 unsigned_int: true,
             } => Ok(*width),
-            _ => Err(format!("{ctx} is not an unsigned integer primitive")),
+            _ => Err(MetadataError::Shape {
+                ctx,
+                kind: "unsigned integer primitive",
+            }),
         }
     }
 }
 
-fn type_at(registry: &[TypeShape], id: u32) -> Result<&TypeShape, String> {
+fn type_at(registry: &[TypeShape], id: u32) -> Result<&TypeShape, MetadataError> {
     registry
         .get(id as usize)
-        .ok_or_else(|| format!("type id {id} missing from registry"))
+        .ok_or(MetadataError::TypeIdMissing(id))
 }
 
-fn byte_size(registry: &[TypeShape], id: u32) -> Result<usize, String> {
+fn byte_size(registry: &[TypeShape], id: u32) -> Result<usize, MetadataError> {
     match type_at(registry, id)? {
         TypeShape::Primitive { width, .. } => Ok(*width),
         TypeShape::Composite(fields) => fields
@@ -268,18 +280,17 @@ fn byte_size(registry: &[TypeShape], id: u32) -> Result<usize, String> {
         TypeShape::Tuple(ids) => ids
             .iter()
             .try_fold(0, |sum, t| Ok(sum + byte_size(registry, *t)?)),
-        TypeShape::Variant(_) => Err(format!("type id {id} is a variant (variable width)")),
-        TypeShape::Variable => Err(format!("type id {id} has variable width")),
+        TypeShape::Variant(_) | TypeShape::Variable => Err(MetadataError::VariableWidth(id)),
     }
 }
 
-fn read_registry<I: Input>(input: &mut I) -> Result<Vec<TypeShape>, String> {
+fn read_registry<I: Input>(input: &mut I) -> Result<Vec<TypeShape>, MetadataError> {
     let n = compact(input)?;
     let mut registry = Vec::with_capacity(n as usize);
     for expected in 0..n {
         let id = compact(input)?;
         if id != expected {
-            return Err(format!("non-sequential type id {id} (expected {expected})"));
+            return Err(MetadataError::NonSequential { got: id, expected });
         }
         // Type { path, type_params, type_def, docs }
         skip_strings(input)?;
@@ -290,7 +301,7 @@ fn read_registry<I: Input>(input: &mut I) -> Result<Vec<TypeShape>, String> {
     Ok(registry)
 }
 
-fn read_type_def<I: Input>(input: &mut I) -> Result<TypeShape, String> {
+fn read_type_def<I: Input>(input: &mut I) -> Result<TypeShape, MetadataError> {
     Ok(match u8::decode(input).map_err(scale)? {
         0 => TypeShape::Composite(read_fields(input)?),
         1 => {
@@ -343,11 +354,11 @@ fn read_type_def<I: Input>(input: &mut I) -> Result<TypeShape, String> {
             compact(input)?;
             TypeShape::Variable
         }
-        tag => return Err(format!("unknown TypeDef tag {tag}")),
+        tag => return Err(MetadataError::UnknownTypeDef(tag)),
     })
 }
 
-fn read_fields<I: Input>(input: &mut I) -> Result<Vec<(String, u32)>, String> {
+fn read_fields<I: Input>(input: &mut I) -> Result<Vec<(String, u32)>, MetadataError> {
     let n = compact(input)?;
     let mut fields = Vec::with_capacity(n as usize);
     for _ in 0..n {
@@ -363,7 +374,7 @@ fn read_fields<I: Input>(input: &mut I) -> Result<Vec<(String, u32)>, String> {
     Ok(fields)
 }
 
-fn skip_type_params<I: Input>(input: &mut I) -> Result<(), String> {
+fn skip_type_params<I: Input>(input: &mut I) -> Result<(), MetadataError> {
     for _ in 0..compact(input)? {
         let _ = String::decode(input).map_err(scale)?;
         match u8::decode(input).map_err(scale)? {
@@ -371,13 +382,13 @@ fn skip_type_params<I: Input>(input: &mut I) -> Result<(), String> {
             1 => {
                 compact(input)?;
             }
-            tag => return Err(format!("invalid Option tag {tag}")),
+            tag => return Err(MetadataError::InvalidOptionTag(tag)),
         }
     }
     Ok(())
 }
 
-fn primitive_shape(tag: u8) -> Result<TypeShape, String> {
+fn primitive_shape(tag: u8) -> Result<TypeShape, MetadataError> {
     let (width, unsigned_int) = match tag {
         0 => (1, false),                     // Bool
         1 => (4, false),                     // Char (u32 codepoint)
@@ -394,7 +405,7 @@ fn primitive_shape(tag: u8) -> Result<TypeShape, String> {
         12 => (8, false),                    // I64
         13 => (16, false),                   // I128
         14 => (32, false),                   // I256
-        _ => return Err(format!("unknown primitive tag {tag}")),
+        _ => return Err(MetadataError::UnknownPrimitive(tag)),
     };
     Ok(TypeShape::Primitive {
         width,
@@ -402,7 +413,7 @@ fn primitive_shape(tag: u8) -> Result<TypeShape, String> {
     })
 }
 
-fn walk_pallets<I: Input>(input: &mut I) -> Result<PalletWalkResult, String> {
+fn walk_pallets<I: Input>(input: &mut I) -> Result<PalletWalkResult, MetadataError> {
     let mut account_info_ty: Option<u32> = None;
     let mut errors: Vec<PalletErrorRef> = Vec::new();
 
@@ -448,12 +459,12 @@ fn walk_pallets<I: Input>(input: &mut I) -> Result<PalletWalkResult, String> {
     }
 
     Ok(PalletWalkResult {
-        account_info_ty: account_info_ty.ok_or("System.Account storage entry not found")?,
+        account_info_ty: account_info_ty.ok_or(MetadataError::StorageNotFound("System.Account"))?,
         errors,
     })
 }
 
-fn read_storage_entry_value_type<I: Input>(input: &mut I) -> Result<u32, String> {
+fn read_storage_entry_value_type<I: Input>(input: &mut I) -> Result<u32, MetadataError> {
     match u8::decode(input).map_err(scale)? {
         0 => compact(input), // Plain(value)
         1 => {
@@ -464,36 +475,36 @@ fn read_storage_entry_value_type<I: Input>(input: &mut I) -> Result<u32, String>
             compact(input)?; // key
             compact(input) // value
         }
-        tag => Err(format!("unknown StorageEntryType tag {tag}")),
+        tag => Err(MetadataError::UnknownStorageEntryType(tag)),
     }
 }
 
-fn compact<I: Input>(input: &mut I) -> Result<u32, String> {
+fn compact<I: Input>(input: &mut I) -> Result<u32, MetadataError> {
     Ok(<Compact<u32>>::decode(input).map_err(scale)?.0)
 }
 
-fn skip_strings<I: Input>(input: &mut I) -> Result<(), String> {
+fn skip_strings<I: Input>(input: &mut I) -> Result<(), MetadataError> {
     let _ = <Vec<String>>::decode(input).map_err(scale)?;
     Ok(())
 }
 
-fn option_tag<I: Input>(input: &mut I) -> Result<bool, String> {
+fn option_tag<I: Input>(input: &mut I) -> Result<bool, MetadataError> {
     match u8::decode(input).map_err(scale)? {
         0 => Ok(false),
         1 => Ok(true),
-        tag => Err(format!("invalid Option tag {tag}")),
+        tag => Err(MetadataError::InvalidOptionTag(tag)),
     }
 }
 
-fn skip_optional_compact<I: Input>(input: &mut I) -> Result<(), String> {
+fn skip_optional_compact<I: Input>(input: &mut I) -> Result<(), MetadataError> {
     if option_tag(input)? {
         compact(input)?;
     }
     Ok(())
 }
 
-fn scale(e: CodecError) -> String {
-    format!("scale decode: {e}")
+fn scale(e: CodecError) -> MetadataError {
+    MetadataError::Scale(e.to_string())
 }
 
 #[cfg(test)]

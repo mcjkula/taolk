@@ -5,6 +5,7 @@ use std::time::Duration;
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 use zeroize::Zeroizing;
 
+use crate::error::ChainError;
 use crate::event::{ConnState, Event};
 use crate::reader;
 use crate::types::Pubkey;
@@ -32,14 +33,14 @@ async fn next_text(
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
         >,
     >,
-) -> Result<String, String> {
+) -> Result<String, ChainError> {
     loop {
         match ws.next().await {
             Some(Ok(WsMessage::Text(t))) => return Ok(t.to_string()),
             Some(Ok(WsMessage::Ping(_) | WsMessage::Pong(_))) => continue,
-            Some(Ok(other)) => return Err(format!("unexpected frame: {other:?}")),
-            Some(Err(e)) => return Err(format!("ws error: {e}")),
-            None => return Err("connection closed".into()),
+            Some(Ok(_)) => return Err(ChainError::BadShape),
+            Some(Err(e)) => return Err(ChainError::Ws(e.to_string())),
+            None => return Err(ChainError::WsClosed),
         }
     }
 }
@@ -51,10 +52,10 @@ async fn fetch_extrinsic_inner(
     my_pubkey: &Pubkey,
     seed: &[u8; 32],
     tx: &Sender<Event>,
-) -> Result<(), String> {
+) -> Result<(), ChainError> {
     let (ws, _) = connect_async(node_url)
         .await
-        .map_err(|e| format!("connect failed: {e}"))?;
+        .map_err(|e| ChainError::Connect(e.to_string()))?;
 
     let (mut write, mut read) = ws.split();
 
@@ -65,13 +66,14 @@ async fn fetch_extrinsic_inner(
     write
         .send(WsMessage::Text(hash_req.to_string().into()))
         .await
-        .map_err(|e| format!("send: {e}"))?;
+        .map_err(|e| ChainError::Send(e.to_string()))?;
 
     let hash_resp = next_text(&mut read).await?;
-    let v: Value = serde_json::from_str(&hash_resp).map_err(|e| format!("parse: {e}"))?;
+    let v: Value =
+        serde_json::from_str(&hash_resp).map_err(|e| ChainError::Parse(e.to_string()))?;
     let block_hash = v["result"]
         .as_str()
-        .ok_or("no hash in response")?
+        .ok_or(ChainError::MissingField("block hash"))?
         .to_string();
 
     let block_req = json!({
@@ -81,11 +83,14 @@ async fn fetch_extrinsic_inner(
     write
         .send(WsMessage::Text(block_req.to_string().into()))
         .await
-        .map_err(|e| format!("send: {e}"))?;
+        .map_err(|e| ChainError::Send(e.to_string()))?;
 
     let block_resp = next_text(&mut read).await?;
-    let v: Value = serde_json::from_str(&block_resp).map_err(|e| format!("parse: {e}"))?;
-    let block = v["result"].get("block").ok_or("no block in response")?;
+    let v: Value =
+        serde_json::from_str(&block_resp).map_err(|e| ChainError::Parse(e.to_string()))?;
+    let block = v["result"]
+        .get("block")
+        .ok_or(ChainError::MissingField("block"))?;
 
     if let Some(exts) = block["extrinsics"].as_array() {
         let block_ts = reader::extract_block_timestamp(exts);
@@ -133,10 +138,10 @@ async fn run_subscription(
     my_pubkey: &Pubkey,
     seed: &[u8; 32],
     tx: &Sender<Event>,
-) -> Result<(), String> {
+) -> Result<(), ChainError> {
     let (mut ws, _) = connect_async(node_url)
         .await
-        .map_err(|e| format!("connect: {e}"))?;
+        .map_err(|e| ChainError::Connect(e.to_string()))?;
 
     let sub_msg = json!({
         "jsonrpc": "2.0", "id": 1,
@@ -144,14 +149,14 @@ async fn run_subscription(
     });
     ws.send(WsMessage::Text(sub_msg.to_string().into()))
         .await
-        .map_err(|e| format!("subscribe: {e}"))?;
+        .map_err(|e| ChainError::Send(e.to_string()))?;
 
     let mut request_id: u64 = 100;
 
     while let Some(frame) = ws.next().await {
         let msg = match frame {
             Ok(m) => m,
-            Err(e) => return Err(format!("read: {e}")),
+            Err(e) => return Err(ChainError::Ws(e.to_string())),
         };
         let text = match &msg {
             WsMessage::Text(t) => t.to_string(),
@@ -175,7 +180,7 @@ async fn run_subscription(
             });
             ws.send(WsMessage::Text(hash_req.to_string().into()))
                 .await
-                .map_err(|e| format!("send: {e}"))?;
+                .map_err(|e| ChainError::Send(e.to_string()))?;
             continue;
         }
 
@@ -188,7 +193,7 @@ async fn run_subscription(
                 });
                 ws.send(WsMessage::Text(block_req.to_string().into()))
                     .await
-                    .map_err(|e| format!("send: {e}"))?;
+                    .map_err(|e| ChainError::Send(e.to_string()))?;
             } else if let Some(block) = result.get("block") {
                 let ctx = reader::ReadContext {
                     my_pubkey,
@@ -200,5 +205,5 @@ async fn run_subscription(
         }
     }
 
-    Err("connection closed".into())
+    Err(ChainError::WsClosed)
 }

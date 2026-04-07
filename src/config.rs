@@ -265,9 +265,10 @@ pub fn is_user_set(key: &str) -> bool {
         .is_some()
 }
 
-/// Set one key in the TOML file without touching defaults of unrelated keys.
-pub fn set_key(key: &str, raw: &[String]) -> Result<String, String> {
-    let def = lookup_key(key).ok_or_else(|| format!("Unknown key: {key}"))?;
+use crate::error::ConfigError;
+
+pub fn set_key(key: &str, raw: &[String]) -> Result<String, ConfigError> {
+    let def = lookup_key(key).ok_or_else(|| ConfigError::UnknownKey(key.into()))?;
 
     let toml_value = match key {
         "wallet.default" | "network.node" | "ui.timestamp_format" | "ui.date_format" => {
@@ -297,11 +298,14 @@ pub fn set_key(key: &str, raw: &[String]) -> Result<String, String> {
         "notifications.volume" => {
             let v: u8 = parse_val(raw, "a number (0-100)")?;
             if v > 100 {
-                return Err(format!("Expected 0-100, got {v}"));
+                return Err(ConfigError::InvalidValue {
+                    expected: "0-100".into(),
+                    got: v.to_string(),
+                });
             }
             toml::Value::Integer(v as i64)
         }
-        _ => return Err(format!("Unknown key: {key}")),
+        _ => return Err(ConfigError::UnknownKey(key.into())),
     };
 
     let path = config_path();
@@ -321,25 +325,27 @@ pub fn set_key(key: &str, raw: &[String]) -> Result<String, String> {
     Ok(get_value(&cfg, key))
 }
 
-pub fn save(config: &Config) -> Result<(), String> {
+pub fn save(config: &Config) -> Result<(), ConfigError> {
     let path = config_path();
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(parent)?;
     }
-    let content = toml::to_string_pretty(config).map_err(|e| e.to_string())?;
-    std::fs::write(&path, content).map_err(|e| e.to_string())
+    let content = toml::to_string_pretty(config)?;
+    std::fs::write(&path, content)?;
+    Ok(())
 }
 
-fn write_table(path: &std::path::Path, table: &toml::Table) -> Result<(), String> {
+fn write_table(path: &std::path::Path, table: &toml::Table) -> Result<(), ConfigError> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(parent)?;
     }
-    let content = toml::to_string_pretty(table).map_err(|e| e.to_string())?;
-    std::fs::write(path, content).map_err(|e| e.to_string())
+    let content = toml::to_string_pretty(table)?;
+    std::fs::write(path, content)?;
+    Ok(())
 }
 
-pub fn unset_key(key: &str) -> Result<String, String> {
-    let def = lookup_key(key).ok_or("unknown key")?;
+pub fn unset_key(key: &str) -> Result<String, ConfigError> {
+    let def = lookup_key(key).ok_or_else(|| ConfigError::UnknownKey(key.into()))?;
 
     let path = config_path();
     let content = std::fs::read_to_string(&path).unwrap_or_default();
@@ -358,18 +364,23 @@ pub fn unset_key(key: &str) -> Result<String, String> {
     Ok(def.default_display.to_string())
 }
 
-fn parse_val<T: std::str::FromStr>(raw: &[String], expected: &str) -> Result<T, String> {
+fn parse_val<T: std::str::FromStr>(raw: &[String], expected: &str) -> Result<T, ConfigError> {
     let s = raw.first().map(|s| s.as_str()).unwrap_or("");
-    s.parse::<T>()
-        .map_err(|_| format!("Expected {expected}, got '{s}'"))
+    s.parse::<T>().map_err(|_| ConfigError::InvalidValue {
+        expected: expected.into(),
+        got: s.into(),
+    })
 }
 
-fn parse_bool(raw: &[String]) -> Result<bool, String> {
+fn parse_bool(raw: &[String]) -> Result<bool, ConfigError> {
     let s = raw.first().map(|s| s.as_str()).unwrap_or("");
     match s {
         "true" => Ok(true),
         "false" => Ok(false),
-        _ => Err(format!("Expected 'true' or 'false', got '{s}'")),
+        _ => Err(ConfigError::InvalidValue {
+            expected: "'true' or 'false'".into(),
+            got: s.into(),
+        }),
     }
 }
 

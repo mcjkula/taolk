@@ -473,8 +473,8 @@ fn cmd_config_set(key: &str, values: &[String]) -> Result<(), Box<dyn std::error
             success(&format!("{key} = {display_val}"));
             hint(&format!("  {}", config::config_path().display()));
         }
-        Err(msg) => {
-            error(&msg);
+        Err(e) => {
+            error(&e.to_string());
             std::process::exit(1);
         }
     }
@@ -493,8 +493,8 @@ fn cmd_config_unset(key: &str) -> Result<(), Box<dyn std::error::Error>> {
             success(&format!("{key} reset to default ({default_val})"));
             hint(&format!("  {}", config::config_path().display()));
         }
-        Err(msg) => {
-            error(&msg);
+        Err(e) => {
+            error(&e.to_string());
             std::process::exit(1);
         }
     }
@@ -2172,10 +2172,10 @@ fn copy_sender(app: &mut App, short_ss58: &str, pubkey: Option<&types::Pubkey>) 
     }
 }
 
-fn parse_channel_ref(input: &str) -> Result<types::BlockRef, String> {
+fn parse_channel_ref(input: &str) -> Result<types::BlockRef, &'static str> {
     let parts: Vec<&str> = input.split(':').collect();
     if parts.len() != 2 {
-        return Err("expected block:index format".into());
+        return Err("expected block:index format");
     }
     let block: u32 = parts[0].parse().map_err(|_| "invalid block number")?;
     let index: u16 = parts[1].parse().map_err(|_| "invalid index")?;

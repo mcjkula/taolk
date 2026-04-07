@@ -1,41 +1,16 @@
 use argon2::Argon2;
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce};
-use std::fmt;
 use std::path::PathBuf;
 use zeroize::Zeroize;
 
+pub use crate::error::WalletError;
 use crate::secret::{Password, Seed};
 
 const WALLET_VERSION: u8 = 0x01;
 const WALLET_FILE_LEN: usize = 93; // 1 + 32 + 12 + 48
 const SALT_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
-
-#[derive(Debug)]
-pub enum WalletError {
-    WrongPassword,
-    CorruptFile,
-    Io(std::io::Error),
-}
-
-impl fmt::Display for WalletError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::WrongPassword => write!(f, "Wrong password"),
-            Self::CorruptFile => write!(f, "Wallet file is corrupt"),
-            Self::Io(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for WalletError {}
-
-impl From<std::io::Error> for WalletError {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e)
-    }
-}
 
 fn wallet_dir() -> PathBuf {
     dirs::home_dir()

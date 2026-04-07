@@ -7,6 +7,7 @@ use parity_scale_codec::{Compact, Encode};
 use serde_json::{Value, json};
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 
+use crate::error::ChainError;
 use crate::metadata::{AccountInfoLayout, ErrorTable, Metadata};
 use crate::types::Pubkey;
 
@@ -28,43 +29,53 @@ pub struct ChainInfo {
     pub chain_name: String,
 }
 
-pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, String> {
+pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, ChainError> {
     let (mut ws, _) = connect_async(node_url)
         .await
-        .map_err(|e| format!("connect: {e}"))?;
+        .map_err(|e| ChainError::Connect(e.to_string()))?;
 
     let req = json!({"jsonrpc":"2.0","id":1,"method":"chain_getBlockHash","params":[0]});
     ws.send(WsMessage::Text(req.to_string().into()))
         .await
-        .map_err(|e| format!("send: {e}"))?;
+        .map_err(|e| ChainError::Send(e.to_string()))?;
     let genesis_hash = read_text_result(&mut ws).await?;
-    let genesis_bytes = hex_to_32(genesis_hash.as_str().ok_or("no genesis hash")?)?;
+    let genesis_bytes = hex_to_32(
+        genesis_hash
+            .as_str()
+            .ok_or(ChainError::MissingField("genesis hash"))?,
+    )?;
 
     let req = json!({"jsonrpc":"2.0","id":2,"method":"state_getRuntimeVersion","params":[]});
     ws.send(WsMessage::Text(req.to_string().into()))
         .await
-        .map_err(|e| format!("send: {e}"))?;
+        .map_err(|e| ChainError::Send(e.to_string()))?;
     let rv = read_text_result(&mut ws).await?;
-    let spec_version = rv["specVersion"].as_u64().ok_or("no specVersion")? as u32;
-    let tx_version = rv["transactionVersion"].as_u64().ok_or("no txVersion")? as u32;
+    let spec_version_raw = rv["specVersion"]
+        .as_u64()
+        .ok_or(ChainError::MissingField("specVersion"))?;
+    let spec_version = u32::try_from(spec_version_raw)
+        .map_err(|_| ChainError::SpecVersionOverflow(spec_version_raw))?;
+    let tx_version_raw = rv["transactionVersion"]
+        .as_u64()
+        .ok_or(ChainError::MissingField("transactionVersion"))?;
+    let tx_version = u32::try_from(tx_version_raw)
+        .map_err(|_| ChainError::SpecVersionOverflow(tx_version_raw))?;
 
     let req = json!({"jsonrpc":"2.0","id":3,"method":"state_getMetadata","params":[]});
     ws.send(WsMessage::Text(req.to_string().into()))
         .await
-        .map_err(|e| format!("send: {e}"))?;
+        .map_err(|e| ChainError::Send(e.to_string()))?;
     let metadata_result = read_text_result(&mut ws).await?;
     let metadata_hex = metadata_result
         .as_str()
-        .ok_or("state_getMetadata returned no result")?;
-    let metadata_bytes = hex::decode(metadata_hex.trim_start_matches("0x"))
-        .map_err(|e| format!("metadata hex decode: {e}"))?;
-    let parsed = Metadata::from_runtime_metadata(&metadata_bytes)
-        .map_err(|e| format!("parse runtime metadata: {e}"))?;
+        .ok_or(ChainError::MissingField("state_getMetadata result"))?;
+    let metadata_bytes = hex::decode(metadata_hex.trim_start_matches("0x"))?;
+    let parsed = Metadata::from_runtime_metadata(&metadata_bytes)?;
 
     let req = json!({"jsonrpc":"2.0","id":4,"method":"system_chain","params":[]});
     ws.send(WsMessage::Text(req.to_string().into()))
         .await
-        .map_err(|e| format!("send: {e}"))?;
+        .map_err(|e| ChainError::Send(e.to_string()))?;
     let chain_name_raw = read_text_result(&mut ws).await?;
     let chain_name = canonical_chain_name(chain_name_raw.as_str().unwrap_or("unknown"));
 
@@ -156,21 +167,29 @@ async fn refresh_signing_params(
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
     base: &ChainInfo,
-) -> Result<ChainInfo, String> {
+) -> Result<ChainInfo, ChainError> {
     let req = json!({"jsonrpc":"2.0","id":91,"method":"chain_getBlockHash","params":[0]});
     ws.send(WsMessage::Text(req.to_string().into()))
         .await
-        .map_err(|e| format!("send: {e}"))?;
+        .map_err(|e| ChainError::Send(e.to_string()))?;
     let g = read_text_result(ws).await?;
-    let genesis_hash = hex_to_32(g.as_str().ok_or("no genesis hash")?)?;
+    let genesis_hash = hex_to_32(g.as_str().ok_or(ChainError::MissingField("genesis hash"))?)?;
 
     let req = json!({"jsonrpc":"2.0","id":92,"method":"state_getRuntimeVersion","params":[]});
     ws.send(WsMessage::Text(req.to_string().into()))
         .await
-        .map_err(|e| format!("send: {e}"))?;
+        .map_err(|e| ChainError::Send(e.to_string()))?;
     let rv = read_text_result(ws).await?;
-    let spec_version = rv["specVersion"].as_u64().ok_or("no specVersion")? as u32;
-    let tx_version = rv["transactionVersion"].as_u64().ok_or("no txVersion")? as u32;
+    let spec_version_raw = rv["specVersion"]
+        .as_u64()
+        .ok_or(ChainError::MissingField("specVersion"))?;
+    let spec_version = u32::try_from(spec_version_raw)
+        .map_err(|_| ChainError::SpecVersionOverflow(spec_version_raw))?;
+    let tx_version_raw = rv["transactionVersion"]
+        .as_u64()
+        .ok_or(ChainError::MissingField("transactionVersion"))?;
+    let tx_version = u32::try_from(tx_version_raw)
+        .map_err(|_| ChainError::SpecVersionOverflow(tx_version_raw))?;
 
     Ok(ChainInfo {
         genesis_hash,
@@ -186,39 +205,39 @@ async fn read_text_result(
     ws: &mut tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
-) -> Result<Value, String> {
+) -> Result<Value, ChainError> {
     loop {
         match ws.next().await {
             Some(Ok(WsMessage::Text(t))) => {
-                let v: Value =
-                    serde_json::from_str(t.as_ref()).map_err(|e| format!("parse: {e}"))?;
+                let v: Value = serde_json::from_str(t.as_ref())
+                    .map_err(|e| ChainError::Parse(e.to_string()))?;
                 if let Some(err) = v.get("error") {
-                    return Err(format!("RPC error: {err}"));
+                    return Err(ChainError::Rpc(err.to_string()));
                 }
                 return Ok(v["result"].clone());
             }
             Some(Ok(WsMessage::Ping(_) | WsMessage::Pong(_))) => continue,
-            Some(Err(e)) => return Err(format!("ws: {e}")),
-            None => return Err("connection closed".into()),
+            Some(Err(e)) => return Err(ChainError::Ws(e.to_string())),
+            None => return Err(ChainError::WsClosed),
             _ => continue,
         }
     }
 }
 
-/// Read the next JSON-RPC message from WebSocket, returning the full JSON Value.
 async fn read_text_result_raw(
     ws: &mut tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
-) -> Result<Value, String> {
+) -> Result<Value, ChainError> {
     loop {
         match ws.next().await {
             Some(Ok(WsMessage::Text(t))) => {
-                return serde_json::from_str(t.as_ref()).map_err(|e| format!("parse: {e}"));
+                return serde_json::from_str(t.as_ref())
+                    .map_err(|e| ChainError::Parse(e.to_string()));
             }
             Some(Ok(WsMessage::Ping(_) | WsMessage::Pong(_))) => continue,
-            Some(Err(e)) => return Err(format!("ws: {e}")),
-            None => return Err("connection closed".into()),
+            Some(Err(e)) => return Err(ChainError::Ws(e.to_string())),
+            None => return Err(ChainError::WsClosed),
             _ => continue,
         }
     }
@@ -232,10 +251,10 @@ pub async fn estimate_fee(
     signing: &crate::secret::SigningKey,
     ss58: &str,
     chain_info: &ChainInfo,
-) -> Result<u128, String> {
+) -> Result<u128, ChainError> {
     let (mut ws, _) = connect_async(node_url)
         .await
-        .map_err(|e| format!("connect: {e}"))?;
+        .map_err(|e| ChainError::Connect(e.to_string()))?;
 
     let chain_info = refresh_signing_params(&mut ws, chain_info).await?;
 
@@ -243,16 +262,13 @@ pub async fn estimate_fee(
         json!({"jsonrpc":"2.0","id":1,"method":"system_accountNextIndex","params":[ss58]});
     ws.send(WsMessage::Text(nonce_req.to_string().into()))
         .await
-        .map_err(|e| format!("send: {e}"))?;
+        .map_err(|e| ChainError::Send(e.to_string()))?;
     let nonce_result = read_text_result(&mut ws).await?;
-    let nonce = nonce_result
-        .as_u64()
-        .map(|n| n as u32)
-        .ok_or_else(|| format!("unexpected nonce response: {nonce_result}"))?;
+    let nonce_raw = nonce_result.as_u64().ok_or(ChainError::BadShape)?;
+    let nonce = u32::try_from(nonce_raw).map_err(|_| ChainError::SpecVersionOverflow(nonce_raw))?;
 
     let ext = build_remark_extrinsic(remark, signing, nonce, &chain_info);
 
-    // 3. Call TransactionPaymentApi_query_info
     let mut params = Vec::new();
     params.extend_from_slice(&ext);
     (ext.len() as u32).encode_to(&mut params);
@@ -265,19 +281,12 @@ pub async fn estimate_fee(
     });
     ws.send(WsMessage::Text(req.to_string().into()))
         .await
-        .map_err(|e| format!("send: {e}"))?;
+        .map_err(|e| ChainError::Send(e.to_string()))?;
 
     let result = read_text_result(&mut ws).await?;
-    let result_hex = result
-        .as_str()
-        .ok_or_else(|| format!("unexpected response: {result}"))?;
+    let result_hex = result.as_str().ok_or(ChainError::BadShape)?;
 
-    // 4. Decode SCALE RuntimeDispatchInfo
-    //    Weight { ref_time: Compact<u64>, proof_size: Compact<u64> }
-    //    DispatchClass: u8
-    //    partial_fee: remaining bytes as LE integer
-    let bytes =
-        hex::decode(result_hex.trim_start_matches("0x")).map_err(|e| format!("hex decode: {e}"))?;
+    let bytes = hex::decode(result_hex.trim_start_matches("0x"))?;
 
     let mut offset = 0;
     offset += scale_compact_len(&bytes, offset)?;
@@ -285,7 +294,7 @@ pub async fn estimate_fee(
     offset += 1;
 
     if offset >= bytes.len() {
-        return Err("no fee data in response".into());
+        return Err(ChainError::BadShape);
     }
 
     let fee_bytes = &bytes[offset..];
@@ -295,16 +304,15 @@ pub async fn estimate_fee(
     Ok(u128::from_le_bytes(buf))
 }
 
-/// Fetch token symbol and decimals from chain properties.
-pub async fn fetch_token_info(node_url: &str) -> Result<(String, u32), String> {
+pub async fn fetch_token_info(node_url: &str) -> Result<(String, u32), ChainError> {
     let (mut ws, _) = connect_async(node_url)
         .await
-        .map_err(|e| format!("connect: {e}"))?;
+        .map_err(|e| ChainError::Connect(e.to_string()))?;
 
     let req = json!({"jsonrpc":"2.0","id":1,"method":"system_properties","params":[]});
     ws.send(WsMessage::Text(req.to_string().into()))
         .await
-        .map_err(|e| format!("send: {e}"))?;
+        .map_err(|e| ChainError::Send(e.to_string()))?;
 
     let result = read_text_result(&mut ws).await?;
     let symbol = result["tokenSymbol"]
@@ -328,17 +336,15 @@ pub async fn fetch_token_info(node_url: &str) -> Result<(String, u32), String> {
     Ok((symbol, decimals))
 }
 
-/// Fetch the free balance for an account using the metadata-derived layout.
 pub async fn fetch_balance(
     node_url: &str,
     pubkey: &Pubkey,
     layout: &AccountInfoLayout,
-) -> Result<u128, String> {
+) -> Result<u128, ChainError> {
     let (mut ws, _) = connect_async(node_url)
         .await
-        .map_err(|e| format!("connect: {e}"))?;
+        .map_err(|e| ChainError::Connect(e.to_string()))?;
 
-    // System.Account key: twox128("System") ++ twox128("Account") ++ blake2_128_concat(pubkey)
     let mut key = Vec::with_capacity(64);
     key.extend_from_slice(&twox128(b"System"));
     key.extend_from_slice(&twox128(b"Account"));
@@ -353,17 +359,15 @@ pub async fn fetch_balance(
     });
     ws.send(WsMessage::Text(req.to_string().into()))
         .await
-        .map_err(|e| format!("send: {e}"))?;
+        .map_err(|e| ChainError::Send(e.to_string()))?;
 
     let result = read_text_result(&mut ws).await?;
     if result.is_null() {
-        return Err("account storage missing on this RPC backend".into());
+        return Err(ChainError::BadShape);
     }
-    let hex_str = result
-        .as_str()
-        .ok_or("unexpected state_getStorage response shape")?;
-    let data = hex::decode(hex_str.trim_start_matches("0x")).map_err(|e| format!("hex: {e}"))?;
-    layout.decode_free(&data)
+    let hex_str = result.as_str().ok_or(ChainError::BadShape)?;
+    let data = hex::decode(hex_str.trim_start_matches("0x"))?;
+    Ok(layout.decode_free(&data)?)
 }
 
 fn twox128(data: &[u8]) -> [u8; 16] {
@@ -378,17 +382,16 @@ fn twox128(data: &[u8]) -> [u8; 16] {
     out
 }
 
-/// Submit a remark extrinsic using a single WebSocket connection for nonce + submit.
 pub async fn submit_remark(
     node_url: &str,
     remark: &[u8],
     signing: &crate::secret::SigningKey,
     ss58: &str,
     chain_info: &ChainInfo,
-) -> Result<String, String> {
+) -> Result<String, ChainError> {
     let (mut ws, _) = connect_async(node_url)
         .await
-        .map_err(|e| format!("connect: {e}"))?;
+        .map_err(|e| ChainError::Connect(e.to_string()))?;
 
     let chain_info = refresh_signing_params(&mut ws, chain_info).await?;
 
@@ -396,12 +399,10 @@ pub async fn submit_remark(
         json!({"jsonrpc":"2.0","id":1,"method":"system_accountNextIndex","params":[ss58]});
     ws.send(WsMessage::Text(nonce_req.to_string().into()))
         .await
-        .map_err(|e| format!("send: {e}"))?;
+        .map_err(|e| ChainError::Send(e.to_string()))?;
     let nonce_result = read_text_result(&mut ws).await?;
-    let nonce = nonce_result
-        .as_u64()
-        .map(|n| n as u32)
-        .ok_or_else(|| format!("unexpected nonce response: {nonce_result}"))?;
+    let nonce_raw = nonce_result.as_u64().ok_or(ChainError::BadShape)?;
+    let nonce = u32::try_from(nonce_raw).map_err(|_| ChainError::SpecVersionOverflow(nonce_raw))?;
 
     let ext = build_remark_extrinsic(remark, signing, nonce, &chain_info);
     let hex = format!("0x{}", hex::encode(&ext));
@@ -409,9 +410,8 @@ pub async fn submit_remark(
         json!({"jsonrpc":"2.0","id":2,"method":"author_submitAndWatchExtrinsic","params":[hex]});
     ws.send(WsMessage::Text(watch_req.to_string().into()))
         .await
-        .map_err(|e| format!("send: {e}"))?;
+        .map_err(|e| ChainError::Send(e.to_string()))?;
 
-    // Wait for inBlock or finalized status, bounded by SUBMIT_TIMEOUT
     let wait = async {
         loop {
             let resp = read_text_result_raw(&mut ws).await?;
@@ -429,27 +429,24 @@ pub async fn submit_remark(
                     || status.get("invalid").is_some()
                     || status.get("usurped").is_some()
                 {
-                    return Err(format!("transaction failed: {status}"));
+                    return Err(ChainError::TxFailed(status.to_string()));
                 }
                 continue;
             }
             if let Some(err) = resp.get("error") {
-                return Err(format!("RPC error: {err}"));
+                return Err(ChainError::Rpc(err.to_string()));
             }
         }
     };
     match tokio::time::timeout(Duration::from_secs(60), wait).await {
         Ok(result) => result,
-        Err(_) => Err(
-            "Timed out after 60s waiting for block inclusion — your message may or may not have landed".into(),
-        ),
+        Err(_) => Err(ChainError::Timeout),
     }
 }
 
-/// Returns the byte length of a SCALE Compact-encoded value at the given offset.
-fn scale_compact_len(data: &[u8], offset: usize) -> Result<usize, String> {
+fn scale_compact_len(data: &[u8], offset: usize) -> Result<usize, ChainError> {
     if offset >= data.len() {
-        return Err("unexpected end of data".into());
+        return Err(ChainError::BadShape);
     }
     match data[offset] & 0b11 {
         0b00 => Ok(1),
@@ -463,9 +460,7 @@ fn scale_compact_len(data: &[u8], offset: usize) -> Result<usize, String> {
     }
 }
 
-fn hex_to_32(hex_str: &str) -> Result<[u8; 32], String> {
-    let bytes = hex::decode(hex_str.trim_start_matches("0x")).map_err(|e| format!("hex: {e}"))?;
-    bytes
-        .try_into()
-        .map_err(|_| "expected 32 bytes".to_string())
+fn hex_to_32(hex_str: &str) -> Result<[u8; 32], ChainError> {
+    let bytes = hex::decode(hex_str.trim_start_matches("0x"))?;
+    bytes.try_into().map_err(|_| ChainError::BadLength)
 }

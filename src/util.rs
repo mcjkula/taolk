@@ -144,18 +144,17 @@ fn is_base58_byte(b: u8) -> bool {
     )
 }
 
-pub fn ss58_decode(address: &str) -> Result<Pubkey, String> {
-    let decoded = bs58_decode(address).map_err(|_| "Invalid base58")?;
-    // Minimum: 1 (prefix) + 32 (pubkey) + 2 (checksum) = 35
+pub fn ss58_decode(address: &str) -> Result<Pubkey, crate::error::AddressError> {
+    use crate::error::AddressError;
+    let decoded = bs58_decode(address).map_err(|_| AddressError::InvalidBase58)?;
     if decoded.len() < 35 {
-        return Err("Address too short".into());
+        return Err(AddressError::TooShort);
     }
     let prefix_len = if decoded[0] < 64 { 1 } else { 2 };
     let pubkey_end = prefix_len + 32;
     if decoded.len() < pubkey_end + 2 {
-        return Err("Address too short".into());
+        return Err(AddressError::TooShort);
     }
-    // Verify checksum
     let payload = &decoded[..pubkey_end];
     let expected_checksum = &decoded[pubkey_end..pubkey_end + 2];
     let hash = {
@@ -165,7 +164,7 @@ pub fn ss58_decode(address: &str) -> Result<Pubkey, String> {
         hasher.finalize()
     };
     if &hash[..2] != expected_checksum {
-        return Err("Invalid checksum".into());
+        return Err(AddressError::BadChecksum);
     }
     let mut pubkey = [0u8; 32];
     pubkey.copy_from_slice(&decoded[prefix_len..pubkey_end]);

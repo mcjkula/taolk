@@ -3,6 +3,7 @@ use std::sync::mpsc::Sender;
 use curve25519_dalek::scalar::Scalar;
 use samp::{ContentType, decode_remark};
 
+use crate::error::ChainError;
 use crate::event::Event;
 use crate::types::{BlockRef, Pubkey};
 
@@ -63,7 +64,7 @@ async fn sync_inner(
     subscribed_channels: Vec<BlockRef>,
     last_block: u64,
     tx: &Sender<Event>,
-) -> Result<(), String> {
+) -> Result<(), ChainError> {
     let _ = tx.send(Event::Status("Catching up...".into()));
     let client = reqwest::Client::new();
     let base = mirror_url.trim_end_matches('/');
@@ -72,26 +73,27 @@ async fn sync_inner(
         .get(format!("{base}/v1/health"))
         .send()
         .await
-        .map_err(|e| format!("health: {e}"))?
+        .map_err(|e| ChainError::Http(format!("health: {e}")))?
         .json()
         .await
-        .map_err(|e| format!("health json: {e}"))?;
+        .map_err(|e| ChainError::Parse(format!("health json: {e}")))?;
 
     if health.ss58_prefix != expected_ss58_prefix {
-        return Err(format!(
-            "chain mismatch: mirror serves '{}' (SS58 prefix {}), expected prefix {}",
-            health.chain, health.ss58_prefix, expected_ss58_prefix
-        ));
+        return Err(ChainError::MirrorChainMismatch {
+            chain: health.chain,
+            got: health.ss58_prefix,
+            expected: expected_ss58_prefix,
+        });
     }
 
     let channels: Vec<ChannelResp> = client
         .get(format!("{base}/v1/channels"))
         .send()
         .await
-        .map_err(|e| format!("channels: {e}"))?
+        .map_err(|e| ChainError::Http(format!("channels: {e}")))?
         .json()
         .await
-        .map_err(|e| format!("channels json: {e}"))?;
+        .map_err(|e| ChainError::Parse(format!("channels json: {e}")))?;
 
     for ch in &channels {
         let _ = tx.send(Event::ChannelDiscovered {
@@ -113,10 +115,10 @@ async fn sync_inner(
             ))
             .send()
             .await
-            .map_err(|e| format!("channel messages: {e}"))?
+            .map_err(|e| ChainError::Http(format!("channel messages: {e}")))?
             .json()
             .await
-            .map_err(|e| format!("channel messages json: {e}"))?;
+            .map_err(|e| ChainError::Parse(format!("channel messages json: {e}")))?;
 
         for r in remarks {
             process_remark_from_mirror(&r, tx);
@@ -148,17 +150,17 @@ async fn fetch_remarks(
     type_byte: u8,
     after: u64,
     label: &str,
-) -> Result<Vec<RemarkResp>, String> {
+) -> Result<Vec<RemarkResp>, ChainError> {
     client
         .get(format!(
             "{base}/v1/remarks?type=0x{type_byte:02x}&after={after}"
         ))
         .send()
         .await
-        .map_err(|e| format!("{label}: {e}"))?
+        .map_err(|e| ChainError::Http(format!("{label}: {e}")))?
         .json()
         .await
-        .map_err(|e| format!("{label} json: {e}"))
+        .map_err(|e| ChainError::Parse(format!("{label} json: {e}")))
 }
 
 pub async fn fetch_channel(mirror_url: &str, channel_ref: BlockRef, tx: Sender<Event>) {

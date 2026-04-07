@@ -115,9 +115,7 @@ impl Session {
         let signing = Seed::from_bytes(*seed).derive_signing_key();
         let my_pubkey = signing.public_key();
 
-        let chain_info = crate::extrinsic::fetch_chain_info(node_url)
-            .await
-            .map_err(|e| SdkError::Chain(format!("Failed to fetch chain info: {e}")))?;
+        let chain_info = crate::extrinsic::fetch_chain_info(node_url).await?;
 
         let (symbol, decimals) = crate::extrinsic::fetch_token_info(node_url)
             .await
@@ -876,26 +874,28 @@ impl Session {
             &self.chain_info,
         )
         .await
-        .map_err(SdkError::Chain)
+        .map_err(SdkError::from)
     }
 
     pub async fn fetch_balance(&self) -> Result<u128> {
         let pk = self.pubkey();
-        crate::extrinsic::fetch_balance(&self.node_url, &pk, &self.chain_info.account_info_layout)
-            .await
-            .map_err(SdkError::Chain)
+        Ok(crate::extrinsic::fetch_balance(
+            &self.node_url,
+            &pk,
+            &self.chain_info.account_info_layout,
+        )
+        .await?)
     }
 
     pub async fn estimate_fee(&self, remark: &[u8]) -> Result<u128> {
-        crate::extrinsic::estimate_fee(
+        Ok(crate::extrinsic::estimate_fee(
             &self.node_url,
             remark,
             &self.signing,
             &self.my_ss58,
             &self.chain_info,
         )
-        .await
-        .map_err(SdkError::Chain)
+        .await?)
     }
 
     pub fn cleanup_pending(&mut self) -> Option<CleanupResult> {
