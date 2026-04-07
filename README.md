@@ -169,7 +169,7 @@ Run your own mirror using the [mirror-template](https://github.com/samp-org/mirr
 
 Wallet files are encrypted with Argon2id (64 MB, 3 iterations) and ChaCha20-Poly1305. Stored at `~/.samp/wallets/` with 0600 permissions.
 
-In memory, the seed is held in a `Zeroizing<[u8; 32]>` wrapper — not copyable, automatically zeroed on drop. Passwords use `Zeroizing<String>`. All cryptographic intermediates (shared secrets, symmetric keys, ephemeral scalars) are explicitly zeroized before function return.
+In memory, secret material flows through dedicated newtypes — `Seed`, `Password`, `Phrase`, `SigningKey` — defined in `src/secret.rs`. None are `Clone`, `Debug`, `Display`, `Serialize`, or `Hash`; all wrap `Zeroizing` and are zeroed on drop. The signing key is held privately on `Session` and only reachable via `Session::sign()` / `Session::public_key()`. Every secret-handling location in the codebase is grep-able to one of those four types. All cryptographic intermediates (shared secrets, symmetric keys, ephemeral scalars) are explicitly zeroized before function return.
 
 On the wire, 1:1 and group messages use ECDH on Ristretto255 with ChaCha20-Poly1305 AEAD. Each group message is independently encrypted for every member. Channels are plaintext (public by design).
 

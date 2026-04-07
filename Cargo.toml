@@ -1,6 +1,6 @@
 [package]
 name = "taolk"
-version = "1.3.0"
+version = "2.0.0"
 edition = "2024"
 license = "MIT"
 description = "Encrypted messaging client for Bittensor"
@@ -20,7 +20,7 @@ strip = true
 codegen-units = 1
 
 [dependencies]
-samp = { git = "https://github.com/samp-org/samp", subdirectory = "rust" }
+samp = { git = "https://github.com/samp-org/samp", rev = "a38bb13c1b8e98bb2ead1fe77623779e6cf00aab", subdirectory = "rust" }
 tokio = { version = "1", features = ["full"] }
 schnorrkel = "0.11"
 curve25519-dalek = { version = "4", features = ["digest"] }
