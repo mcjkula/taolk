@@ -15,6 +15,7 @@ pub enum Event {
         timestamp: u64,
     },
     NewChannelMessage {
+        sender: Pubkey,
         sender_ss58: String,
         channel_ref: BlockRef,
         body: String,
@@ -36,6 +37,7 @@ pub enum Event {
         members: Vec<Pubkey>,
     },
     NewGroupMessage {
+        sender: Pubkey,
         sender_ss58: String,
         group_ref: BlockRef,
         body: String,

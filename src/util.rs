@@ -184,6 +184,40 @@ pub fn ss58_decode(address: &str) -> Result<Pubkey, String> {
     Ok(Pubkey(pubkey))
 }
 
+pub fn copy_to_clipboard(text: &str) {
+    use std::io::{Write, stdout};
+    let encoded = b64_encode(text.as_bytes());
+    let mut out = stdout().lock();
+    let _ = out.write_all(b"\x1b]52;c;");
+    let _ = out.write_all(encoded.as_bytes());
+    let _ = out.write_all(b"\x07");
+    let _ = out.flush();
+}
+
+fn b64_encode(data: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(ALPHABET[((n >> 18) & 0x3f) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 0x3f) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            ALPHABET[((n >> 6) & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            ALPHABET[(n & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
 fn bs58_decode(input: &str) -> Result<Vec<u8>, ()> {
     const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
     let mut bytes = vec![0u8];

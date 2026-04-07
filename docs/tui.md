@@ -199,11 +199,19 @@ Same as thread messaging: `i` to compose, `Enter` to send, `Esc` to save draft.
 
 Press `/` in Normal mode to search within the current view. Type a query; results highlight as you type. Press `Enter` to keep the search active and return to Normal mode. Press `Esc` to clear the search.
 
-## Info
+## Copy a sender's SS58
 
-Press `a` in Normal mode to show details about the current conversation:
-- Thread: the peer's full SS58 address
-- Channel: the block:index reference and creator
+Press `y` in Normal mode while viewing any chat to open the sender picker: a
+list of unique senders from the current view, sorted by most recent activity.
+Navigate with `↑`/`↓` (or `j`/`k`), press `Enter` to copy the highlighted
+sender's full 48-character SS58 to the system clipboard, `Esc` to cancel. The
+clipboard payload is delivered via OSC 52 escape sequence and works in
+WezTerm, macOS Terminal.app, iTerm2, Alacritty, Kitty, and tmux (with
+`set-clipboard on`); it also works over SSH because the escape is interpreted
+on the client terminal.
+
+You can also click directly on a sender's name in any rendered message to
+copy their SS58 in one click — no picker required.
 
 ## Keyboard reference
 
@@ -220,7 +228,7 @@ Press `a` in Normal mode to show details about the current conversation:
 | `g` | Create group |
 | `r` | Fetch missing messages from chain |
 | `/` | Search |
-| `a` | Show address / info |
+| `y` | Open sender picker (copy SS58 from chat) |
 | `Space` | Toggle sidebar |
 | `Ctrl+U` | Scroll up |
 | `Ctrl+D` | Scroll down |

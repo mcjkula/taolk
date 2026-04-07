@@ -101,7 +101,7 @@ fn read_extrinsic_ignores_non_samp_remark() {
     let alice_kp = keypair(&alice_seed);
     let alice_pubkey = Pubkey(alice_kp.public.to_bytes());
 
-    // Build an extrinsic with a non-SAMP remark (no 0x1X content type prefix)
+    // Build an extrinsic with a non-SAMP remark
     let remark = b"not a samp message";
     let ext = extrinsic::build_remark_extrinsic(remark, &alice_kp, 0, &ci());
     let hex = ext_to_hex(&ext);
@@ -190,8 +190,13 @@ fn read_extrinsic_decrypts_for_recipient() {
     let encrypted_content =
         samp::encrypt(plaintext, &recipient_ristretto, &nonce, &alice_seed).unwrap();
 
-    // Build the SAMP remark wire format for encrypted (0x11)
-    let remark = samp::encode_encrypted(0x11, view_tag, &nonce, &encrypted_content);
+    // Build the SAMP remark wire format for encrypted
+    let remark = samp::encode_encrypted(
+        samp::CONTENT_TYPE_ENCRYPTED,
+        view_tag,
+        &nonce,
+        &encrypted_content,
+    );
 
     let ext = extrinsic::build_remark_extrinsic(&remark, &alice_kp, 0, &ci());
     let hex = ext_to_hex(&ext);
@@ -246,7 +251,12 @@ fn read_extrinsic_skips_message_for_wrong_recipient() {
     let view_tag = samp::compute_view_tag(&alice_seed, &recipient_ristretto, &nonce).unwrap();
     let encrypted_content =
         samp::encrypt(plaintext, &recipient_ristretto, &nonce, &alice_seed).unwrap();
-    let remark = samp::encode_encrypted(0x11, view_tag, &nonce, &encrypted_content);
+    let remark = samp::encode_encrypted(
+        samp::CONTENT_TYPE_ENCRYPTED,
+        view_tag,
+        &nonce,
+        &encrypted_content,
+    );
 
     let ext = extrinsic::build_remark_extrinsic(&remark, &alice_kp, 0, &ci());
     let hex = ext_to_hex(&ext);

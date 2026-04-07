@@ -239,6 +239,28 @@ impl Db {
             .ok()
     }
 
+    pub fn load_all_peers(&self) -> std::collections::HashMap<String, Pubkey> {
+        let mut out = std::collections::HashMap::new();
+        let Ok(mut stmt) = self.conn.prepare("SELECT ss58_short, pubkey FROM peers") else {
+            return out;
+        };
+        let rows = stmt.query_map([], |row| {
+            let ss58: String = row.get(0)?;
+            let blob: Vec<u8> = row.get(1)?;
+            let mut key = [0u8; 32];
+            if blob.len() == 32 {
+                key.copy_from_slice(&blob);
+            }
+            Ok((ss58, Pubkey(key)))
+        });
+        if let Ok(rows) = rows {
+            for entry in rows.flatten() {
+                out.insert(entry.0, entry.1);
+            }
+        }
+        out
+    }
+
     pub fn has_message_at(&self, block_ref: BlockRef) -> bool {
         self.conn
             .query_row(
@@ -252,7 +274,7 @@ impl Db {
     pub fn load_inbox(&self) -> (Vec<InboxMessage>, Vec<InboxMessage>) {
         let inner = || -> Option<Vec<InboxMessage>> {
             let mut stmt = self.conn.prepare(
-                "SELECT id, peer_ss58, timestamp, body, content_type, is_mine, block_number, ext_index FROM inbox ORDER BY timestamp"
+                "SELECT id, peer_ss58, timestamp, body, content_type, is_mine, block_number, ext_index FROM inbox ORDER BY block_number, ext_index"
             ).ok()?;
             let all = stmt
                 .query_map([], |row| {

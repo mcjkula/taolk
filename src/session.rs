@@ -185,6 +185,7 @@ impl Session {
     }
 
     pub fn load_from_db(&mut self) {
+        self.peer_pubkeys = self.db.load_all_peers();
         let (inbox, outbox) = self.db.load_inbox();
         self.inbox = inbox;
         self.outbox = outbox;
@@ -238,7 +239,16 @@ impl Session {
             });
         }
 
+        let me = self.pubkey();
         for (group_ref, creator_pubkey, members) in self.db.load_groups() {
+            for member in &members {
+                if *member == me {
+                    continue;
+                }
+                let ss58 = crate::util::ss58_short(member);
+                self.peer_pubkeys.insert(ss58.clone(), *member);
+                self.db.upsert_peer(&ss58, member);
+            }
             let i = self.groups.len();
             let messages = self.db.load_group_messages(group_ref);
             let msg_count = messages.len();
@@ -264,9 +274,15 @@ impl Session {
         content_type: u8,
         block_ref: BlockRef,
     ) {
+        let is_mine = sender == self.pubkey();
+        let peer = if is_mine { recipient } else { sender };
+        let peer_ss58 = crate::util::ss58_short(&peer);
+        self.peer_pubkeys.insert(peer_ss58.clone(), peer);
+        self.db.upsert_peer(&peer_ss58, &peer);
+
         let (block_number, ext_index) = (block_ref.block, block_ref.index);
         if block_number > 0 {
-            let already = if sender == self.pubkey() {
+            let already = if is_mine {
                 self.outbox
                     .iter()
                     .any(|m| m.block_number == block_number && m.ext_index == ext_index)
@@ -279,9 +295,6 @@ impl Session {
                 return;
             }
         }
-        let is_mine = sender == self.pubkey();
-        let peer = if is_mine { recipient } else { sender };
-        let peer_ss58 = crate::util::ss58_short(&peer);
         let msg = InboxMessage {
             peer_ss58,
             timestamp,
@@ -292,11 +305,13 @@ impl Session {
             ext_index,
         };
         self.db.insert_inbox(&msg);
-        if is_mine {
-            self.outbox.push(msg);
+        let target = if is_mine {
+            &mut self.outbox
         } else {
-            self.inbox.push(msg);
-        }
+            &mut self.inbox
+        };
+        target.push(msg);
+        target.sort_by_key(|m| (m.block_number, m.ext_index));
     }
 
     pub fn add_thread_message(
@@ -306,13 +321,6 @@ impl Session {
         mut thread_ref: BlockRef,
         msg: NewMessage,
     ) {
-        if self.db.has_message_at(BlockRef {
-            block: msg.block_number,
-            index: msg.ext_index,
-        }) {
-            return;
-        }
-
         let is_mine = sender == self.pubkey();
         let peer = if is_mine { recipient } else { sender };
         let peer_ss58 = if is_mine {
@@ -322,6 +330,13 @@ impl Session {
         };
         self.peer_pubkeys.insert(peer_ss58.clone(), peer);
         self.db.upsert_peer(&peer_ss58, &peer);
+
+        if self.db.has_message_at(BlockRef {
+            block: msg.block_number,
+            index: msg.ext_index,
+        }) {
+            return;
+        }
 
         if thread_ref == BlockRef::ZERO {
             thread_ref = BlockRef {
@@ -586,6 +601,15 @@ impl Session {
         group_ref: BlockRef,
         members: Vec<Pubkey>,
     ) {
+        let me = self.pubkey();
+        for member in &members {
+            if *member == me {
+                continue;
+            }
+            let ss58 = crate::util::ss58_short(member);
+            self.peer_pubkeys.insert(ss58.clone(), *member);
+            self.db.upsert_peer(&ss58, member);
+        }
         if self.group_index.contains_key(&group_ref) {
             return;
         }
@@ -692,7 +716,12 @@ impl Session {
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         let vt = samp::compute_view_tag(&self.seed, &enc_pk, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
-        Ok(samp::encode_encrypted(0x11, vt, &nonce, &encrypted))
+        Ok(samp::encode_encrypted(
+            samp::CONTENT_TYPE_ENCRYPTED,
+            vt,
+            &nonce,
+            &encrypted,
+        ))
     }
 
     pub fn build_thread_root(&self, recipient: &Pubkey, body: &str) -> Result<Vec<u8>> {
@@ -708,7 +737,12 @@ impl Session {
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         let vt = samp::compute_view_tag(&self.seed, &enc_pk, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
-        Ok(samp::encode_encrypted(0x12, vt, &nonce, &encrypted))
+        Ok(samp::encode_encrypted(
+            samp::CONTENT_TYPE_THREAD,
+            vt,
+            &nonce,
+            &encrypted,
+        ))
     }
 
     pub fn build_thread_reply(&self, thread_idx: usize, body: &str) -> Result<Vec<u8>> {
@@ -728,7 +762,12 @@ impl Session {
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         let vt = samp::compute_view_tag(&self.seed, &enc_pk, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
-        Ok(samp::encode_encrypted(0x12, vt, &nonce, &encrypted))
+        Ok(samp::encode_encrypted(
+            samp::CONTENT_TYPE_THREAD,
+            vt,
+            &nonce,
+            &encrypted,
+        ))
     }
 
     pub fn build_channel_create(&self, name: &str, description: &str) -> Result<Vec<u8>> {

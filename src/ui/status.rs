@@ -70,6 +70,13 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
+        Mode::SenderPicker => Span::styled(
+            " COPY SS58 ",
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
     };
 
     let status_span = if let Some((status, is_error)) = app.current_status() {

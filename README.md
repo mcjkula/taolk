@@ -146,6 +146,15 @@ On the wire, 1:1 and group messages use ECDH on Ristretto255 with ChaCha20-Poly1
 
 The private key never leaves the client. No key material is sent over the network.
 
+### Conscious trade-offs
+
+These properties of taolk are accepted limitations of on-chain trustless messaging, not oversights:
+
+- **No forward secrecy in 1:1 / threads.** Compromise of the seed decrypts every past message of those types. Treat the seed like a PGP private key.
+- **Key reuse for signing and ECDH.** sr25519 signing and Ristretto255 ECDH share the same expanded scalar. No public attack against this reuse exists; SAMP prefers keeping the recipient address equal to the SS58 over forcing a separate enc-key publication.
+- **On-chain metadata is public.** The sender, recipient (where applicable), block height, and timestamp of every remark are visible to anyone reading the chain. Strong metadata privacy needs network-layer mixing, which is out of scope.
+- **No post-quantum resistance.** Ristretto255 is broken by Shor; harvest-now-decrypt-later is acknowledged.
+
 ## Dependencies
 
 Pure Rust. TLS via rustls (no OpenSSL). SQLite bundled via rusqlite. The SDK (without TUI features) pulls no terminal dependencies.
