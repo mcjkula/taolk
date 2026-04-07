@@ -4,6 +4,10 @@ pub struct Pubkey(pub [u8; 32]);
 
 impl Pubkey {
     pub const ZERO: Self = Self([0u8; 32]);
+
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
 }
 
 impl std::ops::Deref for Pubkey {

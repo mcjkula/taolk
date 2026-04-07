@@ -60,6 +60,7 @@ fn derive_key(password: &Password, salt: &[u8; SALT_LEN]) -> [u8; 32] {
     key
 }
 
+#[must_use = "create returns Err if the wallet file cannot be written"]
 pub fn create(name: &str, password: &Password, seed: &Seed) -> Result<(), WalletError> {
     create_at(&wallet_path(name), password, seed)
 }
@@ -109,6 +110,7 @@ pub fn create_at(
     Ok(())
 }
 
+#[must_use = "the returned Seed must be consumed"]
 pub fn open(name: &str, password: &Password) -> Result<Seed, WalletError> {
     open_at(&wallet_path(name), password)
 }
