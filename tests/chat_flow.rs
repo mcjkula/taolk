@@ -13,10 +13,6 @@ use zeroize::Zeroizing;
 const ALICE_PUB: Pubkey = Pubkey([1u8; 32]);
 const CHARLIE_PUB: Pubkey = Pubkey([3u8; 32]);
 
-// ---------------------------------------------------------------------------
-// Thread identity: messages with same thread_ref -> one thread
-// ---------------------------------------------------------------------------
-
 #[test]
 fn two_messages_same_thread() {
     let mut s = bob_session();
@@ -187,10 +183,6 @@ fn own_message_uses_recipient_as_peer() {
     assert_eq!(s.threads[0].peer_ss58, util::ss58_short(&ALICE_PUB));
 }
 
-// ---------------------------------------------------------------------------
-// DB persistence roundtrip
-// ---------------------------------------------------------------------------
-
 #[test]
 fn db_roundtrip_then_new_message_same_thread() {
     let db = Db::open_in_memory(&BOB_SEED).unwrap();
@@ -305,10 +297,6 @@ fn db_roundtrip_own_sent_then_receive_same_thread() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Message ordering
-// ---------------------------------------------------------------------------
-
 #[test]
 fn messages_sorted_by_block_position() {
     let mut s = bob_session();
@@ -394,10 +382,6 @@ fn duplicate_rejected() {
     assert_eq!(s.threads[0].messages.len(), 1);
 }
 
-// ---------------------------------------------------------------------------
-// Gap detection
-// ---------------------------------------------------------------------------
-
 #[test]
 fn gap_detected_for_missing_reference() {
     let mut s = bob_session();
@@ -480,10 +464,6 @@ fn no_gap_for_zero_references() {
     );
     assert!(!s.threads[0].messages[0].has_gap);
 }
-
-// ---------------------------------------------------------------------------
-// reply_to / continues correctness
-// ---------------------------------------------------------------------------
 
 #[test]
 fn last_ref_returns_latest_message() {
@@ -571,10 +551,6 @@ fn my_last_ref_returns_own_latest() {
     assert_eq!(s.threads[0].last_ref(), br(102, 0));
     assert_eq!(s.threads[0].my_last_ref(), br(101, 0));
 }
-
-// ---------------------------------------------------------------------------
-// Thread identity with explicit thread_ref
-// ---------------------------------------------------------------------------
 
 #[test]
 fn alice_sends_two_messages_bob_offline_between() {
@@ -664,10 +640,6 @@ fn cannot_message_self() {
     assert!(s.create_thread(bob_pub()).is_err());
 }
 
-// ---------------------------------------------------------------------------
-// Verify ss58_short determinism
-// ---------------------------------------------------------------------------
-
 #[test]
 fn ss58_short_deterministic() {
     let a = util::ss58_short(&ALICE_PUB);
@@ -685,10 +657,6 @@ fn ss58_decode_roundtrip_preserves_pubkey() {
     assert_eq!(decoded, ALICE_PUB);
     assert_eq!(util::ss58_short(&decoded), util::ss58_short(&ALICE_PUB));
 }
-
-// ---------------------------------------------------------------------------
-// Own message with real recipient
-// ---------------------------------------------------------------------------
 
 #[test]
 fn own_message_with_real_recipient_correct_thread() {

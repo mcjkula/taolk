@@ -32,10 +32,6 @@ fn make_inbox_msg(body: &str, is_mine: bool, block_number: u32, ext_index: u16) 
     }
 }
 
-// ---------------------------------------------------------------------------
-// Inbox
-// ---------------------------------------------------------------------------
-
 #[test]
 fn inbox_insert_and_load() {
     let db = test_db();
@@ -62,10 +58,6 @@ fn inbox_separates_mine_vs_received() {
     assert_eq!(outbox[0].body, "sent");
 }
 
-// ---------------------------------------------------------------------------
-// Thread messages
-// ---------------------------------------------------------------------------
-
 #[test]
 fn thread_message_insert_and_load() {
     let db = test_db();
@@ -83,10 +75,6 @@ fn thread_message_insert_and_load() {
     assert_eq!(threads[0].2.len(), 1);
     assert_eq!(threads[0].2[0].body, "threaded hello");
 }
-
-// ---------------------------------------------------------------------------
-// Channels
-// ---------------------------------------------------------------------------
 
 #[test]
 fn channel_insert_and_load() {
@@ -144,10 +132,6 @@ fn channel_delete() {
     assert!(channels.is_empty());
 }
 
-// ---------------------------------------------------------------------------
-// Known channels
-// ---------------------------------------------------------------------------
-
 #[test]
 fn known_channel_insert_and_load() {
     let db = test_db();
@@ -164,10 +148,6 @@ fn known_channel_insert_and_load() {
     assert_eq!(known[0].2, "A public channel");
     assert_eq!(known[0].3, "Announcer");
 }
-
-// ---------------------------------------------------------------------------
-// Groups
-// ---------------------------------------------------------------------------
 
 #[test]
 fn group_insert_and_load() {
@@ -208,10 +188,6 @@ fn group_message_insert_and_load() {
     assert_eq!(messages[0].sender_ss58, "Alice");
 }
 
-// ---------------------------------------------------------------------------
-// Peers
-// ---------------------------------------------------------------------------
-
 #[test]
 fn peer_upsert_and_get() {
     let db = test_db();
@@ -233,10 +209,6 @@ fn peer_upsert_overwrites() {
     let got = db.get_peer_pubkey("Ali..xyz").unwrap();
     assert_eq!(got, pk2);
 }
-
-// ---------------------------------------------------------------------------
-// has_message_at
-// ---------------------------------------------------------------------------
 
 #[test]
 fn has_message_at_true() {
@@ -305,10 +277,6 @@ fn has_group_message_at() {
         index: 4
     }));
 }
-
-// ---------------------------------------------------------------------------
-// Encryption with different seeds
-// ---------------------------------------------------------------------------
 
 #[test]
 fn different_seeds_different_encryption() {

@@ -2,21 +2,10 @@ mod common;
 
 use common::{ALICE_SEED, signing_from_seed, test_chain_info};
 use taolk::extrinsic;
-use taolk::secret::SigningKey;
-
-fn test_signing() -> SigningKey {
-    signing_from_seed(&ALICE_SEED)
-}
-
-// ---------------------------------------------------------------------------
-// Stable length: same inputs produce same-length extrinsics.
-// SR25519 signatures use internal randomness so bytes differ, but the
-// structure (and thus length) must be identical.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn build_remark_stable_length() {
-    let sk = test_signing();
+    let sk = signing_from_seed(&ALICE_SEED);
     let ci = test_chain_info();
     let remark = b"hello";
 
@@ -26,13 +15,9 @@ fn build_remark_stable_length() {
     assert_eq!(a.len(), b.len());
 }
 
-// ---------------------------------------------------------------------------
-// Different nonces produce different extrinsics
-// ---------------------------------------------------------------------------
-
 #[test]
 fn build_remark_different_nonces() {
-    let sk = test_signing();
+    let sk = signing_from_seed(&ALICE_SEED);
     let ci = test_chain_info();
     let remark = b"hello";
 
@@ -42,13 +27,9 @@ fn build_remark_different_nonces() {
     assert_ne!(a, b);
 }
 
-// ---------------------------------------------------------------------------
-// The remark payload appears as a substring in the encoded extrinsic
-// ---------------------------------------------------------------------------
-
 #[test]
 fn build_remark_contains_payload() {
-    let sk = test_signing();
+    let sk = signing_from_seed(&ALICE_SEED);
     let ci = test_chain_info();
     let remark = b"unique-payload-marker";
 
@@ -61,13 +42,9 @@ fn build_remark_contains_payload() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// First bytes are a SCALE compact length prefix
-// ---------------------------------------------------------------------------
-
 #[test]
 fn build_remark_starts_with_length_prefix() {
-    let sk = test_signing();
+    let sk = signing_from_seed(&ALICE_SEED);
     let ci = test_chain_info();
     let remark = b"test";
 
@@ -83,14 +60,9 @@ fn build_remark_starts_with_length_prefix() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// After length prefix + signature, find system pallet (0x00) and
-// remark_with_event call (0x07)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn build_remark_system_pallet() {
-    let sk = test_signing();
+    let sk = signing_from_seed(&ALICE_SEED);
     let ci = test_chain_info();
     let remark = b"pallet-test";
 
@@ -123,13 +95,9 @@ fn build_remark_system_pallet() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Era byte is 0x00 (immortal)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn build_remark_immortal_era() {
-    let sk = test_signing();
+    let sk = signing_from_seed(&ALICE_SEED);
     let ci = test_chain_info();
     let remark = b"era-test";
 
@@ -145,11 +113,6 @@ fn build_remark_immortal_era() {
         "era byte should be 0x00 (immortal)"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Helper: decode SCALE compact integer from the start of a byte slice
-// Returns (prefix_byte_count, decoded_value)
-// ---------------------------------------------------------------------------
 
 fn decode_compact(data: &[u8]) -> (usize, usize) {
     match data[0] & 0b11 {

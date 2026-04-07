@@ -13,10 +13,6 @@ fn bob_pubkey() -> Pubkey {
     Pubkey(samp::public_from_seed(&BOB_SAMP_SEED))
 }
 
-// ---------------------------------------------------------------------------
-// Public message
-// ---------------------------------------------------------------------------
-
 #[test]
 fn build_public_message_roundtrip() {
     let session = alice_session();
@@ -30,10 +26,6 @@ fn build_public_message_roundtrip() {
     assert_eq!(decoded.recipient, recipient.0);
     assert_eq!(std::str::from_utf8(&decoded.content).unwrap(), body);
 }
-
-// ---------------------------------------------------------------------------
-// Encrypted 1:1 message
-// ---------------------------------------------------------------------------
 
 #[test]
 fn build_encrypted_message_decryptable() {
@@ -50,10 +42,6 @@ fn build_encrypted_message_decryptable() {
     let plaintext = samp::decrypt(&decoded, &bob_scalar()).unwrap();
     assert_eq!(std::str::from_utf8(&plaintext).unwrap(), "hello");
 }
-
-// ---------------------------------------------------------------------------
-// Thread root
-// ---------------------------------------------------------------------------
 
 #[test]
 fn build_thread_root_decryptable() {
@@ -75,10 +63,6 @@ fn build_thread_root_decryptable() {
     assert_eq!(std::str::from_utf8(body).unwrap(), "thread start");
 }
 
-// ---------------------------------------------------------------------------
-// Channel create
-// ---------------------------------------------------------------------------
-
 #[test]
 fn build_channel_create_roundtrip() {
     let session = alice_session();
@@ -92,10 +76,6 @@ fn build_channel_create_roundtrip() {
     assert_eq!(name, "test");
     assert_eq!(description, "desc");
 }
-
-// ---------------------------------------------------------------------------
-// Channel message
-// ---------------------------------------------------------------------------
 
 #[test]
 fn build_channel_message_roundtrip() {
@@ -114,10 +94,6 @@ fn build_channel_message_roundtrip() {
     let wire_ref = samp::channel_ref_from_recipient(&decoded.recipient);
     assert_eq!(wire_ref, channel_ref);
 }
-
-// ---------------------------------------------------------------------------
-// Group create
-// ---------------------------------------------------------------------------
 
 #[test]
 fn build_group_create_decryptable() {
@@ -145,10 +121,6 @@ fn build_group_create_decryptable() {
     assert_eq!(std::str::from_utf8(text).unwrap(), "group hello");
 }
 
-// ---------------------------------------------------------------------------
-// Error: invalid thread index
-// ---------------------------------------------------------------------------
-
 #[test]
 fn build_returns_error_for_invalid_thread_idx() {
     let session = alice_session();
@@ -158,10 +130,6 @@ fn build_returns_error_for_invalid_thread_idx() {
     assert!(err.contains("not found"), "expected NotFound, got: {err}");
 }
 
-// ---------------------------------------------------------------------------
-// Error: invalid channel index
-// ---------------------------------------------------------------------------
-
 #[test]
 fn build_returns_error_for_invalid_channel_idx() {
     let session = alice_session();
@@ -170,10 +138,6 @@ fn build_returns_error_for_invalid_channel_idx() {
     let err = format!("{}", result.unwrap_err());
     assert!(err.contains("not found"), "expected NotFound, got: {err}");
 }
-
-// ---------------------------------------------------------------------------
-// Error: invalid group index
-// ---------------------------------------------------------------------------
 
 #[test]
 fn build_returns_error_for_invalid_group_idx() {

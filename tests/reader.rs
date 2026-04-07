@@ -23,10 +23,6 @@ fn make_ctx<'a>(
     }
 }
 
-// ---------------------------------------------------------------------------
-// 1. read_extrinsic emits Event::NewMessage for a valid SAMP public remark
-// ---------------------------------------------------------------------------
-
 #[test]
 fn read_extrinsic_emits_event_for_samp_remark() {
     let alice_seed = [0xAA; 32];
@@ -69,10 +65,6 @@ fn read_extrinsic_emits_event_for_samp_remark() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// 2. read_extrinsic ignores non-SAMP remark
-// ---------------------------------------------------------------------------
-
 #[test]
 fn read_extrinsic_ignores_non_samp_remark() {
     let alice_seed = [0xAA; 32];
@@ -93,10 +85,6 @@ fn read_extrinsic_ignores_non_samp_remark() {
         "non-SAMP remark should not emit any events"
     );
 }
-
-// ---------------------------------------------------------------------------
-// 3. extract_block_timestamp from a real timestamp inherent
-// ---------------------------------------------------------------------------
 
 #[test]
 fn extract_block_timestamp_from_inherent() {
@@ -133,19 +121,11 @@ fn extract_block_timestamp_from_inherent() {
     assert_eq!(result, ts_ms);
 }
 
-// ---------------------------------------------------------------------------
-// 4. extract_block_timestamp returns 0 for empty extrinsics array
-// ---------------------------------------------------------------------------
-
 #[test]
 fn extract_block_timestamp_empty() {
     let extrinsics: Vec<serde_json::Value> = vec![];
     assert_eq!(reader::extract_block_timestamp(&extrinsics), 0);
 }
-
-// ---------------------------------------------------------------------------
-// 5. read_extrinsic decrypts encrypted message for correct recipient
-// ---------------------------------------------------------------------------
 
 #[test]
 fn read_extrinsic_decrypts_for_recipient() {
@@ -205,10 +185,6 @@ fn read_extrinsic_decrypts_for_recipient() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// 6. read_extrinsic skips encrypted message for wrong recipient
-// ---------------------------------------------------------------------------
-
 #[test]
 fn read_extrinsic_skips_message_for_wrong_recipient() {
     let alice_seed = [0xAA; 32];
@@ -249,10 +225,6 @@ fn read_extrinsic_skips_message_for_wrong_recipient() {
         "encrypted message for Bob should not emit event when read by Charlie"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Debug helper for test failures (Event doesn't derive Debug)
-// ---------------------------------------------------------------------------
 
 fn event_debug(result: &Result<Event, mpsc::TryRecvError>) -> String {
     match result {
