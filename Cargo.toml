@@ -1,6 +1,6 @@
 [package]
 name = "taolk"
-version = "1.0.3"
+version = "1.1.0"
 edition = "2024"
 license = "MIT"
 description = "Encrypted messaging client for Bittensor"
@@ -47,6 +47,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 toml = "0.8"
 thiserror = "2"
 zeroize = { version = "1", features = ["derive"] }
+rodio = { version = "0.22", default-features = false, features = ["playback", "vorbis"] }
 
 # TUI-only dependencies (gated behind "tui" feature)
 ratatui = { version = "0.30", optional = true }

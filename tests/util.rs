@@ -109,3 +109,75 @@ fn format_fee_basic() {
 fn format_number_with_commas() {
     assert_eq!(util::format_number(1234567), "1,234,567");
 }
+
+const TEST_SS58: &str = "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY";
+const OTHER_SS58: &str = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty";
+
+#[test]
+fn body_mentions_finds_self_at_start() {
+    assert!(util::body_mentions(
+        &format!("@{TEST_SS58} please look"),
+        TEST_SS58
+    ));
+}
+
+#[test]
+fn body_mentions_finds_self_after_word() {
+    assert!(util::body_mentions(
+        &format!("hey @{TEST_SS58}, can you help?"),
+        TEST_SS58
+    ));
+}
+
+#[test]
+fn body_mentions_finds_self_at_end() {
+    assert!(util::body_mentions(
+        &format!("nudging @{TEST_SS58}"),
+        TEST_SS58
+    ));
+}
+
+#[test]
+fn body_mentions_ignores_other_address() {
+    assert!(!util::body_mentions(
+        &format!("@{OTHER_SS58} not me"),
+        TEST_SS58
+    ));
+}
+
+#[test]
+fn body_mentions_ignores_bare_self_address() {
+    assert!(!util::body_mentions(
+        &format!("see {TEST_SS58} for details"),
+        TEST_SS58
+    ));
+}
+
+#[test]
+fn body_mentions_ignores_email_like_at() {
+    assert!(!util::body_mentions(
+        &format!("user@{TEST_SS58}"),
+        TEST_SS58
+    ));
+}
+
+#[test]
+fn body_mentions_ignores_extra_base58_suffix() {
+    assert!(!util::body_mentions(
+        &format!("@{TEST_SS58}X extra"),
+        TEST_SS58
+    ));
+}
+
+#[test]
+fn body_mentions_allows_trailing_punctuation() {
+    assert!(util::body_mentions(
+        &format!("@{TEST_SS58}! urgent"),
+        TEST_SS58
+    ));
+}
+
+#[test]
+fn body_mentions_empty_body() {
+    assert!(!util::body_mentions("", TEST_SS58));
+}

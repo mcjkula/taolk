@@ -1,4 +1,5 @@
 use std::time::Instant;
+use taolk::audio::Audio;
 use taolk::session::Session;
 use taolk::types::{BlockRef, Pubkey};
 
@@ -58,10 +59,12 @@ pub struct App {
     pub sidebar_width: u16,
     pub timestamp_format: String,
     pub date_format: String,
+    pub audio: Audio,
+    pub sound_armed: bool,
 }
 
 impl App {
-    pub fn new(session: Session) -> Self {
+    pub fn new(session: Session, audio: Audio) -> Self {
         Self {
             session,
             running: true,
@@ -95,6 +98,8 @@ impl App {
             sidebar_width: 28,
             timestamp_format: "%H:%M".into(),
             date_format: "%Y-%m-%d %H:%M".into(),
+            audio,
+            sound_armed: false,
         }
     }
 

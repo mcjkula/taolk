@@ -8,6 +8,7 @@ pub struct Config {
     pub network: Network,
     pub security: Security,
     pub ui: Ui,
+    pub notifications: Notifications,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -38,6 +39,16 @@ pub struct Ui {
     pub date_format: String,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Notifications {
+    pub enabled: bool,
+    pub volume: u8,
+    pub dm: bool,
+    pub ambient: bool,
+    pub mention: bool,
+}
+
 impl Default for Network {
     fn default() -> Self {
         Self {
@@ -60,6 +71,18 @@ impl Default for Ui {
             mouse: true,
             timestamp_format: "%H:%M".into(),
             date_format: "%Y-%m-%d %H:%M".into(),
+        }
+    }
+}
+
+impl Default for Notifications {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            volume: 70,
+            dm: true,
+            ambient: true,
+            mention: true,
         }
     }
 }
@@ -148,6 +171,41 @@ pub const KEYS: &[KeyDef] = &[
         description: "Full date format (chrono strftime)",
         default_display: "%Y-%m-%d %H:%M",
     },
+    KeyDef {
+        key: "notifications.enabled",
+        section: "notifications",
+        field: "enabled",
+        description: "Play notification sounds",
+        default_display: "true",
+    },
+    KeyDef {
+        key: "notifications.volume",
+        section: "notifications",
+        field: "volume",
+        description: "Notification volume (0-100)",
+        default_display: "70",
+    },
+    KeyDef {
+        key: "notifications.dm",
+        section: "notifications",
+        field: "dm",
+        description: "Sound for direct messages",
+        default_display: "true",
+    },
+    KeyDef {
+        key: "notifications.ambient",
+        section: "notifications",
+        field: "ambient",
+        description: "Sound for channel/group activity",
+        default_display: "true",
+    },
+    KeyDef {
+        key: "notifications.mention",
+        section: "notifications",
+        field: "mention",
+        description: "Sound when @-mentioned in a channel/group",
+        default_display: "true",
+    },
 ];
 
 pub fn lookup_key(key: &str) -> Option<&'static KeyDef> {
@@ -182,6 +240,11 @@ pub fn get_value(config: &Config, key: &str) -> String {
         "ui.mouse" => config.ui.mouse.to_string(),
         "ui.timestamp_format" => config.ui.timestamp_format.clone(),
         "ui.date_format" => config.ui.date_format.clone(),
+        "notifications.enabled" => config.notifications.enabled.to_string(),
+        "notifications.volume" => config.notifications.volume.to_string(),
+        "notifications.dm" => config.notifications.dm.to_string(),
+        "notifications.ambient" => config.notifications.ambient.to_string(),
+        "notifications.mention" => config.notifications.mention.to_string(),
         _ => String::new(),
     }
 }
@@ -233,6 +296,17 @@ pub fn set_key(key: &str, raw: &[String]) -> Result<String, String> {
             toml::Value::Integer(v as i64)
         }
         "ui.mouse" => toml::Value::Boolean(parse_bool(raw)?),
+        "notifications.enabled"
+        | "notifications.dm"
+        | "notifications.ambient"
+        | "notifications.mention" => toml::Value::Boolean(parse_bool(raw)?),
+        "notifications.volume" => {
+            let v: u8 = parse_val(raw, "a number (0-100)")?;
+            if v > 100 {
+                return Err(format!("Expected 0-100, got {v}"));
+            }
+            toml::Value::Integer(v as i64)
+        }
         _ => return Err(format!("Unknown key: {key}")),
     };
 

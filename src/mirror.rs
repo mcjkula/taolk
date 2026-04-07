@@ -53,6 +53,7 @@ pub async fn sync(
     {
         let _ = tx.send(Event::Error(format!("Could not reach mirror: {e}")));
     }
+    let _ = tx.send(Event::CatchupComplete);
 }
 
 async fn sync_inner(
