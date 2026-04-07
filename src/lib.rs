@@ -1,3 +1,4 @@
+#[cfg(feature = "tui")]
 pub mod audio;
 pub mod chain;
 pub mod config;
