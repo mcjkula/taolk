@@ -1,19 +1,13 @@
-use schnorrkel::keys::{ExpansionMode, MiniSecretKey};
 use std::sync::mpsc;
 use taolk::event::Event;
 use taolk::extrinsic::{self, ChainInfo};
 use taolk::metadata::AccountInfoLayout;
 use taolk::reader::{self, ReadContext};
+use taolk::secret::{Seed, SigningKey};
 use taolk::types::Pubkey;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn keypair(seed: &[u8; 32]) -> schnorrkel::Keypair {
-    MiniSecretKey::from_bytes(seed)
-        .unwrap()
-        .expand_to_keypair(ExpansionMode::Ed25519)
+fn signing(seed: &[u8; 32]) -> SigningKey {
+    Seed::from_bytes(*seed).derive_signing_key()
 }
 
 fn ci() -> ChainInfo {
@@ -54,15 +48,15 @@ fn make_ctx<'a>(
 #[test]
 fn read_extrinsic_emits_event_for_samp_remark() {
     let alice_seed = [0xAA; 32];
-    let alice_kp = keypair(&alice_seed);
-    let alice_pubkey = Pubkey(alice_kp.public.to_bytes());
+    let alice_sk = signing(&alice_seed);
+    let alice_pubkey = alice_sk.public_key();
 
     let bob_seed = [0xBB; 32];
-    let bob_pubkey = Pubkey(keypair(&bob_seed).public.to_bytes());
+    let bob_pubkey = signing(&bob_seed).public_key();
 
     // Alice sends a public message to Bob
     let remark = samp::encode_public(&bob_pubkey.0, b"hello bob");
-    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_kp, 0, &ci());
+    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_sk, 0, &ci());
     let hex = ext_to_hex(&ext);
 
     // Bob reads the extrinsic
@@ -100,12 +94,12 @@ fn read_extrinsic_emits_event_for_samp_remark() {
 #[test]
 fn read_extrinsic_ignores_non_samp_remark() {
     let alice_seed = [0xAA; 32];
-    let alice_kp = keypair(&alice_seed);
-    let alice_pubkey = Pubkey(alice_kp.public.to_bytes());
+    let alice_sk = signing(&alice_seed);
+    let alice_pubkey = alice_sk.public_key();
 
     // Build an extrinsic with a non-SAMP remark
     let remark = b"not a samp message";
-    let ext = extrinsic::build_remark_extrinsic(remark, &alice_kp, 0, &ci());
+    let ext = extrinsic::build_remark_extrinsic(remark, &alice_sk, 0, &ci());
     let hex = ext_to_hex(&ext);
 
     let (tx, rx) = mpsc::channel();
@@ -174,14 +168,14 @@ fn extract_block_timestamp_empty() {
 #[test]
 fn read_extrinsic_decrypts_for_recipient() {
     let alice_seed = [0xAA; 32];
-    let alice_kp = keypair(&alice_seed);
-    let alice_pubkey = Pubkey(alice_kp.public.to_bytes());
+    let alice_sk = signing(&alice_seed);
+    let alice_pubkey = alice_sk.public_key();
 
     let bob_seed = [0xBB; 32];
     let bob_ristretto_pub = samp::public_from_seed(&bob_seed);
     // Bob's sr25519 public key (for Substrate account) comes from the keypair
-    let bob_kp = keypair(&bob_seed);
-    let bob_pubkey = Pubkey(bob_kp.public.to_bytes());
+    let bob_sk = signing(&bob_seed);
+    let bob_pubkey = bob_sk.public_key();
 
     let plaintext = b"secret for bob";
     let nonce: [u8; 12] = [0x01; 12];
@@ -200,7 +194,7 @@ fn read_extrinsic_decrypts_for_recipient() {
         &encrypted_content,
     );
 
-    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_kp, 0, &ci());
+    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_sk, 0, &ci());
     let hex = ext_to_hex(&ext);
 
     // Bob reads
@@ -236,14 +230,14 @@ fn read_extrinsic_decrypts_for_recipient() {
 #[test]
 fn read_extrinsic_skips_message_for_wrong_recipient() {
     let alice_seed = [0xAA; 32];
-    let alice_kp = keypair(&alice_seed);
+    let alice_sk = signing(&alice_seed);
 
     let bob_seed = [0xBB; 32];
     let bob_ristretto_pub = samp::public_from_seed(&bob_seed);
 
     let charlie_seed = [0xCC; 32];
-    let charlie_kp = keypair(&charlie_seed);
-    let charlie_pubkey = Pubkey(charlie_kp.public.to_bytes());
+    let charlie_sk = signing(&charlie_seed);
+    let charlie_pubkey = charlie_sk.public_key();
 
     let plaintext = b"for bob only";
     let nonce: [u8; 12] = [0x02; 12];
@@ -260,7 +254,7 @@ fn read_extrinsic_skips_message_for_wrong_recipient() {
         &encrypted_content,
     );
 
-    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_kp, 0, &ci());
+    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_sk, 0, &ci());
     let hex = ext_to_hex(&ext);
 
     // Charlie tries to read (should not match -- view tag mismatch filters it)

@@ -4,7 +4,6 @@ use std::time::Duration;
 use blake2::Digest;
 use futures_util::{SinkExt, StreamExt};
 use parity_scale_codec::{Compact, Encode};
-use schnorrkel::signing_context;
 use serde_json::{Value, json};
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 
@@ -96,11 +95,11 @@ fn canonical_chain_name(raw: &str) -> String {
 
 pub fn build_remark_extrinsic(
     remark: &[u8],
-    keypair: &schnorrkel::Keypair,
+    signing: &crate::secret::SigningKey,
     nonce: u32,
     chain_info: &ChainInfo,
 ) -> Vec<u8> {
-    let account_id = keypair.public.to_bytes();
+    let account_id = *signing.public_key();
 
     let mut call_data = Vec::new();
     call_data.push(PALLET_SYSTEM);
@@ -131,15 +130,14 @@ pub fn build_remark_extrinsic(
         signing_payload
     };
 
-    let ctx = signing_context(b"substrate");
-    let signature = keypair.sign(ctx.bytes(&to_sign));
+    let signature = signing.sign(&to_sign);
 
     let mut extrinsic_payload = Vec::new();
     extrinsic_payload.push(EXT_VERSION_SIGNED);
     extrinsic_payload.push(ADDR_TYPE_ID);
     extrinsic_payload.extend_from_slice(&account_id);
     extrinsic_payload.push(SIG_TYPE_SR25519);
-    extrinsic_payload.extend_from_slice(&signature.to_bytes());
+    extrinsic_payload.extend_from_slice(&signature);
     extrinsic_payload.push(ERA_IMMORTAL);
     Compact(nonce).encode_to(&mut extrinsic_payload);
     extrinsic_payload.push(tip);
@@ -231,7 +229,7 @@ async fn read_text_result_raw(
 pub async fn estimate_fee(
     node_url: &str,
     remark: &[u8],
-    keypair: &schnorrkel::Keypair,
+    signing: &crate::secret::SigningKey,
     ss58: &str,
     chain_info: &ChainInfo,
 ) -> Result<u128, String> {
@@ -252,7 +250,7 @@ pub async fn estimate_fee(
         .map(|n| n as u32)
         .ok_or_else(|| format!("unexpected nonce response: {nonce_result}"))?;
 
-    let ext = build_remark_extrinsic(remark, keypair, nonce, &chain_info);
+    let ext = build_remark_extrinsic(remark, signing, nonce, &chain_info);
 
     // 3. Call TransactionPaymentApi_query_info
     let mut params = Vec::new();
@@ -384,7 +382,7 @@ fn twox128(data: &[u8]) -> [u8; 16] {
 pub async fn submit_remark(
     node_url: &str,
     remark: &[u8],
-    keypair: &schnorrkel::Keypair,
+    signing: &crate::secret::SigningKey,
     ss58: &str,
     chain_info: &ChainInfo,
 ) -> Result<String, String> {
@@ -405,7 +403,7 @@ pub async fn submit_remark(
         .map(|n| n as u32)
         .ok_or_else(|| format!("unexpected nonce response: {nonce_result}"))?;
 
-    let ext = build_remark_extrinsic(remark, keypair, nonce, &chain_info);
+    let ext = build_remark_extrinsic(remark, signing, nonce, &chain_info);
     let hex = format!("0x{}", hex::encode(&ext));
     let watch_req =
         json!({"jsonrpc":"2.0","id":2,"method":"author_submitAndWatchExtrinsic","params":[hex]});

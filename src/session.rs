@@ -3,10 +3,11 @@ use crate::conversation::{
 };
 use crate::db::Db;
 use crate::error::{Result, SdkError};
+use crate::secret::{Seed, SigningKey};
 use crate::types::{BlockRef, Pubkey};
 use chrono::{DateTime, Utc};
-use schnorrkel::keys::{ExpansionMode, MiniSecretKey};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::mpsc;
 use zeroize::Zeroizing;
 
@@ -35,7 +36,8 @@ fn reindex(index: &mut HashMap<BlockRef, usize>, removed: usize) {
 }
 
 pub struct Session {
-    pub keypair: schnorrkel::Keypair,
+    signing: Arc<SigningKey>,
+    pubkey: Pubkey,
     pub my_ss58: String,
     seed: Zeroizing<[u8; 32]>,
     pub node_url: String,
@@ -61,16 +63,17 @@ pub struct Session {
 
 impl Session {
     pub fn new(
-        keypair: schnorrkel::Keypair,
+        signing: SigningKey,
         seed: Zeroizing<[u8; 32]>,
         node_url: String,
         chain_info: crate::extrinsic::ChainInfo,
         db: Db,
     ) -> Self {
-        let pk = Pubkey(keypair.public.to_bytes());
-        let my_ss58 = crate::util::ss58_from_pubkey(&pk);
+        let pubkey = signing.public_key();
+        let my_ss58 = crate::util::ss58_from_pubkey(&pubkey);
         Self {
-            keypair,
+            signing: Arc::new(signing),
+            pubkey,
             my_ss58,
             seed,
             node_url,
@@ -109,10 +112,8 @@ impl Session {
         wallet_name: &str,
         mirror_urls: &[String],
     ) -> Result<(Self, mpsc::Receiver<crate::event::Event>)> {
-        let msk = MiniSecretKey::from_bytes(seed)
-            .map_err(|e| SdkError::Wallet(format!("Invalid seed: {e}")))?;
-        let keypair = msk.expand_to_keypair(ExpansionMode::Ed25519);
-        let my_pubkey = Pubkey(keypair.public.to_bytes());
+        let signing = Seed::from_bytes(*seed).derive_signing_key();
+        let my_pubkey = signing.public_key();
 
         let chain_info = crate::extrinsic::fetch_chain_info(node_url)
             .await
@@ -126,7 +127,7 @@ impl Session {
             .map_err(|e| SdkError::Database(e.to_string()))?;
 
         let mut session = Self::new(
-            keypair,
+            signing,
             Zeroizing::new(*seed),
             node_url.to_string(),
             chain_info,
@@ -177,7 +178,15 @@ impl Session {
     }
 
     pub fn pubkey(&self) -> Pubkey {
-        Pubkey(self.keypair.public.to_bytes())
+        self.pubkey
+    }
+
+    pub fn sign(&self, msg: &[u8]) -> [u8; 64] {
+        self.signing.sign(msg)
+    }
+
+    pub fn signing(&self) -> Arc<SigningKey> {
+        Arc::clone(&self.signing)
     }
 
     pub fn ss58(&self) -> &str {
@@ -862,7 +871,7 @@ impl Session {
         crate::extrinsic::submit_remark(
             &self.node_url,
             remark,
-            &self.keypair,
+            &self.signing,
             &self.my_ss58,
             &self.chain_info,
         )
@@ -881,7 +890,7 @@ impl Session {
         crate::extrinsic::estimate_fee(
             &self.node_url,
             remark,
-            &self.keypair,
+            &self.signing,
             &self.my_ss58,
             &self.chain_info,
         )

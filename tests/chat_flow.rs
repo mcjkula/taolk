@@ -1,9 +1,9 @@
 use chrono::Utc;
-use schnorrkel::keys::{ExpansionMode, MiniSecretKey};
 use taolk::conversation::NewMessage;
 use taolk::db::Db;
 use taolk::extrinsic::ChainInfo;
 use taolk::metadata::AccountInfoLayout;
+use taolk::secret::{Seed, SigningKey};
 use taolk::session::Session;
 use taolk::types::{BlockRef, Pubkey};
 use taolk::util;
@@ -13,14 +13,12 @@ const ALICE_PUB: Pubkey = Pubkey([1u8; 32]);
 const CHARLIE_PUB: Pubkey = Pubkey([3u8; 32]);
 const BOB_SEED: [u8; 32] = [2u8; 32];
 
-fn keypair_from_seed(seed: &[u8; 32]) -> schnorrkel::Keypair {
-    MiniSecretKey::from_bytes(seed)
-        .unwrap()
-        .expand_to_keypair(ExpansionMode::Ed25519)
+fn signing_from_seed(seed: &[u8; 32]) -> SigningKey {
+    Seed::from_bytes(*seed).derive_signing_key()
 }
 
 fn bob_pub() -> Pubkey {
-    Pubkey(keypair_from_seed(&BOB_SEED).public.to_bytes())
+    signing_from_seed(&BOB_SEED).public_key()
 }
 
 fn ci() -> ChainInfo {
@@ -40,7 +38,7 @@ fn ci() -> ChainInfo {
 fn bob_session() -> Session {
     let db = Db::open_in_memory(&BOB_SEED).unwrap();
     Session::new(
-        keypair_from_seed(&BOB_SEED),
+        signing_from_seed(&BOB_SEED),
         Zeroizing::new(BOB_SEED),
         "ws://test".into(),
         ci(),
@@ -238,7 +236,7 @@ fn own_message_uses_recipient_as_peer() {
 fn db_roundtrip_then_new_message_same_thread() {
     let db = Db::open_in_memory(&BOB_SEED).unwrap();
     let mut s = Session::new(
-        keypair_from_seed(&BOB_SEED),
+        signing_from_seed(&BOB_SEED),
         Zeroizing::new(BOB_SEED),
         "ws://test".into(),
         ci(),
@@ -296,7 +294,7 @@ fn db_roundtrip_then_new_message_same_thread() {
 fn db_roundtrip_own_sent_then_receive_same_thread() {
     let db = Db::open_in_memory(&BOB_SEED).unwrap();
     let mut s = Session::new(
-        keypair_from_seed(&BOB_SEED),
+        signing_from_seed(&BOB_SEED),
         Zeroizing::new(BOB_SEED),
         "ws://test".into(),
         ci(),

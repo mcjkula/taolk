@@ -1,8 +1,8 @@
 use chrono::Utc;
-use schnorrkel::keys::{ExpansionMode, MiniSecretKey};
 use taolk::db::Db;
 use taolk::extrinsic::ChainInfo;
 use taolk::metadata::AccountInfoLayout;
+use taolk::secret::{Seed, SigningKey};
 use taolk::session::Session;
 use taolk::types::{BlockRef, Pubkey};
 use zeroize::Zeroizing;
@@ -10,14 +10,12 @@ use zeroize::Zeroizing;
 const ALICE_PUB: Pubkey = Pubkey([1u8; 32]);
 const BOB_SEED: [u8; 32] = [2u8; 32];
 
-fn keypair_from_seed(seed: &[u8; 32]) -> schnorrkel::Keypair {
-    MiniSecretKey::from_bytes(seed)
-        .unwrap()
-        .expand_to_keypair(ExpansionMode::Ed25519)
+fn signing_from_seed(seed: &[u8; 32]) -> SigningKey {
+    Seed::from_bytes(*seed).derive_signing_key()
 }
 
 fn bob_pub() -> Pubkey {
-    Pubkey(keypair_from_seed(&BOB_SEED).public.to_bytes())
+    signing_from_seed(&BOB_SEED).public_key()
 }
 
 fn ci() -> ChainInfo {
@@ -37,7 +35,7 @@ fn ci() -> ChainInfo {
 fn bob_session() -> Session {
     let db = Db::open_in_memory(&BOB_SEED).unwrap();
     Session::new(
-        keypair_from_seed(&BOB_SEED),
+        signing_from_seed(&BOB_SEED),
         Zeroizing::new(BOB_SEED),
         "ws://test".into(),
         ci(),

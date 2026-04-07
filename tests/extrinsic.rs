@@ -1,11 +1,9 @@
-use schnorrkel::keys::{ExpansionMode, MiniSecretKey};
 use taolk::extrinsic::{self, ChainInfo};
 use taolk::metadata::AccountInfoLayout;
+use taolk::secret::{Seed, SigningKey};
 
-fn test_keypair() -> schnorrkel::Keypair {
-    MiniSecretKey::from_bytes(&[0xAA; 32])
-        .unwrap()
-        .expand_to_keypair(ExpansionMode::Ed25519)
+fn test_signing() -> SigningKey {
+    Seed::from_bytes([0xAA; 32]).derive_signing_key()
 }
 
 fn test_chain_info() -> ChainInfo {
@@ -30,12 +28,12 @@ fn test_chain_info() -> ChainInfo {
 
 #[test]
 fn build_remark_stable_length() {
-    let kp = test_keypair();
+    let sk = test_signing();
     let ci = test_chain_info();
     let remark = b"hello";
 
-    let a = extrinsic::build_remark_extrinsic(remark, &kp, 0, &ci);
-    let b = extrinsic::build_remark_extrinsic(remark, &kp, 0, &ci);
+    let a = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci);
+    let b = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci);
 
     assert_eq!(a.len(), b.len());
 }
@@ -46,12 +44,12 @@ fn build_remark_stable_length() {
 
 #[test]
 fn build_remark_different_nonces() {
-    let kp = test_keypair();
+    let sk = test_signing();
     let ci = test_chain_info();
     let remark = b"hello";
 
-    let a = extrinsic::build_remark_extrinsic(remark, &kp, 0, &ci);
-    let b = extrinsic::build_remark_extrinsic(remark, &kp, 1, &ci);
+    let a = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci);
+    let b = extrinsic::build_remark_extrinsic(remark, &sk, 1, &ci);
 
     assert_ne!(a, b);
 }
@@ -62,11 +60,11 @@ fn build_remark_different_nonces() {
 
 #[test]
 fn build_remark_contains_payload() {
-    let kp = test_keypair();
+    let sk = test_signing();
     let ci = test_chain_info();
     let remark = b"unique-payload-marker";
 
-    let ext = extrinsic::build_remark_extrinsic(remark, &kp, 0, &ci);
+    let ext = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci);
 
     let found = ext.windows(remark.len()).any(|w| w == remark);
     assert!(
@@ -81,11 +79,11 @@ fn build_remark_contains_payload() {
 
 #[test]
 fn build_remark_starts_with_length_prefix() {
-    let kp = test_keypair();
+    let sk = test_signing();
     let ci = test_chain_info();
     let remark = b"test";
 
-    let ext = extrinsic::build_remark_extrinsic(remark, &kp, 0, &ci);
+    let ext = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci);
 
     // Decode compact length from first byte(s)
     let (prefix_len, encoded_len) = decode_compact(&ext);
@@ -104,11 +102,11 @@ fn build_remark_starts_with_length_prefix() {
 
 #[test]
 fn build_remark_system_pallet() {
-    let kp = test_keypair();
+    let sk = test_signing();
     let ci = test_chain_info();
     let remark = b"pallet-test";
 
-    let ext = extrinsic::build_remark_extrinsic(remark, &kp, 0, &ci);
+    let ext = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci);
 
     // Layout after compact length prefix:
     // 0x84 (signed flag) | 0x00 (addr type) | account_id(32) | 0x01 (sig type) | sig(64)
@@ -143,11 +141,11 @@ fn build_remark_system_pallet() {
 
 #[test]
 fn build_remark_immortal_era() {
-    let kp = test_keypair();
+    let sk = test_signing();
     let ci = test_chain_info();
     let remark = b"era-test";
 
-    let ext = extrinsic::build_remark_extrinsic(remark, &kp, 0, &ci);
+    let ext = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci);
 
     let (prefix_len, _) = decode_compact(&ext);
     let payload = &ext[prefix_len..];

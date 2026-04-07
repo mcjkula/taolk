@@ -1,17 +1,15 @@
-use schnorrkel::keys::{ExpansionMode, MiniSecretKey};
 use taolk::db::Db;
 use taolk::extrinsic::ChainInfo;
 use taolk::metadata::AccountInfoLayout;
+use taolk::secret::{Seed, SigningKey};
 use taolk::session::Session;
 use taolk::types::{BlockRef, Pubkey};
 use zeroize::Zeroizing;
 
 const SEED: [u8; 32] = [0xCC; 32];
 
-fn keypair_from_seed(seed: &[u8; 32]) -> schnorrkel::Keypair {
-    MiniSecretKey::from_bytes(seed)
-        .unwrap()
-        .expand_to_keypair(ExpansionMode::Ed25519)
+fn signing_from_seed(seed: &[u8; 32]) -> SigningKey {
+    Seed::from_bytes(*seed).derive_signing_key()
 }
 
 fn ci() -> ChainInfo {
@@ -31,7 +29,7 @@ fn ci() -> ChainInfo {
 fn make_session() -> Session {
     let db = Db::open_in_memory(&SEED).unwrap();
     Session::new(
-        keypair_from_seed(&SEED),
+        signing_from_seed(&SEED),
         Zeroizing::new(SEED),
         "ws://test".into(),
         ci(),
@@ -40,7 +38,7 @@ fn make_session() -> Session {
 }
 
 fn other_pubkey() -> Pubkey {
-    Pubkey(keypair_from_seed(&[0xDD; 32]).public.to_bytes())
+    signing_from_seed(&[0xDD; 32]).public_key()
 }
 
 // ---------------------------------------------------------------------------

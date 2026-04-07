@@ -20,7 +20,6 @@ use crossterm::terminal::{
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use schnorrkel::keys::{ExpansionMode, MiniSecretKey};
 use std::io::stdout;
 use std::sync::mpsc;
 use std::time::Duration;
@@ -866,9 +865,8 @@ fn run_session(
     mirror_urls: &[String],
     cfg: &config::Config,
 ) -> Result<SessionExit, Box<dyn std::error::Error>> {
-    let msk = MiniSecretKey::from_bytes(seed).map_err(|e| format!("Invalid seed: {e}"))?;
-    let keypair = msk.expand_to_keypair(ExpansionMode::Ed25519);
-    let my_pubkey = types::Pubkey(keypair.public.to_bytes());
+    let signing = taolk::secret::Seed::from_bytes(*seed).derive_signing_key();
+    let my_pubkey = signing.public_key();
 
     let rt = tokio::runtime::Runtime::new()?;
 
@@ -886,7 +884,7 @@ fn run_session(
 
     let db = db::Db::open(wallet_name, seed, &chain_info.genesis_hash)?;
     let session = session::Session::new(
-        keypair,
+        signing,
         zeroize::Zeroizing::new(*seed),
         node_url.to_string(),
         chain_info.clone(),
@@ -1142,12 +1140,12 @@ fn run_session(
             }
             TuiEvent::Core(event::Event::SubmitRemark { remark }) => {
                 let url = app.session.node_url.clone();
-                let kp = app.session.keypair.clone();
+                let signing = app.session.signing();
                 let ss58 = app.session.my_ss58.clone();
                 let ci = chain_info.clone();
                 let tx = event_tx.clone();
                 rt.spawn(async move {
-                    match extrinsic::submit_remark(&url, &remark, &kp, &ss58, &ci).await {
+                    match extrinsic::submit_remark(&url, &remark, &signing, &ss58, &ci).await {
                         Ok(_) => {
                             let _ = tx.send(event::Event::MessageSent);
                         }
@@ -1696,7 +1694,7 @@ fn handle_insert_key(
                         app.pending_fee = None;
                         app.mode = Mode::Confirm;
 
-                        let kp = app.session.keypair.clone();
+                        let signing = app.session.signing();
                         let ss58 = app.session.my_ss58.clone();
                         let ci = app.session.chain_info.clone();
                         let url = app.session.node_url.clone();
@@ -1704,7 +1702,8 @@ fn handle_insert_key(
                         let symbol = app.session.token_symbol.clone();
                         let decimals = app.session.token_decimals;
                         rt.spawn(async move {
-                            match extrinsic::estimate_fee(&url, &remark, &kp, &ss58, &ci).await {
+                            match extrinsic::estimate_fee(&url, &remark, &signing, &ss58, &ci).await
+                            {
                                 Ok(fee) => {
                                     let display = util::format_fee(fee, decimals, &symbol);
                                     let _ = tx.send(event::Event::FeeEstimated {
@@ -1939,7 +1938,7 @@ fn handle_create_channel_desc_key(
                     app.pending_fee = None;
                     app.mode = Mode::Confirm;
 
-                    let kp = app.session.keypair.clone();
+                    let signing = app.session.signing();
                     let ss58 = app.session.my_ss58.clone();
                     let ci = app.session.chain_info.clone();
                     let url = app.session.node_url.clone();
@@ -1947,7 +1946,7 @@ fn handle_create_channel_desc_key(
                     let symbol = app.session.token_symbol.clone();
                     let decimals = app.session.token_decimals;
                     rt.spawn(async move {
-                        match extrinsic::estimate_fee(&url, &remark, &kp, &ss58, &ci).await {
+                        match extrinsic::estimate_fee(&url, &remark, &signing, &ss58, &ci).await {
                             Ok(fee) => {
                                 let display = util::format_fee(fee, decimals, &symbol);
                                 let _ = tx.send(event::Event::FeeEstimated {
