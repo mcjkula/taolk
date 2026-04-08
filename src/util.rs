@@ -8,11 +8,12 @@ pub fn ss58_from_pubkey(pubkey: &Pubkey) -> String {
 }
 
 pub fn ss58_short(pubkey: &Pubkey) -> String {
-    pubkey
-        .to_ss58(samp::Ss58Prefix::SUBSTRATE_GENERIC)
-        .short()
-        .as_str()
-        .to_string()
+    let full = ss58_from_pubkey(pubkey);
+    if full.len() > 12 {
+        format!("{}...{}", &full[..6], &full[full.len() - 4..])
+    } else {
+        full
+    }
 }
 
 pub fn truncate(s: &str, max: usize) -> String {

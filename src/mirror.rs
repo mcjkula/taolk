@@ -28,7 +28,7 @@ struct Hint {
 pub async fn sync(
     mirror_urls: Vec<String>,
     node_url: &str,
-    expected_chain: &samp::ChainName,
+    expected_chain: &crate::types::ChainName,
     expected_ss58_prefix: samp::Ss58Prefix,
     keys: &DecryptionKeys,
     my_pubkey: &Pubkey,
@@ -59,7 +59,7 @@ pub async fn sync(
 async fn sync_inner(
     mirror_urls: Vec<String>,
     node_url: &str,
-    expected_chain: &samp::ChainName,
+    expected_chain: &crate::types::ChainName,
     expected_ss58_prefix: samp::Ss58Prefix,
     keys: &DecryptionKeys,
     my_pubkey: &Pubkey,
@@ -97,7 +97,7 @@ async fn sync_inner(
 pub async fn fetch_channel(
     mirror_urls: Vec<String>,
     node_url: &str,
-    expected_chain: &samp::ChainName,
+    expected_chain: &crate::types::ChainName,
     expected_ss58_prefix: samp::Ss58Prefix,
     channel_ref: BlockRef,
     my_pubkey: &Pubkey,
@@ -127,7 +127,7 @@ pub async fn fetch_channel(
 async fn check_health_all(
     client: &reqwest::Client,
     bases: &[String],
-    expected_chain: &samp::ChainName,
+    expected_chain: &crate::types::ChainName,
     expected_prefix: samp::Ss58Prefix,
 ) -> Vec<String> {
     let expected_chain_str = expected_chain.as_str().to_string();

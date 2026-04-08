@@ -3,6 +3,74 @@ use zeroize::Zeroizing;
 
 use crate::error::SdkError;
 
+pub const MESSAGE_BODY_MAX_BYTES: usize = 4096;
+
+#[derive(Clone, PartialEq, Eq, Hash, Default)]
+pub struct MessageBody(String);
+
+impl MessageBody {
+    pub fn parse(s: impl Into<String>) -> Result<Self, SdkError> {
+        let s = s.into();
+        if s.len() > MESSAGE_BODY_MAX_BYTES {
+            return Err(SdkError::Other(format!(
+                "message body must be 0..={MESSAGE_BODY_MAX_BYTES} bytes (got {})",
+                s.len()
+            )));
+        }
+        Ok(Self(s))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl std::fmt::Debug for MessageBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MessageBody({} bytes)", self.0.len())
+    }
+}
+
+pub const CHAIN_NAME_MAX_BYTES: usize = 64;
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct ChainName(String);
+
+impl ChainName {
+    pub fn parse(s: impl Into<String>) -> Result<Self, SdkError> {
+        let s = s.into();
+        if s.is_empty() || s.len() > CHAIN_NAME_MAX_BYTES {
+            return Err(SdkError::Other(format!(
+                "chain name must be 1..={CHAIN_NAME_MAX_BYTES} bytes (got {})",
+                s.len()
+            )));
+        }
+        Ok(Self(s))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for ChainName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ChainName({:?})", self.0)
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct WalletName(String);
 

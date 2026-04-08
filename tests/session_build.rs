@@ -13,8 +13,8 @@ fn bob_pubkey() -> Pubkey {
     samp::public_from_seed(&samp::Seed::from_bytes(BOB_SAMP_SEED))
 }
 
-fn mb(s: &str) -> samp::MessageBody {
-    samp::MessageBody::parse(s.to_string()).unwrap()
+fn mb(s: &str) -> taolk::types::MessageBody {
+    taolk::types::MessageBody::parse(s.to_string()).unwrap()
 }
 
 #[test]

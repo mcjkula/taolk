@@ -751,20 +751,20 @@ impl Session {
     pub fn build_public_message(
         &self,
         recipient: &Pubkey,
-        body: &samp::MessageBody,
+        body: &crate::types::MessageBody,
     ) -> Result<samp::RemarkBytes> {
-        Ok(samp::encode_public(recipient, body))
+        Ok(samp::encode_public(recipient, body.as_str()))
     }
 
     pub fn build_encrypted_message(
         &self,
         seed: &[u8; 32],
         recipient: &Pubkey,
-        body: &samp::MessageBody,
+        body: &crate::types::MessageBody,
     ) -> Result<samp::RemarkBytes> {
         let nonce = samp::Nonce::from_bytes(rand_nonce());
         let sender = samp::Seed::from_bytes(*seed);
-        let plaintext = samp::Plaintext::from_bytes(body.as_bytes().to_vec());
+        let plaintext = samp::Plaintext::from_bytes(body.as_str().as_bytes().to_vec());
         let encrypted = samp::encrypt(&plaintext, recipient, &nonce, &sender)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         let vt = samp::compute_view_tag(&sender, recipient, &nonce)
@@ -781,7 +781,7 @@ impl Session {
         &self,
         seed: &[u8; 32],
         recipient: &Pubkey,
-        body: &samp::MessageBody,
+        body: &crate::types::MessageBody,
     ) -> Result<samp::RemarkBytes> {
         let nonce = samp::Nonce::from_bytes(rand_nonce());
         let sender = samp::Seed::from_bytes(*seed);
@@ -789,7 +789,7 @@ impl Session {
             BlockRef::ZERO,
             BlockRef::ZERO,
             BlockRef::ZERO,
-            body.as_bytes(),
+            body.as_str().as_bytes(),
         ));
         let encrypted = samp::encrypt(&plaintext, recipient, &nonce, &sender)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
@@ -807,7 +807,7 @@ impl Session {
         &self,
         seed: &[u8; 32],
         thread_idx: usize,
-        body: &samp::MessageBody,
+        body: &crate::types::MessageBody,
     ) -> Result<samp::RemarkBytes> {
         let thread = self
             .threads
@@ -819,7 +819,7 @@ impl Session {
             thread.thread_ref,
             thread.last_ref(),
             thread.my_last_ref(),
-            body.as_bytes(),
+            body.as_str().as_bytes(),
         ));
         let encrypted = samp::encrypt(&plaintext, &thread.peer_pubkey, &nonce, &sender)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
@@ -844,7 +844,7 @@ impl Session {
     pub fn build_channel_message(
         &self,
         channel_idx: usize,
-        body: &samp::MessageBody,
+        body: &crate::types::MessageBody,
     ) -> Result<samp::RemarkBytes> {
         let channel = self
             .channels
@@ -854,7 +854,7 @@ impl Session {
             channel.channel_ref,
             channel.last_ref(),
             channel.my_last_ref(),
-            body,
+            body.as_str(),
         ))
     }
 
@@ -862,7 +862,7 @@ impl Session {
         &self,
         seed: &[u8; 32],
         members: &[Pubkey],
-        body: &samp::MessageBody,
+        body: &crate::types::MessageBody,
     ) -> Result<samp::RemarkBytes> {
         if members.len() > MAX_GROUP_MEMBERS {
             return Err(SdkError::Other(format!(
@@ -872,7 +872,7 @@ impl Session {
         let nonce = samp::Nonce::from_bytes(rand_nonce());
         let sender = samp::Seed::from_bytes(*seed);
         let mut body_bytes = samp::encode_group_members(members);
-        body_bytes.extend_from_slice(body.as_bytes());
+        body_bytes.extend_from_slice(body.as_str().as_bytes());
         let plaintext = samp::Plaintext::from_bytes(samp::encode_thread_content(
             BlockRef::ZERO,
             BlockRef::ZERO,
@@ -894,7 +894,7 @@ impl Session {
         &self,
         seed: &[u8; 32],
         group_idx: usize,
-        body: &samp::MessageBody,
+        body: &crate::types::MessageBody,
     ) -> Result<samp::RemarkBytes> {
         let group = self
             .groups
@@ -906,7 +906,7 @@ impl Session {
             group.group_ref,
             group.last_ref(),
             group.my_last_ref(),
-            body.as_bytes(),
+            body.as_str().as_bytes(),
         ));
         let (eph_pubkey, capsules, ciphertext) =
             samp::encrypt_for_group(&plaintext, &group.members, &nonce, &sender)

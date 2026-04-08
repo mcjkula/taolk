@@ -37,7 +37,7 @@ pub fn dave_pubkey() -> Pubkey {
 
 pub fn test_chain_info() -> ChainInfo {
     ChainInfo {
-        name: samp::ChainName::parse("Test").unwrap(),
+        name: taolk::types::ChainName::parse("Test").unwrap(),
         ss58_prefix: samp::Ss58Prefix::SUBSTRATE_GENERIC,
         chain_params: ChainParams {
             genesis_hash: samp::GenesisHash::from_bytes([0; 32]),

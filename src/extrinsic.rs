@@ -17,7 +17,7 @@ pub(crate) const SYSTEM_REMARK_WITH_EVENT: (u8, u8) = (0, 7);
 
 #[derive(Clone)]
 pub struct ChainInfo {
-    pub name: samp::ChainName,
+    pub name: crate::types::ChainName,
     pub ss58_prefix: samp::Ss58Prefix,
     pub chain_params: ChainParams,
     pub account_storage: StorageLayout,
@@ -78,7 +78,7 @@ pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, ChainError> {
         .as_str()
         .ok_or(ChainError::MissingField("system_chain"))?
         .to_string();
-    let name = samp::ChainName::parse(name_str).map_err(|_| ChainError::BadShape)?;
+    let name = crate::types::ChainName::parse(name_str).map_err(|_| ChainError::BadShape)?;
 
     let req = json!({"jsonrpc":"2.0","id":5,"method":"system_properties","params":[]});
     ws.send(WsMessage::Text(req.to_string().into()))

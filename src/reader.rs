@@ -146,7 +146,7 @@ pub fn process_remark(
                 sender,
                 content_type: ContentType::Public.to_byte(),
                 recipient: *recipient,
-                decrypted_body: Some(body.as_str().to_string()),
+                decrypted_body: Some(body.clone()),
                 thread_ref: BlockRef::ZERO,
                 reply_to: BlockRef::ZERO,
                 continues: BlockRef::ZERO,

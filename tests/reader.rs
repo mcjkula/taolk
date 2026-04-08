@@ -37,8 +37,7 @@ fn read_extrinsic_emits_event_for_samp_remark() {
     let bob_seed = [0xBB; 32];
     let bob_pubkey = signing(&bob_seed).public_key();
 
-    let body = samp::MessageBody::parse("hello bob").unwrap();
-    let remark = samp::encode_public(&bob_pubkey, &body);
+    let remark = samp::encode_public(&bob_pubkey, "hello bob");
     let ext = build_remark_ext(&remark, &alice_sk, 0);
     let hex = ext_to_hex(&ext);
 

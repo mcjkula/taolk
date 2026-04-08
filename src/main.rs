@@ -550,7 +550,7 @@ fn dispatch_pending_send(
             return Ok(());
         }
     };
-    let body = match samp::MessageBody::parse(text.clone()) {
+    let body = match crate::types::MessageBody::parse(text.clone()) {
         Ok(b) => b,
         Err(e) => {
             app.set_status(format!("Invalid message: {e}"));
@@ -1243,7 +1243,7 @@ fn run_session(
 fn build_send_remark(
     app: &App,
     seed: &[u8; 32],
-    body: &samp::MessageBody,
+    body: &crate::types::MessageBody,
 ) -> error::Result<samp::RemarkBytes> {
     if let (Some((pubkey, _)), Some(ct)) = (&app.msg_recipient, app.msg_type) {
         return match ct {
