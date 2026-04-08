@@ -21,7 +21,7 @@ codegen-units = 1
 
 [dependencies]
 samp = { path = "../../../skilaboo/rust" }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "net", "time", "io-util"] }
 schnorrkel = "0.11"
 curve25519-dalek = { version = "4", features = ["digest"] }
 hkdf = "0.12"
