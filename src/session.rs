@@ -209,6 +209,10 @@ impl Session {
         DecryptionKeys::new(*self.view_scalar, Some(*self.seed))
     }
 
+    pub fn cached_seed(&self) -> &[u8; 32] {
+        &self.seed
+    }
+
     pub fn ss58(&self) -> &str {
         &self.my_ss58
     }
@@ -741,12 +745,17 @@ impl Session {
         Ok(samp::encode_public(&recipient.0, body.as_bytes()))
     }
 
-    pub fn build_encrypted_message(&self, recipient: &Pubkey, body: &str) -> Result<Vec<u8>> {
+    pub fn build_encrypted_message(
+        &self,
+        seed: &[u8; 32],
+        recipient: &Pubkey,
+        body: &str,
+    ) -> Result<Vec<u8>> {
         let nonce = rand_nonce();
         let enc_pk = curve25519_dalek::ristretto::CompressedRistretto(recipient.0);
-        let encrypted = samp::encrypt(body.as_bytes(), &enc_pk, &nonce, &self.seed)
+        let encrypted = samp::encrypt(body.as_bytes(), &enc_pk, &nonce, seed)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
-        let vt = samp::compute_view_tag(&self.seed, &enc_pk, &nonce)
+        let vt = samp::compute_view_tag(seed, &enc_pk, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_encrypted(
             samp::CONTENT_TYPE_ENCRYPTED,
@@ -756,7 +765,12 @@ impl Session {
         ))
     }
 
-    pub fn build_thread_root(&self, recipient: &Pubkey, body: &str) -> Result<Vec<u8>> {
+    pub fn build_thread_root(
+        &self,
+        seed: &[u8; 32],
+        recipient: &Pubkey,
+        body: &str,
+    ) -> Result<Vec<u8>> {
         let nonce = rand_nonce();
         let plaintext = samp::encode_thread_content(
             BlockRef::ZERO,
@@ -765,9 +779,9 @@ impl Session {
             body.as_bytes(),
         );
         let enc_pk = curve25519_dalek::ristretto::CompressedRistretto(recipient.0);
-        let encrypted = samp::encrypt(&plaintext, &enc_pk, &nonce, &self.seed)
+        let encrypted = samp::encrypt(&plaintext, &enc_pk, &nonce, seed)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
-        let vt = samp::compute_view_tag(&self.seed, &enc_pk, &nonce)
+        let vt = samp::compute_view_tag(seed, &enc_pk, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_encrypted(
             samp::CONTENT_TYPE_THREAD,
@@ -777,7 +791,12 @@ impl Session {
         ))
     }
 
-    pub fn build_thread_reply(&self, thread_idx: usize, body: &str) -> Result<Vec<u8>> {
+    pub fn build_thread_reply(
+        &self,
+        seed: &[u8; 32],
+        thread_idx: usize,
+        body: &str,
+    ) -> Result<Vec<u8>> {
         let thread = self
             .threads
             .get(thread_idx)
@@ -790,9 +809,9 @@ impl Session {
             body.as_bytes(),
         );
         let enc_pk = curve25519_dalek::ristretto::CompressedRistretto(thread.peer_pubkey.0);
-        let encrypted = samp::encrypt(&plaintext, &enc_pk, &nonce, &self.seed)
+        let encrypted = samp::encrypt(&plaintext, &enc_pk, &nonce, seed)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
-        let vt = samp::compute_view_tag(&self.seed, &enc_pk, &nonce)
+        let vt = samp::compute_view_tag(seed, &enc_pk, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_encrypted(
             samp::CONTENT_TYPE_THREAD,
@@ -819,7 +838,12 @@ impl Session {
         ))
     }
 
-    pub fn build_group_create(&self, members: &[Pubkey], body: &str) -> Result<Vec<u8>> {
+    pub fn build_group_create(
+        &self,
+        seed: &[u8; 32],
+        members: &[Pubkey],
+        body: &str,
+    ) -> Result<Vec<u8>> {
         if members.len() > MAX_GROUP_MEMBERS {
             return Err(SdkError::Other(format!(
                 "Group too large: max {MAX_GROUP_MEMBERS} members supported"
@@ -836,7 +860,7 @@ impl Session {
             &body_bytes,
         );
         let (eph_pubkey, capsules, ciphertext) =
-            samp::encrypt_for_group(&plaintext, &raw_members, &nonce, &self.seed)
+            samp::encrypt_for_group(&plaintext, &raw_members, &nonce, seed)
                 .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_group(
             &nonce,
@@ -846,7 +870,12 @@ impl Session {
         ))
     }
 
-    pub fn build_group_message(&self, group_idx: usize, body: &str) -> Result<Vec<u8>> {
+    pub fn build_group_message(
+        &self,
+        seed: &[u8; 32],
+        group_idx: usize,
+        body: &str,
+    ) -> Result<Vec<u8>> {
         let group = self
             .groups
             .get(group_idx)
@@ -860,7 +889,7 @@ impl Session {
         );
         let raw_members: Vec<[u8; 32]> = group.members.iter().map(|pk| pk.0).collect();
         let (eph_pubkey, capsules, ciphertext) =
-            samp::encrypt_for_group(&plaintext, &raw_members, &nonce, &self.seed)
+            samp::encrypt_for_group(&plaintext, &raw_members, &nonce, seed)
                 .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_group(
             &nonce,

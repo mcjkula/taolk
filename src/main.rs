@@ -926,21 +926,21 @@ fn run_session(
     Ok(SessionExit::Quit)
 }
 
-fn build_send_remark(app: &App, text: &str) -> error::Result<Vec<u8>> {
+fn build_send_remark(app: &App, seed: &[u8; 32], text: &str) -> error::Result<Vec<u8>> {
     if let (Some((pubkey, _)), Some(ct)) = (&app.msg_recipient, app.msg_type) {
         return match ct {
             0x01 => app.session.build_public_message(pubkey, text),
-            0x02 => app.session.build_encrypted_message(pubkey, text),
+            0x02 => app.session.build_encrypted_message(seed, pubkey, text),
             _ => Err(error::SdkError::Other("Invalid message type".into())),
         };
     }
 
     if let (Some((pubkey, _)), None) = (&app.msg_recipient, app.msg_type) {
-        return app.session.build_thread_root(pubkey, text);
+        return app.session.build_thread_root(seed, pubkey, text);
     }
 
     match app.view {
-        app::View::Thread(idx) => app.session.build_thread_reply(idx, text),
+        app::View::Thread(idx) => app.session.build_thread_reply(seed, idx, text),
         app::View::Channel(idx) => app.session.build_channel_message(idx, text),
         app::View::Group(idx) => {
             let group = app
@@ -949,9 +949,10 @@ fn build_send_remark(app: &App, text: &str) -> error::Result<Vec<u8>> {
                 .get(idx)
                 .ok_or_else(|| error::SdkError::NotFound("No group selected".into()))?;
             if group.group_ref.is_zero() {
-                app.session.build_group_create(&group.members.clone(), text)
+                app.session
+                    .build_group_create(seed, &group.members.clone(), text)
             } else {
-                app.session.build_group_message(idx, text)
+                app.session.build_group_message(seed, idx, text)
             }
         }
         _ => Err(error::SdkError::Other("Cannot send from this view".into())),
@@ -1318,7 +1319,8 @@ fn handle_insert_key(
             }
             {
                 let text = app.input.clone();
-                match build_send_remark(app, &text) {
+                let seed = *app.session.cached_seed();
+                match build_send_remark(app, &seed, &text) {
                     Ok(remark) => {
                         app.pending_remark = Some(remark.clone());
                         app.pending_text = Some(text);

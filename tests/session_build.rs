@@ -33,7 +33,7 @@ fn build_encrypted_message_decryptable() {
     let recipient = bob_pubkey();
 
     let remark = session
-        .build_encrypted_message(&recipient, "hello")
+        .build_encrypted_message(&ALICE_SEED, &recipient, "hello")
         .unwrap();
     let decoded = samp::decode_remark(&remark).unwrap();
 
@@ -49,7 +49,7 @@ fn build_thread_root_decryptable() {
     let recipient = bob_pubkey();
 
     let remark = session
-        .build_thread_root(&recipient, "thread start")
+        .build_thread_root(&ALICE_SEED, &recipient, "thread start")
         .unwrap();
     let decoded = samp::decode_remark(&remark).unwrap();
 
@@ -102,7 +102,9 @@ fn build_group_create_decryptable() {
     let bob_pk = samp::public_from_seed(&BOB_SAMP_SEED);
     let members = vec![Pubkey(alice_pk), Pubkey(bob_pk)];
 
-    let remark = session.build_group_create(&members, "group hello").unwrap();
+    let remark = session
+        .build_group_create(&ALICE_SEED, &members, "group hello")
+        .unwrap();
     let decoded = samp::decode_remark(&remark).unwrap();
 
     assert_eq!(decoded.content_type, samp::ContentType::Group);
@@ -123,7 +125,7 @@ fn build_group_create_decryptable() {
 #[test]
 fn build_returns_error_for_invalid_thread_idx() {
     let session = alice_session();
-    let result = session.build_thread_reply(999, "test");
+    let result = session.build_thread_reply(&ALICE_SEED, 999, "test");
     assert!(result.is_err());
     let err = format!("{}", result.unwrap_err());
     assert!(err.contains("not found"), "expected NotFound, got: {err}");
@@ -141,7 +143,7 @@ fn build_returns_error_for_invalid_channel_idx() {
 #[test]
 fn build_returns_error_for_invalid_group_idx() {
     let session = alice_session();
-    let result = session.build_group_message(999, "test");
+    let result = session.build_group_message(&ALICE_SEED, 999, "test");
     assert!(result.is_err());
     let err = format!("{}", result.unwrap_err());
     assert!(err.contains("not found"), "expected NotFound, got: {err}");
