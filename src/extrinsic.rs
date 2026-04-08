@@ -26,7 +26,6 @@ pub struct ChainInfo {
     pub tx_version: u32,
     pub account_info_layout: AccountInfoLayout,
     pub errors: Arc<ErrorTable>,
-    pub chain_name: String,
 }
 
 pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, ChainError> {
@@ -72,36 +71,13 @@ pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, ChainError> {
     let metadata_bytes = hex::decode(metadata_hex.trim_start_matches("0x"))?;
     let parsed = Metadata::from_runtime_metadata(&metadata_bytes)?;
 
-    let req = json!({"jsonrpc":"2.0","id":4,"method":"system_chain","params":[]});
-    ws.send(WsMessage::Text(req.to_string().into()))
-        .await
-        .map_err(|e| ChainError::Send(e.to_string()))?;
-    let chain_name_raw = read_text_result(&mut ws).await?;
-    let chain_name = canonical_chain_name(chain_name_raw.as_str().unwrap_or("unknown"));
-
     Ok(ChainInfo {
         genesis_hash: genesis_bytes,
         spec_version,
         tx_version,
         account_info_layout: parsed.layout,
         errors: Arc::new(parsed.errors),
-        chain_name,
     })
-}
-
-fn canonical_chain_name(raw: &str) -> String {
-    let lower = raw.to_ascii_lowercase();
-    if lower.contains("test") {
-        "test".into()
-    } else if lower == "bittensor" || lower == "finney" {
-        "finney".into()
-    } else {
-        let mut s = raw.to_string();
-        if s.chars().count() > 12 {
-            s = s.chars().take(12).collect();
-        }
-        s
-    }
 }
 
 pub fn build_remark_extrinsic(
@@ -202,7 +178,6 @@ async fn refresh_signing_params(
         tx_version,
         account_info_layout: base.account_info_layout.clone(),
         errors: base.errors.clone(),
-        chain_name: base.chain_name.clone(),
     })
 }
 

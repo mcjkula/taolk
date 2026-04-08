@@ -6,21 +6,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use taolk::event::ConnState;
 
-fn chain_pill(name: &str) -> Span<'_> {
-    let bg = match name {
-        "finney" => Color::Cyan,
-        "test" => Color::Yellow,
-        _ => Color::DarkGray,
-    };
-    Span::styled(
-        format!(" {name} "),
-        Style::default()
-            .fg(Color::Black)
-            .bg(bg)
-            .add_modifier(Modifier::BOLD),
-    )
-}
-
 fn reconnect_pill(state: ConnState) -> Option<Span<'static>> {
     match state {
         ConnState::Connected => None,
@@ -176,9 +161,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     };
     let block_span = Span::styled(&block_str, Style::default().fg(block_color));
 
-    let chain = chain_pill(&app.session.chain_info.chain_name);
     let reconnect = reconnect_pill(app.connection);
-    let chain_width = u16::try_from(chain.width()).unwrap_or(u16::MAX);
     let reconnect_width = reconnect
         .as_ref()
         .map_or(0, |s| u16::try_from(s.width()).unwrap_or(u16::MAX));
@@ -187,10 +170,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         + u16::try_from(block_str.len()).unwrap_or(u16::MAX)
         + reconnect_width;
     let mode_width = u16::try_from(mode.width()).unwrap_or(u16::MAX);
-    let max_status = usize::from(
-        area.width
-            .saturating_sub(chain_width + mode_width + right_width + 1),
-    );
+    let max_status = usize::from(area.width.saturating_sub(mode_width + right_width + 1));
     let status_span = if status_span.width() > max_status {
         let content = status_span.content.to_string();
         let truncated = if max_status > 2 {
@@ -202,11 +182,11 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         status_span
     };
-    let used = chain_width + mode_width + u16::try_from(status_span.width()).unwrap_or(u16::MAX);
+    let used = mode_width + u16::try_from(status_span.width()).unwrap_or(u16::MAX);
     let padding = area.width.saturating_sub(used + right_width);
     let pad_span = Span::raw(" ".repeat(usize::from(padding)));
 
-    let mut spans = vec![chain, mode, status_span, pad_span];
+    let mut spans = vec![mode, status_span, pad_span];
     if let Some(rc) = reconnect {
         spans.push(rc);
     }

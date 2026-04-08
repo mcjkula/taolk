@@ -44,7 +44,6 @@ pub fn test_chain_info() -> ChainInfo {
             free_width: 8,
         },
         errors: Default::default(),
-        chain_name: "test".into(),
     }
 }
 
