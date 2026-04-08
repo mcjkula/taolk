@@ -15,19 +15,40 @@ type GroupRow = (BlockRef, Pubkey, Vec<Pubkey>);
 type ChannelRow = (BlockRef, String, String, String, Vec<ThreadMessage>);
 type ChannelMeta = (BlockRef, String, String, String);
 
-#[derive(Clone, Copy, Debug)]
-pub enum ConvKind {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConversationKind {
+    Inbox,
     Thread,
     Channel,
     Group,
 }
 
-impl ConvKind {
+impl ConversationKind {
+    pub const fn to_byte(self) -> u8 {
+        match self {
+            Self::Thread => 0,
+            Self::Channel => 1,
+            Self::Group => 2,
+            Self::Inbox => 3,
+        }
+    }
+
+    pub const fn from_byte(b: u8) -> Option<Self> {
+        match b {
+            0 => Some(Self::Thread),
+            1 => Some(Self::Channel),
+            2 => Some(Self::Group),
+            3 => Some(Self::Inbox),
+            _ => None,
+        }
+    }
+
     fn table(self) -> &'static str {
         match self {
             Self::Thread => "thread_messages",
             Self::Channel => "channel_messages",
             Self::Group => "group_messages",
+            Self::Inbox => "inbox_messages",
         }
     }
 
@@ -36,6 +57,7 @@ impl ConvKind {
             Self::Thread => ("thread_block", "thread_index"),
             Self::Channel => ("channel_block", "channel_index"),
             Self::Group => ("group_block", "group_index"),
+            Self::Inbox => ("peer_block", "peer_index"),
         }
     }
 }
@@ -217,15 +239,27 @@ impl Db {
             .unwrap_or_default()
     }
 
-    fn encrypt_draft(&self, plaintext: &str, kind: u8, block: u32, index: u16) -> Vec<u8> {
-        let nonce = draft_nonce(kind, block, index);
+    fn encrypt_draft(
+        &self,
+        plaintext: &str,
+        kind: ConversationKind,
+        block: u32,
+        index: u16,
+    ) -> Vec<u8> {
+        let nonce = draft_nonce(kind.to_byte(), block, index);
         self.cipher
             .encrypt(Nonce::from_slice(&nonce), plaintext.as_bytes())
             .unwrap_or_default()
     }
 
-    fn decrypt_draft(&self, ciphertext: &[u8], kind: u8, block: u32, index: u16) -> String {
-        let nonce = draft_nonce(kind, block, index);
+    fn decrypt_draft(
+        &self,
+        ciphertext: &[u8],
+        kind: ConversationKind,
+        block: u32,
+        index: u16,
+    ) -> String {
+        let nonce = draft_nonce(kind.to_byte(), block, index);
         self.cipher
             .decrypt(Nonce::from_slice(&nonce), ciphertext)
             .ok()
@@ -233,7 +267,7 @@ impl Db {
             .unwrap_or_default()
     }
 
-    pub fn save_draft(&self, kind: u8, block: u32, index: u16, body: &str) {
+    pub fn save_draft(&self, kind: ConversationKind, block: u32, index: u16, body: &str) {
         if body.is_empty() {
             self.delete_draft(kind, block, index);
             return;
@@ -249,29 +283,36 @@ impl Db {
              VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(kind, ref_block, ref_index)
              DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at",
-            params![kind, block, index, encrypted, now],
+            params![kind.to_byte(), block, index, encrypted, now],
         );
     }
 
-    pub fn delete_draft(&self, kind: u8, block: u32, index: u16) {
+    pub fn delete_draft(&self, kind: ConversationKind, block: u32, index: u16) {
         let _ = self.conn.execute(
             "DELETE FROM drafts WHERE kind = ?1 AND ref_block = ?2 AND ref_index = ?3",
-            params![kind, block, index],
+            params![kind.to_byte(), block, index],
         );
     }
 
-    pub fn load_drafts(&self) -> Vec<(u8, BlockRef, String)> {
-        let inner = || -> Option<Vec<(u8, BlockRef, Vec<u8>)>> {
+    pub fn load_drafts(&self) -> Vec<(ConversationKind, BlockRef, String)> {
+        let inner = || -> Option<Vec<(ConversationKind, BlockRef, Vec<u8>)>> {
             let mut stmt = self
                 .conn
                 .prepare("SELECT kind, ref_block, ref_index, body FROM drafts")
                 .ok()?;
             let rows = stmt
                 .query_map([], |row| {
-                    let kind: u8 = row.get(0)?;
+                    let kind_byte: u8 = row.get(0)?;
                     let block: u32 = row.get(1)?;
                     let index: u16 = row.get(2)?;
                     let body: Vec<u8> = row.get(3)?;
+                    let kind = ConversationKind::from_byte(kind_byte).ok_or_else(|| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Integer,
+                            Box::new(std::io::Error::other(format!("invalid kind {kind_byte}"))),
+                        )
+                    })?;
                     Ok((kind, BlockRef::from_parts(block, index), body))
                 })
                 .ok()?
@@ -369,7 +410,7 @@ impl Db {
         out
     }
 
-    pub fn has_message_at(&self, kind: ConvKind, block_ref: BlockRef) -> bool {
+    pub fn has_message_at(&self, kind: ConversationKind, block_ref: BlockRef) -> bool {
         let sql = format!(
             "SELECT 1 FROM {} WHERE block_number = ?1 AND ext_index = ?2",
             kind.table()
@@ -383,7 +424,7 @@ impl Db {
             .is_ok()
     }
 
-    pub fn has_gap(&self, kind: ConvKind, reply_to: BlockRef, continues: BlockRef) -> bool {
+    pub fn has_gap(&self, kind: ConversationKind, reply_to: BlockRef, continues: BlockRef) -> bool {
         (reply_to != BlockRef::ZERO && !self.has_message_at(kind, reply_to))
             || (continues != BlockRef::ZERO && !self.has_message_at(kind, continues))
     }
@@ -619,7 +660,7 @@ impl Db {
 
     pub fn insert_threaded_message(
         &self,
-        kind: ConvKind,
+        kind: ConversationKind,
         conv_ref: BlockRef,
         msg: &ThreadMessage,
         block_number: u32,

@@ -80,7 +80,7 @@ fn channel_insert_and_load() {
     db.insert_channel(ch_ref, "general", "General chat", "Creator");
 
     let msg = make_thread_msg("channel msg", false, 300, 0);
-    db.insert_threaded_message(taolk::db::ConvKind::Channel, ch_ref, &msg, 300, 0);
+    db.insert_threaded_message(taolk::db::ConversationKind::Channel, ch_ref, &msg, 300, 0);
 
     let channels = db.load_channels();
     assert_eq!(channels.len(), 1);
@@ -112,7 +112,7 @@ fn channel_delete() {
     let ch_ref = BlockRef::from_parts(200, 0);
     db.insert_channel(ch_ref, "doomed", "to be deleted", "Creator");
     let msg = make_thread_msg("doomed msg", false, 300, 0);
-    db.insert_threaded_message(taolk::db::ConvKind::Channel, ch_ref, &msg, 300, 0);
+    db.insert_threaded_message(taolk::db::ConversationKind::Channel, ch_ref, &msg, 300, 0);
 
     db.delete_channel(ch_ref);
 
@@ -159,7 +159,7 @@ fn group_message_insert_and_load() {
     db.insert_group(group_ref, &creator, &[Pubkey::from_bytes([2u8; 32])]);
 
     let msg = make_thread_msg("group hello", false, 500, 0);
-    db.insert_threaded_message(taolk::db::ConvKind::Group, group_ref, &msg, 500, 0);
+    db.insert_threaded_message(taolk::db::ConversationKind::Group, group_ref, &msg, 500, 0);
 
     let messages = db.load_group_messages(group_ref);
     assert_eq!(messages.len(), 1);
@@ -196,13 +196,19 @@ fn has_message_at_true() {
     let msg = make_thread_msg("exists", false, 100, 0);
     db.insert_thread_message(thread_ref, "Alice", &msg, 100, 0);
 
-    assert!(db.has_message_at(taolk::db::ConvKind::Thread, BlockRef::from_parts(100, 0)));
+    assert!(db.has_message_at(
+        taolk::db::ConversationKind::Thread,
+        BlockRef::from_parts(100, 0)
+    ));
 }
 
 #[test]
 fn has_message_at_false() {
     let db = test_db();
-    assert!(!db.has_message_at(taolk::db::ConvKind::Thread, BlockRef::from_parts(999, 0)));
+    assert!(!db.has_message_at(
+        taolk::db::ConversationKind::Thread,
+        BlockRef::from_parts(999, 0)
+    ));
 }
 
 #[test]
@@ -211,10 +217,16 @@ fn has_channel_message_at() {
     let ch_ref = BlockRef::from_parts(200, 0);
     db.insert_channel(ch_ref, "ch", "desc", "creator");
     let msg = make_thread_msg("ch msg", false, 300, 1);
-    db.insert_threaded_message(taolk::db::ConvKind::Channel, ch_ref, &msg, 300, 1);
+    db.insert_threaded_message(taolk::db::ConversationKind::Channel, ch_ref, &msg, 300, 1);
 
-    assert!(db.has_message_at(taolk::db::ConvKind::Channel, BlockRef::from_parts(300, 1)));
-    assert!(!db.has_message_at(taolk::db::ConvKind::Channel, BlockRef::from_parts(300, 2)));
+    assert!(db.has_message_at(
+        taolk::db::ConversationKind::Channel,
+        BlockRef::from_parts(300, 1)
+    ));
+    assert!(!db.has_message_at(
+        taolk::db::ConversationKind::Channel,
+        BlockRef::from_parts(300, 2)
+    ));
 }
 
 #[test]
@@ -224,10 +236,16 @@ fn has_group_message_at() {
     let creator = Pubkey::from_bytes([1u8; 32]);
     db.insert_group(group_ref, &creator, &[]);
     let msg = make_thread_msg("grp msg", false, 500, 3);
-    db.insert_threaded_message(taolk::db::ConvKind::Group, group_ref, &msg, 500, 3);
+    db.insert_threaded_message(taolk::db::ConversationKind::Group, group_ref, &msg, 500, 3);
 
-    assert!(db.has_message_at(taolk::db::ConvKind::Group, BlockRef::from_parts(500, 3)));
-    assert!(!db.has_message_at(taolk::db::ConvKind::Group, BlockRef::from_parts(500, 4)));
+    assert!(db.has_message_at(
+        taolk::db::ConversationKind::Group,
+        BlockRef::from_parts(500, 3)
+    ));
+    assert!(!db.has_message_at(
+        taolk::db::ConversationKind::Group,
+        BlockRef::from_parts(500, 4)
+    ));
 }
 
 #[test]

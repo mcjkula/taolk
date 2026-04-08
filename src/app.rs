@@ -212,10 +212,23 @@ impl App {
     }
 
     pub fn save_draft(&mut self) {
-        let key: Option<(u8, BlockRef)> = match self.view {
-            View::Thread(i) => self.session.threads.get(i).map(|t| (0u8, t.thread_ref)),
-            View::Channel(i) => self.session.channels.get(i).map(|c| (1u8, c.channel_ref)),
-            View::Group(i) => self.session.groups.get(i).map(|g| (2u8, g.group_ref)),
+        use taolk::db::ConversationKind;
+        let key: Option<(ConversationKind, BlockRef)> = match self.view {
+            View::Thread(i) => self
+                .session
+                .threads
+                .get(i)
+                .map(|t| (ConversationKind::Thread, t.thread_ref)),
+            View::Channel(i) => self
+                .session
+                .channels
+                .get(i)
+                .map(|c| (ConversationKind::Channel, c.channel_ref)),
+            View::Group(i) => self
+                .session
+                .groups
+                .get(i)
+                .map(|g| (ConversationKind::Group, g.group_ref)),
             _ => None,
         };
         match self.view {
@@ -286,10 +299,23 @@ impl App {
     }
 
     pub fn clear_draft(&mut self) {
-        let key: Option<(u8, BlockRef)> = match self.view {
-            View::Thread(i) => self.session.threads.get(i).map(|t| (0u8, t.thread_ref)),
-            View::Channel(i) => self.session.channels.get(i).map(|c| (1u8, c.channel_ref)),
-            View::Group(i) => self.session.groups.get(i).map(|g| (2u8, g.group_ref)),
+        use taolk::db::ConversationKind;
+        let key: Option<(ConversationKind, BlockRef)> = match self.view {
+            View::Thread(i) => self
+                .session
+                .threads
+                .get(i)
+                .map(|t| (ConversationKind::Thread, t.thread_ref)),
+            View::Channel(i) => self
+                .session
+                .channels
+                .get(i)
+                .map(|c| (ConversationKind::Channel, c.channel_ref)),
+            View::Group(i) => self
+                .session
+                .groups
+                .get(i)
+                .map(|g| (ConversationKind::Group, g.group_ref)),
             _ => None,
         };
         match self.view {

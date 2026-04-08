@@ -247,7 +247,7 @@ impl Session {
                 draft: String::new(),
                 last_read: msg_count,
             });
-            self.refresh_gaps(crate::db::ConvKind::Thread, i);
+            self.refresh_gaps(crate::db::ConversationKind::Thread, i);
         }
 
         for (channel_ref, name, description, creator_ss58, messages) in self.db.load_channels() {
@@ -263,7 +263,7 @@ impl Session {
                 draft: String::new(),
                 last_read: msg_count,
             });
-            self.refresh_gaps(crate::db::ConvKind::Channel, i);
+            self.refresh_gaps(crate::db::ConversationKind::Channel, i);
         }
 
         for (channel_ref, name, description, creator_ss58) in self.db.load_known_channels() {
@@ -302,7 +302,7 @@ impl Session {
                 draft: String::new(),
                 last_read: msg_count,
             });
-            self.refresh_gaps(crate::db::ConvKind::Group, i);
+            self.refresh_gaps(crate::db::ConversationKind::Group, i);
         }
 
         for (kind, bref, body) in self.db.load_drafts() {
@@ -310,22 +310,22 @@ impl Session {
                 continue;
             }
             match kind {
-                0 => {
+                crate::db::ConversationKind::Thread => {
                     if let Some(t) = self.threads.iter_mut().find(|t| t.thread_ref == bref) {
                         t.draft = body;
                     }
                 }
-                1 => {
+                crate::db::ConversationKind::Channel => {
                     if let Some(c) = self.channels.iter_mut().find(|c| c.channel_ref == bref) {
                         c.draft = body;
                     }
                 }
-                2 => {
+                crate::db::ConversationKind::Group => {
                     if let Some(g) = self.groups.iter_mut().find(|g| g.group_ref == bref) {
                         g.draft = body;
                     }
                 }
-                _ => {}
+                crate::db::ConversationKind::Inbox => {}
             }
         }
     }
@@ -397,7 +397,7 @@ impl Session {
         self.db.upsert_peer(&peer_ss58, &peer);
 
         if self.db.has_message_at(
-            crate::db::ConvKind::Thread,
+            crate::db::ConversationKind::Thread,
             BlockRef::from_parts(msg.block_number, msg.ext_index),
         ) {
             return;
@@ -442,9 +442,11 @@ impl Session {
             i
         };
 
-        let has_gap = self
-            .db
-            .has_gap(crate::db::ConvKind::Thread, msg.reply_to, msg.continues);
+        let has_gap = self.db.has_gap(
+            crate::db::ConversationKind::Thread,
+            msg.reply_to,
+            msg.continues,
+        );
 
         let tm = ThreadMessage::from_new(msg, is_mine, has_gap);
 
@@ -458,7 +460,7 @@ impl Session {
 
     pub fn add_channel_message(&mut self, channel_ref: BlockRef, msg: NewMessage) {
         if self.db.has_message_at(
-            crate::db::ConvKind::Channel,
+            crate::db::ConversationKind::Channel,
             BlockRef::from_parts(msg.block_number, msg.ext_index),
         ) {
             return;
@@ -470,14 +472,16 @@ impl Session {
 
         let is_mine = msg.sender_ss58 == crate::util::ss58_short(&self.pubkey());
 
-        let has_gap = self
-            .db
-            .has_gap(crate::db::ConvKind::Channel, msg.reply_to, msg.continues);
+        let has_gap = self.db.has_gap(
+            crate::db::ConversationKind::Channel,
+            msg.reply_to,
+            msg.continues,
+        );
 
         let tm = ThreadMessage::from_new(msg, is_mine, has_gap);
 
         self.db.insert_threaded_message(
-            crate::db::ConvKind::Channel,
+            crate::db::ConversationKind::Channel,
             channel_ref,
             &tm,
             tm.block_number,
@@ -625,11 +629,16 @@ impl Session {
         i
     }
 
-    pub fn refresh_gaps(&mut self, kind: crate::db::ConvKind, idx: usize) {
+    pub fn refresh_gaps(&mut self, kind: crate::db::ConversationKind, idx: usize) {
         let messages: Option<&mut Vec<ThreadMessage>> = match kind {
-            crate::db::ConvKind::Thread => self.threads.get_mut(idx).map(|t| &mut t.messages),
-            crate::db::ConvKind::Channel => self.channels.get_mut(idx).map(|c| &mut c.messages),
-            crate::db::ConvKind::Group => self.groups.get_mut(idx).map(|g| &mut g.messages),
+            crate::db::ConversationKind::Thread => {
+                self.threads.get_mut(idx).map(|t| &mut t.messages)
+            }
+            crate::db::ConversationKind::Channel => {
+                self.channels.get_mut(idx).map(|c| &mut c.messages)
+            }
+            crate::db::ConversationKind::Group => self.groups.get_mut(idx).map(|g| &mut g.messages),
+            crate::db::ConversationKind::Inbox => None,
         };
         if let Some(messages) = messages {
             refresh_message_gaps(messages, |br| self.db.has_message_at(kind, br));
@@ -677,7 +686,7 @@ impl Session {
 
     pub fn add_group_message(&mut self, group_ref: BlockRef, msg: NewMessage) {
         if self.db.has_message_at(
-            crate::db::ConvKind::Group,
+            crate::db::ConversationKind::Group,
             BlockRef::from_parts(msg.block_number, msg.ext_index),
         ) {
             return;
@@ -689,14 +698,16 @@ impl Session {
 
         let is_mine = msg.sender_ss58 == crate::util::ss58_short(&self.pubkey());
 
-        let has_gap = self
-            .db
-            .has_gap(crate::db::ConvKind::Group, msg.reply_to, msg.continues);
+        let has_gap = self.db.has_gap(
+            crate::db::ConversationKind::Group,
+            msg.reply_to,
+            msg.continues,
+        );
 
         let tm = ThreadMessage::from_new(msg, is_mine, has_gap);
 
         self.db.insert_threaded_message(
-            crate::db::ConvKind::Group,
+            crate::db::ConversationKind::Group,
             group_ref,
             &tm,
             tm.block_number,

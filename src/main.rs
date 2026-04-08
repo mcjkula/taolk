@@ -1094,13 +1094,16 @@ fn run_session(
             }
             TuiEvent::Core(event::Event::GapsRefreshed) => {
                 for i in 0..app.session.threads.len() {
-                    app.session.refresh_gaps(taolk::db::ConvKind::Thread, i);
+                    app.session
+                        .refresh_gaps(taolk::db::ConversationKind::Thread, i);
                 }
                 for i in 0..app.session.channels.len() {
-                    app.session.refresh_gaps(taolk::db::ConvKind::Channel, i);
+                    app.session
+                        .refresh_gaps(taolk::db::ConversationKind::Channel, i);
                 }
                 for i in 0..app.session.groups.len() {
-                    app.session.refresh_gaps(taolk::db::ConvKind::Group, i);
+                    app.session
+                        .refresh_gaps(taolk::db::ConversationKind::Group, i);
                 }
                 app.set_status("Loaded");
             }
@@ -1160,13 +1163,16 @@ fn run_session(
             TuiEvent::Core(event::Event::CatchupComplete) => {
                 app.sound_armed = true;
                 for i in 0..app.session.threads.len() {
-                    app.session.refresh_gaps(taolk::db::ConvKind::Thread, i);
+                    app.session
+                        .refresh_gaps(taolk::db::ConversationKind::Thread, i);
                 }
                 for i in 0..app.session.channels.len() {
-                    app.session.refresh_gaps(taolk::db::ConvKind::Channel, i);
+                    app.session
+                        .refresh_gaps(taolk::db::ConversationKind::Channel, i);
                 }
                 for i in 0..app.session.groups.len() {
-                    app.session.refresh_gaps(taolk::db::ConvKind::Group, i);
+                    app.session
+                        .refresh_gaps(taolk::db::ConversationKind::Group, i);
                 }
             }
             TuiEvent::Core(event::Event::LockedOutbound {

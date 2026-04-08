@@ -423,7 +423,7 @@ fn gap_resolved_after_loading_reference() {
             ext_index: 2,
         },
     );
-    s.refresh_gaps(taolk::db::ConvKind::Thread, 0);
+    s.refresh_gaps(taolk::db::ConversationKind::Thread, 0);
 
     assert!(
         !s.threads[0].messages[1].has_gap,

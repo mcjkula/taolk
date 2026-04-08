@@ -229,7 +229,7 @@ fn channel_gap_detection() {
             ext_index: 2,
         },
     );
-    s.refresh_gaps(taolk::db::ConvKind::Channel, 0);
+    s.refresh_gaps(taolk::db::ConversationKind::Channel, 0);
     assert!(!s.channels[0].messages[1].has_gap);
 }
 
