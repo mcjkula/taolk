@@ -115,6 +115,7 @@ pub async fn fetch_channel(
     let (b, i) = (channel_ref.block, channel_ref.index);
     let hints = fetch_per_channel_hints(&client, &healthy, b, i, 0).await;
     resolve_message_hints(node_url, hints, my_pubkey, keys, &tx).await;
+    let _ = tx.send(Event::CatchupComplete);
 }
 
 async fn check_health_all(
