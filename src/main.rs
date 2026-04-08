@@ -1557,8 +1557,14 @@ fn handle_normal_key(
         KeyCode::Home => app.scroll_offset = usize::MAX,
         KeyCode::Char('G') | KeyCode::End => app.scroll_offset = 0,
         KeyCode::Char(' ') => app.show_sidebar = !app.show_sidebar,
-        KeyCode::Char('j') | KeyCode::Tab | KeyCode::Down => app.next_sidebar(),
-        KeyCode::Char('k') | KeyCode::BackTab | KeyCode::Up => app.prev_sidebar(),
+        KeyCode::Char('j') | KeyCode::Tab | KeyCode::Down if app.view != app::View::ChannelDir => {
+            app.next_sidebar()
+        }
+        KeyCode::Char('k') | KeyCode::BackTab | KeyCode::Up
+            if app.view != app::View::ChannelDir =>
+        {
+            app.prev_sidebar()
+        }
         _ => {}
     }
 }
