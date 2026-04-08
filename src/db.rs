@@ -30,6 +30,14 @@ impl ConvKind {
             Self::Group => "group_messages",
         }
     }
+
+    fn ref_cols(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Thread => ("thread_block", "thread_index"),
+            Self::Channel => ("channel_block", "channel_index"),
+            Self::Group => ("group_block", "group_index"),
+        }
+    }
 }
 
 const DB_KEY_INFO: &[u8] = b"taolk-db-v1";
@@ -609,22 +617,39 @@ impl Db {
         inner().unwrap_or_default()
     }
 
-    pub fn insert_group_message(
+    pub fn insert_threaded_message(
         &self,
-        group_ref: BlockRef,
+        kind: ConvKind,
+        conv_ref: BlockRef,
         msg: &ThreadMessage,
         block_number: u32,
         ext_index: u16,
     ) {
         let encrypted = self.encrypt_body(&msg.body, block_number, ext_index);
-        let _ = self.conn.execute(
-            "INSERT OR IGNORE INTO group_messages
-             (group_block, group_index, sender_ss58, timestamp, body, is_mine,
-              reply_to_block, reply_to_index, continues_block, continues_index, block_number, ext_index)
+        let (block_col, index_col) = kind.ref_cols();
+        let sql = format!(
+            "INSERT OR IGNORE INTO {} \
+             ({block_col}, {index_col}, sender_ss58, timestamp, body, is_mine, \
+              reply_to_block, reply_to_index, continues_block, continues_index, block_number, ext_index) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            params![group_ref.block, group_ref.index, msg.sender_ss58, msg.timestamp.timestamp(),
-                    encrypted, i32::from(msg.is_mine), msg.reply_to.block, msg.reply_to.index,
-                    msg.continues.block, msg.continues.index, block_number, ext_index],
+            kind.table()
+        );
+        let _ = self.conn.execute(
+            &sql,
+            params![
+                conv_ref.block,
+                conv_ref.index,
+                msg.sender_ss58,
+                msg.timestamp.timestamp(),
+                encrypted,
+                i32::from(msg.is_mine),
+                msg.reply_to.block,
+                msg.reply_to.index,
+                msg.continues.block,
+                msg.continues.index,
+                block_number,
+                ext_index,
+            ],
         );
     }
 
@@ -677,25 +702,6 @@ impl Db {
             Some(rows)
         };
         inner().unwrap_or_default()
-    }
-
-    pub fn insert_channel_message(
-        &self,
-        channel_ref: BlockRef,
-        msg: &ThreadMessage,
-        block_number: u32,
-        ext_index: u16,
-    ) {
-        let encrypted = self.encrypt_body(&msg.body, block_number, ext_index);
-        let _ = self.conn.execute(
-            "INSERT OR IGNORE INTO channel_messages
-             (channel_block, channel_index, sender_ss58, timestamp, body, is_mine,
-              reply_to_block, reply_to_index, continues_block, continues_index, block_number, ext_index)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            params![channel_ref.block, channel_ref.index, msg.sender_ss58, msg.timestamp.timestamp(),
-                    encrypted, i32::from(msg.is_mine), msg.reply_to.block, msg.reply_to.index,
-                    msg.continues.block, msg.continues.index, block_number, ext_index],
-        );
     }
 
     pub fn delete_channel(&self, channel_ref: BlockRef) {

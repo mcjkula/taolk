@@ -86,7 +86,7 @@ fn channel_insert_and_load() {
     db.insert_channel(ch_ref, "general", "General chat", "Creator");
 
     let msg = make_thread_msg("channel msg", false, 300, 0);
-    db.insert_channel_message(ch_ref, &msg, 300, 0);
+    db.insert_threaded_message(taolk::db::ConvKind::Channel, ch_ref, &msg, 300, 0);
 
     let channels = db.load_channels();
     assert_eq!(channels.len(), 1);
@@ -124,7 +124,7 @@ fn channel_delete() {
     };
     db.insert_channel(ch_ref, "doomed", "to be deleted", "Creator");
     let msg = make_thread_msg("doomed msg", false, 300, 0);
-    db.insert_channel_message(ch_ref, &msg, 300, 0);
+    db.insert_threaded_message(taolk::db::ConvKind::Channel, ch_ref, &msg, 300, 0);
 
     db.delete_channel(ch_ref);
 
@@ -180,7 +180,7 @@ fn group_message_insert_and_load() {
     db.insert_group(group_ref, &creator, &[Pubkey([2u8; 32])]);
 
     let msg = make_thread_msg("group hello", false, 500, 0);
-    db.insert_group_message(group_ref, &msg, 500, 0);
+    db.insert_threaded_message(taolk::db::ConvKind::Group, group_ref, &msg, 500, 0);
 
     let messages = db.load_group_messages(group_ref);
     assert_eq!(messages.len(), 1);
@@ -250,7 +250,7 @@ fn has_channel_message_at() {
     };
     db.insert_channel(ch_ref, "ch", "desc", "creator");
     let msg = make_thread_msg("ch msg", false, 300, 1);
-    db.insert_channel_message(ch_ref, &msg, 300, 1);
+    db.insert_threaded_message(taolk::db::ConvKind::Channel, ch_ref, &msg, 300, 1);
 
     assert!(db.has_message_at(
         taolk::db::ConvKind::Channel,
@@ -278,7 +278,7 @@ fn has_group_message_at() {
     let creator = Pubkey([1u8; 32]);
     db.insert_group(group_ref, &creator, &[]);
     let msg = make_thread_msg("grp msg", false, 500, 3);
-    db.insert_group_message(group_ref, &msg, 500, 3);
+    db.insert_threaded_message(taolk::db::ConvKind::Group, group_ref, &msg, 500, 3);
 
     assert!(db.has_message_at(
         taolk::db::ConvKind::Group,

@@ -451,8 +451,13 @@ impl Session {
 
         let tm = ThreadMessage::from_new(msg, is_mine, has_gap);
 
-        self.db
-            .insert_channel_message(channel_ref, &tm, tm.block_number, tm.ext_index);
+        self.db.insert_threaded_message(
+            crate::db::ConvKind::Channel,
+            channel_ref,
+            &tm,
+            tm.block_number,
+            tm.ext_index,
+        );
         self.channels[idx].messages.push(tm);
         self.channels[idx]
             .messages
@@ -668,8 +673,13 @@ impl Session {
 
         let tm = ThreadMessage::from_new(msg, is_mine, has_gap);
 
-        self.db
-            .insert_group_message(group_ref, &tm, tm.block_number, tm.ext_index);
+        self.db.insert_threaded_message(
+            crate::db::ConvKind::Group,
+            group_ref,
+            &tm,
+            tm.block_number,
+            tm.ext_index,
+        );
         self.groups[idx].messages.push(tm);
         self.groups[idx]
             .messages
