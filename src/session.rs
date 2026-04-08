@@ -164,8 +164,21 @@ impl Session {
             let sc = zeroize::Zeroizing::new(*seed);
             let pk = my_pubkey;
             let etx = tx.clone();
+            let chain_name = session.chain_info.name.clone();
+            let ss58_prefix = session.chain_info.ss58_prefix;
             tokio::spawn(async move {
-                crate::mirror::sync(urls, &node, 42, &sc, &pk, subscribed, 0, etx).await;
+                crate::mirror::sync(
+                    urls,
+                    &node,
+                    &chain_name,
+                    ss58_prefix,
+                    &sc,
+                    &pk,
+                    subscribed,
+                    0,
+                    etx,
+                )
+                .await;
             });
         }
 

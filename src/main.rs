@@ -546,8 +546,21 @@ fn run_session(
         let sc = zeroize::Zeroizing::new(*seed);
         let pubkey = my_pubkey;
         let tx = event_tx.clone();
+        let chain_name = chain_info.name.clone();
+        let ss58_prefix = chain_info.ss58_prefix;
         rt.spawn(async move {
-            mirror::sync(urls, &node, 42, &sc, &pubkey, subscribed, 0, tx).await;
+            mirror::sync(
+                urls,
+                &node,
+                &chain_name,
+                ss58_prefix,
+                &sc,
+                &pubkey,
+                subscribed,
+                0,
+                tx,
+            )
+            .await;
         });
     } else {
         app.sound_armed = true;
@@ -780,8 +793,20 @@ fn run_session(
                     let tx = event_tx.clone();
                     let pk = my_pubkey;
                     let sc = zeroize::Zeroizing::new(*seed);
+                    let chain_name = chain_info.name.clone();
+                    let ss58_prefix = chain_info.ss58_prefix;
                     rt.spawn(async move {
-                        mirror::fetch_channel(urls, &node, channel_ref, &pk, &sc, tx).await;
+                        mirror::fetch_channel(
+                            urls,
+                            &node,
+                            &chain_name,
+                            ss58_prefix,
+                            channel_ref,
+                            &pk,
+                            &sc,
+                            tx,
+                        )
+                        .await;
                     });
                 }
             }

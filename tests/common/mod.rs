@@ -37,6 +37,8 @@ pub fn dave_pubkey() -> Pubkey {
 
 pub fn test_chain_info() -> ChainInfo {
     ChainInfo {
+        name: "Test".into(),
+        ss58_prefix: 42,
         chain_params: ChainParams {
             genesis_hash: [0; 32],
             spec_version: 1,

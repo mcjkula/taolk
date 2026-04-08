@@ -11,6 +11,7 @@ use crate::types::{BlockRef, Pubkey};
 
 #[derive(serde::Deserialize)]
 struct HealthResp {
+    chain: String,
     ss58_prefix: u16,
 }
 
@@ -24,6 +25,7 @@ struct Hint {
 pub async fn sync(
     mirror_urls: Vec<String>,
     node_url: &str,
+    expected_chain: &str,
     expected_ss58_prefix: u16,
     seed: &[u8; 32],
     my_pubkey: &Pubkey,
@@ -35,6 +37,7 @@ pub async fn sync(
     if let Err(e) = sync_inner(
         mirror_urls,
         node_url,
+        expected_chain,
         expected_ss58_prefix,
         seed,
         my_pubkey,
@@ -53,6 +56,7 @@ pub async fn sync(
 async fn sync_inner(
     mirror_urls: Vec<String>,
     node_url: &str,
+    expected_chain: &str,
     expected_ss58_prefix: u16,
     seed: &[u8; 32],
     my_pubkey: &Pubkey,
@@ -66,9 +70,11 @@ async fn sync_inner(
         .map(|u| u.trim_end_matches('/').to_string())
         .collect();
 
-    let healthy = check_health_all(&client, &bases, expected_ss58_prefix).await;
+    let healthy = check_health_all(&client, &bases, expected_chain, expected_ss58_prefix).await;
     if healthy.is_empty() {
-        return Err(ChainError::Http("no healthy mirrors".into()));
+        return Err(ChainError::Http(format!(
+            "no healthy mirrors serving '{expected_chain}' (ss58 {expected_ss58_prefix})"
+        )));
     }
 
     let channel_hints = fetch_channel_directory_hints(&client, &healthy).await;
@@ -82,9 +88,12 @@ async fn sync_inner(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn fetch_channel(
     mirror_urls: Vec<String>,
     node_url: &str,
+    expected_chain: &str,
+    expected_ss58_prefix: u16,
     channel_ref: BlockRef,
     my_pubkey: &Pubkey,
     seed: &[u8; 32],
@@ -95,14 +104,22 @@ pub async fn fetch_channel(
         .iter()
         .map(|u| u.trim_end_matches('/').to_string())
         .collect();
+    let healthy = check_health_all(&client, &bases, expected_chain, expected_ss58_prefix).await;
+    if healthy.is_empty() {
+        let _ = tx.send(Event::Error(format!(
+            "no healthy mirrors serving '{expected_chain}' (ss58 {expected_ss58_prefix})"
+        )));
+        return;
+    }
     let (b, i) = (channel_ref.block, channel_ref.index);
-    let hints = fetch_per_channel_hints(&client, &bases, b, i, 0).await;
+    let hints = fetch_per_channel_hints(&client, &healthy, b, i, 0).await;
     resolve_message_hints(node_url, hints, my_pubkey, seed, &tx).await;
 }
 
 async fn check_health_all(
     client: &reqwest::Client,
     bases: &[String],
+    expected_chain: &str,
     expected_prefix: u16,
 ) -> Vec<String> {
     let futures = bases.iter().map(|base| async move {
@@ -114,7 +131,7 @@ async fn check_health_all(
             .json()
             .await
             .ok()?;
-        if resp.ss58_prefix == expected_prefix {
+        if resp.chain == expected_chain && resp.ss58_prefix == expected_prefix {
             Some(base.clone())
         } else {
             None

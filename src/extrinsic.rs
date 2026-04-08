@@ -17,6 +17,8 @@ pub(crate) const SYSTEM_REMARK_WITH_EVENT: (u8, u8) = (0, 7);
 
 #[derive(Clone)]
 pub struct ChainInfo {
+    pub name: String,
+    pub ss58_prefix: u16,
     pub chain_params: ChainParams,
     pub account_storage: StorageLayout,
     pub errors: Arc<ErrorTable>,
@@ -67,7 +69,29 @@ pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, ChainError> {
 
     let account_storage = metadata.storage_layout("System", "Account", &["data", "free"])?;
 
+    let req = json!({"jsonrpc":"2.0","id":4,"method":"system_chain","params":[]});
+    ws.send(WsMessage::Text(req.to_string().into()))
+        .await
+        .map_err(|e| ChainError::Send(e.to_string()))?;
+    let chain_result = read_text_result(&mut ws).await?;
+    let name = chain_result
+        .as_str()
+        .ok_or(ChainError::MissingField("system_chain"))?
+        .to_string();
+
+    let req = json!({"jsonrpc":"2.0","id":5,"method":"system_properties","params":[]});
+    ws.send(WsMessage::Text(req.to_string().into()))
+        .await
+        .map_err(|e| ChainError::Send(e.to_string()))?;
+    let props = read_text_result(&mut ws).await?;
+    let ss58_raw = props["ss58Format"]
+        .as_u64()
+        .ok_or(ChainError::MissingField("ss58Format"))?;
+    let ss58_prefix = u16::try_from(ss58_raw).map_err(|_| ChainError::BadShape)?;
+
     Ok(ChainInfo {
+        name,
+        ss58_prefix,
         chain_params: ChainParams {
             genesis_hash: genesis_bytes,
             spec_version,
@@ -108,6 +132,8 @@ async fn refresh_signing_params(
         .map_err(|_| ChainError::SpecVersionOverflow(tx_version_raw))?;
 
     Ok(ChainInfo {
+        name: base.name.clone(),
+        ss58_prefix: base.ss58_prefix,
         chain_params: ChainParams {
             genesis_hash,
             spec_version,
