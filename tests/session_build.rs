@@ -89,10 +89,7 @@ fn build_channel_create_roundtrip() {
 #[test]
 fn build_channel_message_roundtrip() {
     let mut session = alice_session();
-    let channel_ref = BlockRef {
-        block: 500,
-        index: 1,
-    };
+    let channel_ref = BlockRef::from_parts(500, 1);
     session.subscribe_channel(channel_ref);
 
     let remark = session.build_channel_message(0, &mb("chan msg")).unwrap();

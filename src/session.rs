@@ -345,7 +345,7 @@ impl Session {
         self.peer_pubkeys.insert(peer_ss58.clone(), peer);
         self.db.upsert_peer(&peer_ss58, &peer);
 
-        let (block_number, ext_index) = (block_ref.block, block_ref.index);
+        let (block_number, ext_index) = (block_ref.block().get(), block_ref.index().get());
         if block_number > 0 {
             let already = if is_mine {
                 self.outbox
@@ -398,19 +398,13 @@ impl Session {
 
         if self.db.has_message_at(
             crate::db::ConvKind::Thread,
-            BlockRef {
-                block: msg.block_number,
-                index: msg.ext_index,
-            },
+            BlockRef::from_parts(msg.block_number, msg.ext_index),
         ) {
             return;
         }
 
         if thread_ref == BlockRef::ZERO {
-            thread_ref = BlockRef {
-                block: msg.block_number,
-                index: msg.ext_index,
-            };
+            thread_ref = BlockRef::from_parts(msg.block_number, msg.ext_index);
         }
 
         let idx = if let Some(&i) = self.thread_index.get(&thread_ref) {
@@ -465,10 +459,7 @@ impl Session {
     pub fn add_channel_message(&mut self, channel_ref: BlockRef, msg: NewMessage) {
         if self.db.has_message_at(
             crate::db::ConvKind::Channel,
-            BlockRef {
-                block: msg.block_number,
-                index: msg.ext_index,
-            },
+            BlockRef::from_parts(msg.block_number, msg.ext_index),
         ) {
             return;
         }
@@ -687,10 +678,7 @@ impl Session {
     pub fn add_group_message(&mut self, group_ref: BlockRef, msg: NewMessage) {
         if self.db.has_message_at(
             crate::db::ConvKind::Group,
-            BlockRef {
-                block: msg.block_number,
-                index: msg.ext_index,
-            },
+            BlockRef::from_parts(msg.block_number, msg.ext_index),
         ) {
             return;
         }

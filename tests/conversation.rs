@@ -41,8 +41,8 @@ fn last_ref_empty_returns_zero() {
 fn last_ref_returns_final_message_position() {
     let messages = vec![msg(100, 0, false), msg(200, 3, true), msg(150, 1, false)];
     let r = last_ref(&messages);
-    assert_eq!(r.block, 150);
-    assert_eq!(r.index, 1);
+    assert_eq!(r.block().get(), 150);
+    assert_eq!(r.index().get(), 1);
 }
 
 #[test]
@@ -55,7 +55,7 @@ fn my_last_ref_skips_received_messages() {
         msg(500, 0, false),
     ];
     let r = my_last_ref(&messages);
-    assert_eq!(r.block, 400);
+    assert_eq!(r.block().get(), 400);
 }
 
 #[test]
@@ -68,44 +68,14 @@ fn my_last_ref_returns_zero_when_no_owned_messages() {
 fn gap_refs_returns_unique_sorted_references() {
     let messages = vec![
         msg(100, 0, false),
-        msg_with_gap(
-            200,
-            BlockRef {
-                block: 50,
-                index: 0,
-            },
-        ),
-        msg_with_gap(
-            300,
-            BlockRef {
-                block: 50,
-                index: 0,
-            },
-        ),
-        msg_with_gap(
-            400,
-            BlockRef {
-                block: 75,
-                index: 1,
-            },
-        ),
+        msg_with_gap(200, BlockRef::from_parts(50, 0)),
+        msg_with_gap(300, BlockRef::from_parts(50, 0)),
+        msg_with_gap(400, BlockRef::from_parts(75, 1)),
     ];
     let refs = gap_refs(&messages);
     assert_eq!(refs.len(), 2);
-    assert_eq!(
-        refs[0],
-        BlockRef {
-            block: 50,
-            index: 0
-        }
-    );
-    assert_eq!(
-        refs[1],
-        BlockRef {
-            block: 75,
-            index: 1
-        }
-    );
+    assert_eq!(refs[0], BlockRef::from_parts(50, 0));
+    assert_eq!(refs[1], BlockRef::from_parts(75, 1));
 }
 
 #[test]
@@ -176,13 +146,7 @@ fn channel_last_ref_uses_messages() {
         draft: String::new(),
         last_read: 0,
     };
-    assert_eq!(
-        channel.last_ref(),
-        BlockRef {
-            block: 20,
-            index: 5
-        }
-    );
+    assert_eq!(channel.last_ref(), BlockRef::from_parts(20, 5));
     assert_eq!(channel.unread(), 2);
 }
 
@@ -196,18 +160,6 @@ fn group_last_ref_uses_messages() {
         draft: String::new(),
         last_read: 0,
     };
-    assert_eq!(
-        group.last_ref(),
-        BlockRef {
-            block: 20,
-            index: 5
-        }
-    );
-    assert_eq!(
-        group.my_last_ref(),
-        BlockRef {
-            block: 20,
-            index: 5
-        }
-    );
+    assert_eq!(group.last_ref(), BlockRef::from_parts(20, 5));
+    assert_eq!(group.my_last_ref(), BlockRef::from_parts(20, 5));
 }

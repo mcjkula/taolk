@@ -239,7 +239,7 @@ impl App {
         if let Some((kind, bref)) = key {
             self.session
                 .db
-                .save_draft(kind, bref.block, bref.index, &self.input);
+                .save_draft(kind, bref.block().get(), bref.index().get(), &self.input);
         }
     }
 
@@ -311,7 +311,9 @@ impl App {
             _ => {}
         }
         if let Some((kind, bref)) = key {
-            self.session.db.delete_draft(kind, bref.block, bref.index);
+            self.session
+                .db
+                .delete_draft(kind, bref.block().get(), bref.index().get());
         }
     }
 
@@ -348,10 +350,7 @@ impl App {
                     if !m.is_mine {
                         record(
                             &m.peer_ss58,
-                            BlockRef {
-                                block: m.block_number,
-                                index: m.ext_index,
-                            },
+                            BlockRef::from_parts(m.block_number, m.ext_index),
                         );
                     }
                 }
@@ -360,10 +359,7 @@ impl App {
                 for m in &self.session.outbox {
                     record(
                         &m.peer_ss58,
-                        BlockRef {
-                            block: m.block_number,
-                            index: m.ext_index,
-                        },
+                        BlockRef::from_parts(m.block_number, m.ext_index),
                     );
                 }
             }
@@ -373,10 +369,7 @@ impl App {
                         if !m.is_mine {
                             record(
                                 &m.sender_ss58,
-                                BlockRef {
-                                    block: m.block_number,
-                                    index: m.ext_index,
-                                },
+                                BlockRef::from_parts(m.block_number, m.ext_index),
                             );
                         }
                     }
@@ -388,10 +381,7 @@ impl App {
                         if !m.is_mine {
                             record(
                                 &m.sender_ss58,
-                                BlockRef {
-                                    block: m.block_number,
-                                    index: m.ext_index,
-                                },
+                                BlockRef::from_parts(m.block_number, m.ext_index),
                             );
                         }
                     }
@@ -403,10 +393,7 @@ impl App {
                         if !m.is_mine {
                             record(
                                 &m.sender_ss58,
-                                BlockRef {
-                                    block: m.block_number,
-                                    index: m.ext_index,
-                                },
+                                BlockRef::from_parts(m.block_number, m.ext_index),
                             );
                         }
                     }
@@ -468,19 +455,13 @@ impl App {
                 let la =
                     a.1.iter()
                         .filter_map(|&i| self.session.threads[i].messages.last())
-                        .map(|m| BlockRef {
-                            block: m.block_number,
-                            index: m.ext_index,
-                        })
+                        .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
                         .max()
                         .unwrap_or(BlockRef::ZERO);
                 let lb =
                     b.1.iter()
                         .filter_map(|&i| self.session.threads[i].messages.last())
-                        .map(|m| BlockRef {
-                            block: m.block_number,
-                            index: m.ext_index,
-                        })
+                        .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
                         .max()
                         .unwrap_or(BlockRef::ZERO);
                 lb.cmp(&la)
@@ -490,18 +471,12 @@ impl App {
                     let la = self.session.threads[a]
                         .messages
                         .last()
-                        .map(|m| BlockRef {
-                            block: m.block_number,
-                            index: m.ext_index,
-                        })
+                        .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
                         .unwrap_or(BlockRef::ZERO);
                     let lb = self.session.threads[b]
                         .messages
                         .last()
-                        .map(|m| BlockRef {
-                            block: m.block_number,
-                            index: m.ext_index,
-                        })
+                        .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
                         .unwrap_or(BlockRef::ZERO);
                     lb.cmp(&la)
                 });
@@ -537,18 +512,12 @@ impl App {
                 let la = self.session.channels[a]
                     .messages
                     .last()
-                    .map(|m| BlockRef {
-                        block: m.block_number,
-                        index: m.ext_index,
-                    })
+                    .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
                     .unwrap_or(BlockRef::ZERO);
                 let lb = self.session.channels[b]
                     .messages
                     .last()
-                    .map(|m| BlockRef {
-                        block: m.block_number,
-                        index: m.ext_index,
-                    })
+                    .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
                     .unwrap_or(BlockRef::ZERO);
                 lb.cmp(&la)
             });
@@ -569,18 +538,12 @@ impl App {
                 let la = self.session.groups[a]
                     .messages
                     .last()
-                    .map(|m| BlockRef {
-                        block: m.block_number,
-                        index: m.ext_index,
-                    })
+                    .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
                     .unwrap_or(BlockRef::ZERO);
                 let lb = self.session.groups[b]
                     .messages
                     .last()
-                    .map(|m| BlockRef {
-                        block: m.block_number,
-                        index: m.ext_index,
-                    })
+                    .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
                     .unwrap_or(BlockRef::ZERO);
                 lb.cmp(&la)
             });

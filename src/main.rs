@@ -521,10 +521,7 @@ fn dispatch_unlock_all(
             sender: entry.sender,
             remark,
             remark_bytes: entry.remark_bytes,
-            block: types::BlockRef {
-                block: entry.block_number,
-                index: entry.ext_index,
-            },
+            at: types::BlockRef::from_parts(entry.block_number, entry.ext_index),
             timestamp_secs: entry.timestamp,
         };
         reader::process_remark(&source, &my_pubkey, &keys, send_tx);
@@ -913,10 +910,7 @@ fn run_session(
                             ts,
                             body,
                             kind,
-                            types::BlockRef {
-                                block: block_number,
-                                index: ext_index,
-                            },
+                            types::BlockRef::from_parts(block_number, ext_index),
                         );
                     }
                     0x02 => {
@@ -1088,8 +1082,8 @@ fn run_session(
                 rt.spawn(async move {
                     chain::fetch_and_process_extrinsic(
                         &url,
-                        block_ref.block,
-                        block_ref.index,
+                        block_ref.block().get(),
+                        block_ref.index().get(),
                         my_pubkey,
                         keys,
                         tx.clone(),
@@ -2119,7 +2113,7 @@ fn parse_channel_ref(input: &str) -> Result<types::BlockRef, &'static str> {
     }
     let block: u32 = parts[0].parse().map_err(|_| "invalid block number")?;
     let index: u16 = parts[1].parse().map_err(|_| "invalid index")?;
-    Ok(types::BlockRef { block, index })
+    Ok(types::BlockRef::from_parts(block, index))
 }
 
 fn handle_confirm_key(
@@ -2228,15 +2222,15 @@ mod tests {
     #[test]
     fn parse_channel_ref_valid() {
         let r = parse_channel_ref("12345:7").unwrap();
-        assert_eq!(r.block, 12345);
-        assert_eq!(r.index, 7);
+        assert_eq!(r.block().get(), 12345);
+        assert_eq!(r.index().get(), 7);
     }
 
     #[test]
     fn parse_channel_ref_zero() {
         let r = parse_channel_ref("0:0").unwrap();
-        assert_eq!(r.block, 0);
-        assert_eq!(r.index, 0);
+        assert_eq!(r.block().get(), 0);
+        assert_eq!(r.index().get(), 0);
     }
 
     #[test]

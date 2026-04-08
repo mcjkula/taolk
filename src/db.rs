@@ -272,7 +272,7 @@ impl Db {
                     let block: u32 = row.get(1)?;
                     let index: u16 = row.get(2)?;
                     let body: Vec<u8> = row.get(3)?;
-                    Ok((kind, BlockRef { block, index }, body))
+                    Ok((kind, BlockRef::from_parts(block, index), body))
                 })
                 .ok()?
                 .filter_map(|r| r.ok())
@@ -283,7 +283,8 @@ impl Db {
             .unwrap_or_default()
             .into_iter()
             .map(|(kind, bref, encrypted)| {
-                let body = self.decrypt_draft(&encrypted, kind, bref.block, bref.index);
+                let body =
+                    self.decrypt_draft(&encrypted, kind, bref.block().get(), bref.index().get());
                 (kind, bref, body)
             })
             .collect()
@@ -318,9 +319,9 @@ impl Db {
              (thread_block, thread_index, peer_ss58, sender_ss58, timestamp, body, is_mine,
               reply_to_block, reply_to_index, continues_block, continues_index, block_number, ext_index)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-            params![thread_ref.block, thread_ref.index, peer_ss58, msg.sender_ss58, msg.timestamp.timestamp(),
-                    encrypted, i32::from(msg.is_mine), msg.reply_to.block, msg.reply_to.index,
-                    msg.continues.block, msg.continues.index, block_number, ext_index],
+            params![thread_ref.block().get(), thread_ref.index().get(), peer_ss58, msg.sender_ss58, msg.timestamp.timestamp(),
+                    encrypted, i32::from(msg.is_mine), msg.reply_to.block().get(), msg.reply_to.index().get(),
+                    msg.continues.block().get(), msg.continues.index().get(), block_number, ext_index],
         );
     }
 
@@ -374,7 +375,11 @@ impl Db {
             kind.table()
         );
         self.conn
-            .query_row(&sql, params![block_ref.block, block_ref.index], |_| Ok(()))
+            .query_row(
+                &sql,
+                params![block_ref.block().get(), block_ref.index().get()],
+                |_| Ok(()),
+            )
             .is_ok()
     }
 
@@ -435,24 +440,15 @@ impl Db {
                     let bn: u32 = row.get(11)?;
                     let ei: u16 = row.get(12)?;
                     Ok((
-                        BlockRef {
-                            block: row.get::<_, u32>(0)?,
-                            index: row.get::<_, u16>(1)?,
-                        },
+                        BlockRef::from_parts(row.get::<_, u32>(0)?, row.get::<_, u16>(1)?),
                         row.get::<_, String>(2)?,
                         ThreadMessage {
                             sender_ss58: row.get(3)?,
                             timestamp: ts(t),
                             body: String::new(),
                             is_mine: row.get::<_, i32>(6)? != 0,
-                            reply_to: BlockRef {
-                                block: row.get(7)?,
-                                index: row.get(8)?,
-                            },
-                            continues: BlockRef {
-                                block: row.get(9)?,
-                                index: row.get(10)?,
-                            },
+                            reply_to: BlockRef::from_parts(row.get(7)?, row.get(8)?),
+                            continues: BlockRef::from_parts(row.get(9)?, row.get(10)?),
                             block_number: bn,
                             ext_index: ei,
                             has_gap: false,
@@ -491,7 +487,7 @@ impl Db {
     ) {
         let _ = self.conn.execute(
             "INSERT OR IGNORE INTO channels (channel_block, channel_index, name, description, creator_ss58) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![channel_ref.block, channel_ref.index, name, description, creator_ss58],
+            params![channel_ref.block().get(), channel_ref.index().get(), name, description, creator_ss58],
         );
     }
 
@@ -504,7 +500,7 @@ impl Db {
     ) {
         let _ = self.conn.execute(
             "UPDATE channels SET name = ?3, description = ?4, creator_ss58 = ?5 WHERE channel_block = ?1 AND channel_index = ?2",
-            params![channel_ref.block, channel_ref.index, name, description, creator_ss58],
+            params![channel_ref.block().get(), channel_ref.index().get(), name, description, creator_ss58],
         );
     }
 
@@ -517,7 +513,7 @@ impl Db {
     ) {
         let _ = self.conn.execute(
             "INSERT OR IGNORE INTO known_channels (channel_block, channel_index, name, description, creator_ss58) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![channel_ref.block, channel_ref.index, name, description, creator_ss58],
+            params![channel_ref.block().get(), channel_ref.index().get(), name, description, creator_ss58],
         );
     }
 
@@ -530,7 +526,7 @@ impl Db {
     ) {
         let _ = self.conn.execute(
             "UPDATE known_channels SET name = ?3, description = ?4, creator_ss58 = ?5 WHERE channel_block = ?1 AND channel_index = ?2",
-            params![channel_ref.block, channel_ref.index, name, description, creator_ss58],
+            params![channel_ref.block().get(), channel_ref.index().get(), name, description, creator_ss58],
         );
     }
 
@@ -540,10 +536,7 @@ impl Db {
             let rows = stmt
                 .query_map([], |row| {
                     Ok((
-                        BlockRef {
-                            block: row.get::<_, u32>(0)?,
-                            index: row.get::<_, u16>(1)?,
-                        },
+                        BlockRef::from_parts(row.get::<_, u32>(0)?, row.get::<_, u16>(1)?),
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
@@ -558,7 +551,7 @@ impl Db {
     }
 
     pub fn insert_group(&self, group_ref: BlockRef, creator_pubkey: &Pubkey, members: &[Pubkey]) {
-        let nonce = group_nonce(group_ref.block, group_ref.index);
+        let nonce = group_nonce(group_ref.block().get(), group_ref.index().get());
         let members_raw: Vec<u8> = members
             .iter()
             .flat_map(|pk| pk.as_bytes().iter().copied())
@@ -569,7 +562,7 @@ impl Db {
             .unwrap_or_default();
         let _ = self.conn.execute(
             "INSERT OR IGNORE INTO groups (group_block, group_index, creator_pubkey, members) VALUES (?1, ?2, ?3, ?4)",
-            params![group_ref.block, group_ref.index, &creator_pubkey.as_bytes()[..], encrypted_members],
+            params![group_ref.block().get(), group_ref.index().get(), &creator_pubkey.as_bytes()[..], encrypted_members],
         );
     }
 
@@ -613,7 +606,7 @@ impl Db {
                         })
                         .collect();
                     Some((
-                        BlockRef { block, index },
+                        BlockRef::from_parts(block, index),
                         Pubkey::from_bytes(creator_bytes),
                         members,
                     ))
@@ -644,16 +637,16 @@ impl Db {
         let _ = self.conn.execute(
             &sql,
             params![
-                conv_ref.block,
-                conv_ref.index,
+                conv_ref.block().get(),
+                conv_ref.index().get(),
                 msg.sender_ss58,
                 msg.timestamp.timestamp(),
                 encrypted,
                 i32::from(msg.is_mine),
-                msg.reply_to.block,
-                msg.reply_to.index,
-                msg.continues.block,
-                msg.continues.index,
+                msg.reply_to.block().get(),
+                msg.reply_to.index().get(),
+                msg.continues.block().get(),
+                msg.continues.index().get(),
                 block_number,
                 ext_index,
             ],
@@ -673,32 +666,29 @@ impl Db {
                 )
                 .ok()?;
             let rows = stmt
-                .query_map(params![group_ref.block, group_ref.index], |row| {
-                    let t: i64 = row.get(1)?;
-                    let ct: Vec<u8> = row.get(2)?;
-                    let bn: u32 = row.get(8)?;
-                    let ei: u16 = row.get(9)?;
-                    Ok((
-                        ThreadMessage {
-                            sender_ss58: row.get(0)?,
-                            timestamp: ts(t),
-                            body: String::new(),
-                            is_mine: row.get::<_, i32>(3)? != 0,
-                            reply_to: BlockRef {
-                                block: row.get(4)?,
-                                index: row.get(5)?,
+                .query_map(
+                    params![group_ref.block().get(), group_ref.index().get()],
+                    |row| {
+                        let t: i64 = row.get(1)?;
+                        let ct: Vec<u8> = row.get(2)?;
+                        let bn: u32 = row.get(8)?;
+                        let ei: u16 = row.get(9)?;
+                        Ok((
+                            ThreadMessage {
+                                sender_ss58: row.get(0)?,
+                                timestamp: ts(t),
+                                body: String::new(),
+                                is_mine: row.get::<_, i32>(3)? != 0,
+                                reply_to: BlockRef::from_parts(row.get(4)?, row.get(5)?),
+                                continues: BlockRef::from_parts(row.get(6)?, row.get(7)?),
+                                block_number: bn,
+                                ext_index: ei,
+                                has_gap: false,
                             },
-                            continues: BlockRef {
-                                block: row.get(6)?,
-                                index: row.get(7)?,
-                            },
-                            block_number: bn,
-                            ext_index: ei,
-                            has_gap: false,
-                        },
-                        ct,
-                    ))
-                })
+                            ct,
+                        ))
+                    },
+                )
                 .ok()?
                 .filter_map(|r| r.ok())
                 .map(|(mut msg, ct)| {
@@ -714,11 +704,11 @@ impl Db {
     pub fn delete_channel(&self, channel_ref: BlockRef) {
         let _ = self.conn.execute(
             "DELETE FROM channel_messages WHERE channel_block = ?1 AND channel_index = ?2",
-            params![channel_ref.block, channel_ref.index],
+            params![channel_ref.block().get(), channel_ref.index().get()],
         );
         let _ = self.conn.execute(
             "DELETE FROM channels WHERE channel_block = ?1 AND channel_index = ?2",
-            params![channel_ref.block, channel_ref.index],
+            params![channel_ref.block().get(), channel_ref.index().get()],
         );
     }
 
@@ -728,10 +718,7 @@ impl Db {
             let rows = stmt
                 .query_map([], |row| {
                     Ok((
-                        BlockRef {
-                            block: row.get::<_, u32>(0)?,
-                            index: row.get::<_, u16>(1)?,
-                        },
+                        BlockRef::from_parts(row.get::<_, u32>(0)?, row.get::<_, u16>(1)?),
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
@@ -754,10 +741,7 @@ impl Db {
                 std::collections::HashMap::new();
             for row in stmt
                 .query_map([], |row| {
-                    let ch = BlockRef {
-                        block: row.get(0)?,
-                        index: row.get(1)?,
-                    };
+                    let ch = BlockRef::from_parts(row.get(0)?, row.get(1)?);
                     let t: i64 = row.get(3)?;
                     let ct: Vec<u8> = row.get(4)?;
                     let bn: u32 = row.get(10)?;
@@ -769,14 +753,8 @@ impl Db {
                             timestamp: ts(t),
                             body: String::new(),
                             is_mine: row.get::<_, i32>(5)? != 0,
-                            reply_to: BlockRef {
-                                block: row.get(6)?,
-                                index: row.get(7)?,
-                            },
-                            continues: BlockRef {
-                                block: row.get(8)?,
-                                index: row.get(9)?,
-                            },
+                            reply_to: BlockRef::from_parts(row.get(6)?, row.get(7)?),
+                            continues: BlockRef::from_parts(row.get(8)?, row.get(9)?),
                             block_number: bn,
                             ext_index: ei,
                             has_gap: false,

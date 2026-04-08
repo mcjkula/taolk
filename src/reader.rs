@@ -22,7 +22,7 @@ pub struct RemarkSource {
     pub sender: Pubkey,
     pub remark: Remark,
     pub remark_bytes: samp::RemarkBytes,
-    pub block: BlockRef,
+    pub at: BlockRef,
     pub timestamp_secs: u64,
 }
 
@@ -81,10 +81,7 @@ pub fn source_from_extrinsic(
         sender,
         remark,
         remark_bytes,
-        block: BlockRef {
-            block: block_number,
-            index: ext_index,
-        },
+        at: BlockRef::from_parts(block_number, ext_index),
         timestamp_secs: block_ts_ms / 1000,
     })
 }
@@ -136,8 +133,8 @@ pub fn process_remark(
     tx: &Sender<Event>,
 ) {
     let sender = source.sender;
-    let block_number = source.block.block;
-    let ext_index = source.block.index;
+    let block_number = source.at.block().get();
+    let ext_index = source.at.index().get();
     let timestamp = source.timestamp_secs;
 
     match &source.remark {
@@ -184,10 +181,7 @@ pub fn process_remark(
                 name: name.as_str().to_string(),
                 description: description.as_str().to_string(),
                 creator_ss58,
-                channel_ref: BlockRef {
-                    block: block_number,
-                    index: ext_index,
-                },
+                channel_ref: BlockRef::from_parts(block_number, ext_index),
             });
         }
         Remark::Channel {
@@ -233,10 +227,7 @@ pub fn process_remark(
                 };
                 let _ = tx.send(Event::GroupDiscovered {
                     creator_pubkey: sender,
-                    group_ref: BlockRef {
-                        block: block_number,
-                        index: ext_index,
-                    },
+                    group_ref: BlockRef::from_parts(block_number, ext_index),
                     members,
                 });
                 let body = String::from_utf8(first_msg.to_vec()).unwrap_or_default();
@@ -244,10 +235,7 @@ pub fn process_remark(
                 let _ = tx.send(Event::NewGroupMessage {
                     sender,
                     sender_ss58,
-                    group_ref: BlockRef {
-                        block: block_number,
-                        index: ext_index,
-                    },
+                    group_ref: BlockRef::from_parts(block_number, ext_index),
                     body,
                     reply_to: BlockRef::ZERO,
                     continues: BlockRef::ZERO,
@@ -289,8 +277,8 @@ fn process_one_to_one(
     tx: &Sender<Event>,
     is_thread: bool,
 ) {
-    let block_number = source.block.block;
-    let ext_index = source.block.index;
+    let block_number = source.at.block().get();
+    let ext_index = source.at.index().get();
     let timestamp = source.timestamp_secs;
     let is_mine = sender == *my_pubkey;
     let scalar = keys.scalar();

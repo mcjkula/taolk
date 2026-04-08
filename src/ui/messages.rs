@@ -440,7 +440,11 @@ fn render_thread(frame: &mut Frame, app: &App, thread_idx: usize, area: Rect) {
     let id_str = if thread.thread_ref.is_zero() {
         String::new()
     } else {
-        format!("{}:{}", thread.thread_ref.block, thread.thread_ref.index)
+        format!(
+            "{}:{}",
+            thread.thread_ref.block().get(),
+            thread.thread_ref.index().get()
+        )
     };
     let id_reserve = if id_str.is_empty() {
         0
@@ -473,7 +477,8 @@ fn render_channel(frame: &mut Frame, app: &App, chan_idx: usize, area: Rect) {
     let w = usize::from(area.width);
     let id_str = format!(
         "{}:{}",
-        channel.channel_ref.block, channel.channel_ref.index
+        channel.channel_ref.block().get(),
+        channel.channel_ref.index().get()
     );
     let id_reserve = id_str.len() + 1;
     let title = format!(
@@ -513,7 +518,11 @@ fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
     let id_str = if group.group_ref.is_zero() {
         String::new()
     } else {
-        format!("{}:{}", group.group_ref.block, group.group_ref.index)
+        format!(
+            "{}:{}",
+            group.group_ref.block().get(),
+            group.group_ref.index().get()
+        )
     };
     let id_reserve = if id_str.is_empty() {
         0
@@ -603,7 +612,11 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
 
         let indicator = if selected { "> " } else { "  " };
         let check = if subscribed { " \u{2713}" } else { "" };
-        let id_str = format!(" {}:{}", info.channel_ref.block, info.channel_ref.index);
+        let id_str = format!(
+            " {}:{}",
+            info.channel_ref.block().get(),
+            info.channel_ref.index().get()
+        );
         let name_str = format!("#{}", info.name);
 
         let name_color = if subscribed {

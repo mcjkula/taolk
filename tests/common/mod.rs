@@ -85,7 +85,7 @@ pub fn now() -> DateTime<Utc> {
 }
 
 pub fn br(block: u32, index: u16) -> BlockRef {
-    BlockRef { block, index }
+    BlockRef::from_parts(block, index)
 }
 
 pub fn build_remark_ext(

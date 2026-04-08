@@ -1,3 +1,4 @@
+use samp::{BlockNumber, ExtIndex};
 use taolk::types::{BlockRef, Pubkey};
 
 #[test]
@@ -40,24 +41,24 @@ fn pubkey_into_bytes() {
 
 #[test]
 fn blockref_zero() {
-    assert_eq!(BlockRef::ZERO.block, 0);
-    assert_eq!(BlockRef::ZERO.index, 0);
+    assert_eq!(BlockRef::ZERO.block().get(), 0);
+    assert_eq!(BlockRef::ZERO.index().get(), 0);
 }
 
 #[test]
 fn blockref_is_zero() {
     assert!(BlockRef::ZERO.is_zero());
-    assert!(!BlockRef { block: 1, index: 0 }.is_zero());
+    assert!(!BlockRef::new(BlockNumber::new(1), ExtIndex::new(0)).is_zero());
 }
 
 #[test]
 fn blockref_ordering() {
-    let a = BlockRef { block: 0, index: 5 };
-    let b = BlockRef { block: 1, index: 0 };
+    let a = BlockRef::new(BlockNumber::new(0), ExtIndex::new(5));
+    let b = BlockRef::new(BlockNumber::new(1), ExtIndex::new(0));
     assert!(b > a);
 
-    let c = BlockRef { block: 1, index: 0 };
-    let d = BlockRef { block: 1, index: 3 };
+    let c = BlockRef::new(BlockNumber::new(1), ExtIndex::new(0));
+    let d = BlockRef::new(BlockNumber::new(1), ExtIndex::new(3));
     assert!(d > c);
 }
 
@@ -66,14 +67,8 @@ fn blockref_hash_consistent() {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
-    let a = BlockRef {
-        block: 42,
-        index: 7,
-    };
-    let b = BlockRef {
-        block: 42,
-        index: 7,
-    };
+    let a = BlockRef::from_parts(42, 7);
+    let b = BlockRef::from_parts(42, 7);
 
     let mut h1 = DefaultHasher::new();
     a.hash(&mut h1);

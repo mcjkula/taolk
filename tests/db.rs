@@ -61,10 +61,7 @@ fn inbox_separates_mine_vs_received() {
 #[test]
 fn thread_message_insert_and_load() {
     let db = test_db();
-    let thread_ref = BlockRef {
-        block: 100,
-        index: 0,
-    };
+    let thread_ref = BlockRef::from_parts(100, 0);
     let msg = make_thread_msg("threaded hello", false, 100, 0);
     db.insert_thread_message(thread_ref, "Alice", &msg, 100, 0);
 
@@ -79,10 +76,7 @@ fn thread_message_insert_and_load() {
 #[test]
 fn channel_insert_and_load() {
     let db = test_db();
-    let ch_ref = BlockRef {
-        block: 200,
-        index: 0,
-    };
+    let ch_ref = BlockRef::from_parts(200, 0);
     db.insert_channel(ch_ref, "general", "General chat", "Creator");
 
     let msg = make_thread_msg("channel msg", false, 300, 0);
@@ -101,10 +95,7 @@ fn channel_insert_and_load() {
 #[test]
 fn channel_update_meta() {
     let db = test_db();
-    let ch_ref = BlockRef {
-        block: 200,
-        index: 0,
-    };
+    let ch_ref = BlockRef::from_parts(200, 0);
     db.insert_channel(ch_ref, "old-name", "old desc", "Creator");
 
     db.update_channel_meta(ch_ref, "new-name", "new desc", "Creator");
@@ -118,10 +109,7 @@ fn channel_update_meta() {
 #[test]
 fn channel_delete() {
     let db = test_db();
-    let ch_ref = BlockRef {
-        block: 200,
-        index: 0,
-    };
+    let ch_ref = BlockRef::from_parts(200, 0);
     db.insert_channel(ch_ref, "doomed", "to be deleted", "Creator");
     let msg = make_thread_msg("doomed msg", false, 300, 0);
     db.insert_threaded_message(taolk::db::ConvKind::Channel, ch_ref, &msg, 300, 0);
@@ -135,10 +123,7 @@ fn channel_delete() {
 #[test]
 fn known_channel_insert_and_load() {
     let db = test_db();
-    let ch_ref = BlockRef {
-        block: 500,
-        index: 1,
-    };
+    let ch_ref = BlockRef::from_parts(500, 1);
     db.insert_known_channel(ch_ref, "public-ch", "A public channel", "Announcer");
 
     let known = db.load_known_channels();
@@ -152,10 +137,7 @@ fn known_channel_insert_and_load() {
 #[test]
 fn group_insert_and_load() {
     let db = test_db();
-    let group_ref = BlockRef {
-        block: 400,
-        index: 0,
-    };
+    let group_ref = BlockRef::from_parts(400, 0);
     let creator = Pubkey::from_bytes([1u8; 32]);
     let members = vec![Pubkey::from_bytes([2u8; 32]), Pubkey::from_bytes([3u8; 32])];
     db.insert_group(group_ref, &creator, &members);
@@ -172,10 +154,7 @@ fn group_insert_and_load() {
 #[test]
 fn group_message_insert_and_load() {
     let db = test_db();
-    let group_ref = BlockRef {
-        block: 400,
-        index: 0,
-    };
+    let group_ref = BlockRef::from_parts(400, 0);
     let creator = Pubkey::from_bytes([1u8; 32]);
     db.insert_group(group_ref, &creator, &[Pubkey::from_bytes([2u8; 32])]);
 
@@ -213,87 +192,42 @@ fn peer_upsert_overwrites() {
 #[test]
 fn has_message_at_true() {
     let db = test_db();
-    let thread_ref = BlockRef {
-        block: 100,
-        index: 0,
-    };
+    let thread_ref = BlockRef::from_parts(100, 0);
     let msg = make_thread_msg("exists", false, 100, 0);
     db.insert_thread_message(thread_ref, "Alice", &msg, 100, 0);
 
-    assert!(db.has_message_at(
-        taolk::db::ConvKind::Thread,
-        BlockRef {
-            block: 100,
-            index: 0
-        }
-    ));
+    assert!(db.has_message_at(taolk::db::ConvKind::Thread, BlockRef::from_parts(100, 0)));
 }
 
 #[test]
 fn has_message_at_false() {
     let db = test_db();
-    assert!(!db.has_message_at(
-        taolk::db::ConvKind::Thread,
-        BlockRef {
-            block: 999,
-            index: 0
-        }
-    ));
+    assert!(!db.has_message_at(taolk::db::ConvKind::Thread, BlockRef::from_parts(999, 0)));
 }
 
 #[test]
 fn has_channel_message_at() {
     let db = test_db();
-    let ch_ref = BlockRef {
-        block: 200,
-        index: 0,
-    };
+    let ch_ref = BlockRef::from_parts(200, 0);
     db.insert_channel(ch_ref, "ch", "desc", "creator");
     let msg = make_thread_msg("ch msg", false, 300, 1);
     db.insert_threaded_message(taolk::db::ConvKind::Channel, ch_ref, &msg, 300, 1);
 
-    assert!(db.has_message_at(
-        taolk::db::ConvKind::Channel,
-        BlockRef {
-            block: 300,
-            index: 1
-        }
-    ));
-    assert!(!db.has_message_at(
-        taolk::db::ConvKind::Channel,
-        BlockRef {
-            block: 300,
-            index: 2
-        }
-    ));
+    assert!(db.has_message_at(taolk::db::ConvKind::Channel, BlockRef::from_parts(300, 1)));
+    assert!(!db.has_message_at(taolk::db::ConvKind::Channel, BlockRef::from_parts(300, 2)));
 }
 
 #[test]
 fn has_group_message_at() {
     let db = test_db();
-    let group_ref = BlockRef {
-        block: 400,
-        index: 0,
-    };
+    let group_ref = BlockRef::from_parts(400, 0);
     let creator = Pubkey::from_bytes([1u8; 32]);
     db.insert_group(group_ref, &creator, &[]);
     let msg = make_thread_msg("grp msg", false, 500, 3);
     db.insert_threaded_message(taolk::db::ConvKind::Group, group_ref, &msg, 500, 3);
 
-    assert!(db.has_message_at(
-        taolk::db::ConvKind::Group,
-        BlockRef {
-            block: 500,
-            index: 3
-        }
-    ));
-    assert!(!db.has_message_at(
-        taolk::db::ConvKind::Group,
-        BlockRef {
-            block: 500,
-            index: 4
-        }
-    ));
+    assert!(db.has_message_at(taolk::db::ConvKind::Group, BlockRef::from_parts(500, 3)));
+    assert!(!db.has_message_at(taolk::db::ConvKind::Group, BlockRef::from_parts(500, 4)));
 }
 
 #[test]
@@ -301,10 +235,7 @@ fn different_seeds_different_encryption() {
     let db_a = Db::open_in_memory(&[0xAA; 32]).unwrap();
     let db_b = Db::open_in_memory(&[0xBB; 32]).unwrap();
 
-    let thread_ref = BlockRef {
-        block: 100,
-        index: 0,
-    };
+    let thread_ref = BlockRef::from_parts(100, 0);
     let msg = ThreadMessage {
         sender_ss58: "Alice".into(),
         timestamp: Utc::now(),

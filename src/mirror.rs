@@ -18,8 +18,10 @@ struct HealthResp {
 
 #[derive(serde::Deserialize)]
 struct Hint {
-    block: u32,
-    index: u16,
+    #[serde(rename = "block")]
+    b: u32,
+    #[serde(rename = "index")]
+    i: u16,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -116,7 +118,7 @@ pub async fn fetch_channel(
         )));
         return;
     }
-    let (b, i) = (channel_ref.block, channel_ref.index);
+    let (b, i) = (channel_ref.block().get(), channel_ref.index().get());
     let hints = fetch_per_channel_hints(&client, &healthy, b, i, 0).await;
     resolve_message_hints(node_url, hints, my_pubkey, keys, &tx).await;
     let _ = tx.send(Event::CatchupComplete);
@@ -177,7 +179,7 @@ async fn fetch_channel_directory_hints(
         .flatten()
     {
         for h in hints {
-            union.insert((h.block, h.index));
+            union.insert((h.b, h.i));
         }
     }
     union
@@ -192,7 +194,15 @@ async fn fetch_message_hints(
     let mut union = HashSet::new();
 
     for ch in subscribed_channels {
-        for hint in fetch_per_channel_hints(client, bases, ch.block, ch.index, last_block).await {
+        for hint in fetch_per_channel_hints(
+            client,
+            bases,
+            ch.block().get(),
+            ch.index().get(),
+            last_block,
+        )
+        .await
+        {
             union.insert(hint);
         }
     }
@@ -217,7 +227,7 @@ async fn fetch_message_hints(
             .flatten()
         {
             for h in hints {
-                union.insert((h.block, h.index));
+                union.insert((h.b, h.i));
             }
         }
     }
@@ -252,7 +262,7 @@ async fn fetch_per_channel_hints(
         .flatten()
     {
         for h in hints {
-            union.insert((h.block, h.index));
+            union.insert((h.b, h.i));
         }
     }
     union
@@ -334,6 +344,6 @@ fn emit_channel_create(source: &RemarkSource, tx: &Sender<Event>) {
         name: name.as_str().to_string(),
         description: description.as_str().to_string(),
         creator_ss58: crate::util::ss58_short(&source.sender),
-        channel_ref: source.block,
+        channel_ref: source.at,
     });
 }

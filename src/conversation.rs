@@ -54,10 +54,7 @@ pub struct NewMessage {
 pub fn last_ref(messages: &[ThreadMessage]) -> BlockRef {
     messages
         .last()
-        .map(|m| BlockRef {
-            block: m.block_number,
-            index: m.ext_index,
-        })
+        .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
         .unwrap_or(BlockRef::ZERO)
 }
 
@@ -66,10 +63,7 @@ pub fn my_last_ref(messages: &[ThreadMessage]) -> BlockRef {
         .iter()
         .rev()
         .find(|m| m.is_mine)
-        .map(|m| BlockRef {
-            block: m.block_number,
-            index: m.ext_index,
-        })
+        .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
         .unwrap_or(BlockRef::ZERO)
 }
 
@@ -85,7 +79,7 @@ pub fn gap_refs(messages: &[ThreadMessage]) -> Vec<BlockRef> {
             }
         }
     }
-    refs.sort_by(|a, b| (a.block, a.index).cmp(&(b.block, b.index)));
+    refs.sort_by_key(|r| (r.block().get(), r.index().get()));
     refs.dedup();
     refs
 }

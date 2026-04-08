@@ -135,7 +135,11 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                     let label = if thread.thread_ref.is_zero() {
                         app.spinner_5().to_string()
                     } else {
-                        format!("{}:{}", thread.thread_ref.block, thread.thread_ref.index)
+                        format!(
+                            "{}:{}",
+                            thread.thread_ref.block().get(),
+                            thread.thread_ref.index().get()
+                        )
                     };
                     let is_last = j == thread_idxs.len() - 1;
                     let branch = if is_last {
