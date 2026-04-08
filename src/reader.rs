@@ -1,7 +1,7 @@
 use samp::extrinsic::{extract_call, extract_signer as samp_extract_signer};
 use samp::scale::{decode_bytes, decode_compact};
 use samp::{
-    ContentType, Remark, decode_channel_content, decode_channel_create, decode_group_content,
+    ContentType, EncryptedPayload, Remark, decode_channel_content, decode_group_content,
     decode_group_members, decode_remark, decode_thread_content,
 };
 use serde_json::Value;
@@ -135,21 +135,20 @@ pub fn process_remark(
     tx: &Sender<Event>,
 ) {
     let sender = source.sender;
-    let remark = &source.remark;
     let block_number = source.block.block;
     let ext_index = source.block.index;
     let timestamp = source.timestamp_secs;
 
-    match remark.content_type {
-        ContentType::Public => {
-            if &remark.recipient != my_pubkey.as_bytes() && sender != *my_pubkey {
+    match &source.remark {
+        Remark::Public { recipient, body } => {
+            if recipient != my_pubkey && sender != *my_pubkey {
                 return;
             }
             let _ = tx.send(Event::NewMessage {
                 sender,
-                content_type: remark.content_type.to_byte(),
-                recipient: Pubkey::from_bytes(remark.recipient),
-                decrypted_body: String::from_utf8(remark.content.clone()).ok(),
+                content_type: ContentType::Public.to_byte(),
+                recipient: *recipient,
+                decrypted_body: String::from_utf8(body.clone()).ok(),
                 thread_ref: BlockRef::ZERO,
                 reply_to: BlockRef::ZERO,
                 continues: BlockRef::ZERO,
@@ -158,90 +157,31 @@ pub fn process_remark(
                 timestamp,
             });
         }
-        ContentType::Encrypted | ContentType::Thread => {
-            let is_mine = sender == *my_pubkey;
-            let scalar = keys.scalar();
-
-            if !is_mine {
-                let tag = match samp::check_view_tag(remark, &scalar) {
-                    Ok(t) => t,
-                    Err(_) => return,
-                };
-                if tag != remark.view_tag {
-                    return;
-                }
-            }
-
-            let plaintext = if is_mine {
-                let Some(seed_bytes) = keys.seed() else {
-                    let _ = tx.send(Event::LockedOutbound {
-                        sender,
-                        block_number,
-                        ext_index,
-                        timestamp,
-                        remark_bytes: source.remark_bytes.clone(),
-                    });
-                    return;
-                };
-                let sender_seed = samp::Seed::from_bytes(*seed_bytes);
-                samp::decrypt_as_sender(remark, &sender_seed)
-            } else {
-                samp::decrypt(remark, &scalar)
-            };
-
-            let plaintext = match plaintext {
-                Ok(pt) => pt,
-                Err(_) => return,
-            };
-
-            let mut recipient = remark.recipient;
-            if is_mine
-                && let Some(seed_bytes) = keys.seed()
-                && let Ok(r) = samp::unseal_recipient(remark, &samp::Seed::from_bytes(*seed_bytes))
-            {
-                recipient = *r.as_bytes();
-            }
-
-            let ct = remark.content_type.to_byte();
-            let (body, thread_ref, reply_to, continues) = if ct & 0x0F == 0x02 {
-                match decode_thread_content(&plaintext) {
-                    Ok((thread, reply_to, continues, body_bytes)) => {
-                        let body = String::from_utf8(body_bytes.to_vec()).ok();
-                        (body, thread, reply_to, continues)
-                    }
-                    Err(_) => return,
-                }
-            } else {
-                (
-                    String::from_utf8(plaintext).ok(),
-                    BlockRef::ZERO,
-                    BlockRef::ZERO,
-                    BlockRef::ZERO,
-                )
-            };
-
-            let _ = tx.send(Event::NewMessage {
-                sender,
-                content_type: ct,
-                recipient: Pubkey::from_bytes(recipient),
-                decrypted_body: body,
-                thread_ref,
-                reply_to,
-                continues,
-                block_number,
-                ext_index,
-                timestamp,
-            });
-        }
-        ContentType::ChannelCreate => {
-            let (name, description) = match decode_channel_create(&remark.content) {
-                Ok(r) => (r.0.to_string(), r.1.to_string()),
-                Err(_) => return,
-            };
+        Remark::Encrypted(payload) => process_one_to_one(
+            payload,
+            ContentType::Encrypted,
+            sender,
+            my_pubkey,
+            keys,
+            source,
+            tx,
+            false,
+        ),
+        Remark::Thread(payload) => process_one_to_one(
+            payload,
+            ContentType::Thread,
+            sender,
+            my_pubkey,
+            keys,
+            source,
+            tx,
+            true,
+        ),
+        Remark::ChannelCreate { name, description } => {
             let creator_ss58 = crate::util::ss58_short(&sender);
             let _ = tx.send(Event::ChannelDiscovered {
-                name,
-                description,
+                name: name.clone(),
+                description: description.clone(),
                 creator_ss58,
                 channel_ref: BlockRef {
                     block: block_number,
@@ -249,16 +189,18 @@ pub fn process_remark(
                 },
             });
         }
-        ContentType::Channel => {
-            let channel_ref = samp::channel_ref_from_recipient(&remark.recipient);
-            if let Ok((reply_to, continues, body_bytes)) = decode_channel_content(&remark.content)
+        Remark::Channel {
+            channel_ref,
+            content,
+        } => {
+            if let Ok((reply_to, continues, body_bytes)) = decode_channel_content(content)
                 && let Ok(body) = String::from_utf8(body_bytes.to_vec())
             {
                 let sender_ss58 = crate::util::ss58_short(&sender);
                 let _ = tx.send(Event::NewChannelMessage {
                     sender,
                     sender_ss58,
-                    channel_ref,
+                    channel_ref: *channel_ref,
                     body,
                     reply_to,
                     continues,
@@ -268,11 +210,11 @@ pub fn process_remark(
                 });
             }
         }
-        ContentType::Group => {
+        Remark::Group(payload) => {
             let scalar = keys.scalar();
 
             let plaintext =
-                match samp::decrypt_from_group(&remark.content, &scalar, &remark.nonce, None) {
+                match samp::decrypt_from_group(&payload.content, &scalar, &payload.nonce, None) {
                     Ok(pt) => pt,
                     Err(_) => return,
                 };
@@ -288,7 +230,6 @@ pub fn process_remark(
                     Ok(r) => r,
                     Err(_) => return,
                 };
-                let members: Vec<Pubkey> = members;
                 let _ = tx.send(Event::GroupDiscovered {
                     creator_pubkey: sender,
                     group_ref: BlockRef {
@@ -332,6 +273,94 @@ pub fn process_remark(
                 });
             }
         }
-        ContentType::Application(_) => {}
+        Remark::Application { .. } => {}
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn process_one_to_one(
+    payload: &EncryptedPayload,
+    ct: ContentType,
+    sender: Pubkey,
+    my_pubkey: &Pubkey,
+    keys: &DecryptionKeys,
+    source: &RemarkSource,
+    tx: &Sender<Event>,
+    is_thread: bool,
+) {
+    let block_number = source.block.block;
+    let ext_index = source.block.index;
+    let timestamp = source.timestamp_secs;
+    let is_mine = sender == *my_pubkey;
+    let scalar = keys.scalar();
+
+    if !is_mine {
+        let tag = match samp::check_view_tag(payload, &scalar) {
+            Ok(t) => t,
+            Err(_) => return,
+        };
+        if tag != payload.view_tag {
+            return;
+        }
+    }
+
+    let plaintext = if is_mine {
+        let Some(seed_bytes) = keys.seed() else {
+            let _ = tx.send(Event::LockedOutbound {
+                sender,
+                block_number,
+                ext_index,
+                timestamp,
+                remark_bytes: source.remark_bytes.clone(),
+            });
+            return;
+        };
+        let sender_seed = samp::Seed::from_bytes(*seed_bytes);
+        samp::decrypt_as_sender(payload, &sender_seed)
+    } else {
+        samp::decrypt(payload, &scalar)
+    };
+
+    let plaintext = match plaintext {
+        Ok(pt) => pt,
+        Err(_) => return,
+    };
+
+    let mut recipient = *my_pubkey;
+    if is_mine
+        && let Some(seed_bytes) = keys.seed()
+        && let Ok(r) = samp::unseal_recipient(payload, &samp::Seed::from_bytes(*seed_bytes))
+    {
+        recipient = r;
+    }
+
+    let (body, thread_ref, reply_to, continues) = if is_thread {
+        match decode_thread_content(&plaintext) {
+            Ok((thread, reply_to, continues, body_bytes)) => {
+                let body = String::from_utf8(body_bytes.to_vec()).ok();
+                (body, thread, reply_to, continues)
+            }
+            Err(_) => return,
+        }
+    } else {
+        (
+            String::from_utf8(plaintext).ok(),
+            BlockRef::ZERO,
+            BlockRef::ZERO,
+            BlockRef::ZERO,
+        )
+    };
+
+    let _ = tx.send(Event::NewMessage {
+        sender,
+        content_type: ct.to_byte(),
+        recipient,
+        decrypted_body: body,
+        thread_ref,
+        reply_to,
+        continues,
+        block_number,
+        ext_index,
+        timestamp,
+    });
 }

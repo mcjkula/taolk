@@ -20,11 +20,15 @@ fn build_public_message_roundtrip() {
     let body = "hello world";
 
     let remark = session.build_public_message(&recipient, body).unwrap();
-    let decoded = samp::decode_remark(&remark).unwrap();
-
-    assert_eq!(decoded.content_type, samp::ContentType::Public);
-    assert_eq!(&decoded.recipient, recipient.as_bytes());
-    assert_eq!(std::str::from_utf8(&decoded.content).unwrap(), body);
+    let samp::Remark::Public {
+        recipient: r,
+        body: b,
+    } = samp::decode_remark(&remark).unwrap()
+    else {
+        panic!("expected Public");
+    };
+    assert_eq!(r, recipient);
+    assert_eq!(std::str::from_utf8(&b).unwrap(), body);
 }
 
 #[test]
@@ -35,11 +39,11 @@ fn build_encrypted_message_decryptable() {
     let remark = session
         .build_encrypted_message(&ALICE_SEED, &recipient, "hello")
         .unwrap();
-    let decoded = samp::decode_remark(&remark).unwrap();
+    let samp::Remark::Encrypted(payload) = samp::decode_remark(&remark).unwrap() else {
+        panic!("expected Encrypted");
+    };
 
-    assert_eq!(decoded.content_type, samp::ContentType::Encrypted);
-
-    let plaintext = samp::decrypt(&decoded, &bob_scalar()).unwrap();
+    let plaintext = samp::decrypt(&payload, &bob_scalar()).unwrap();
     assert_eq!(std::str::from_utf8(&plaintext).unwrap(), "hello");
 }
 
@@ -51,11 +55,11 @@ fn build_thread_root_decryptable() {
     let remark = session
         .build_thread_root(&ALICE_SEED, &recipient, "thread start")
         .unwrap();
-    let decoded = samp::decode_remark(&remark).unwrap();
+    let samp::Remark::Thread(payload) = samp::decode_remark(&remark).unwrap() else {
+        panic!("expected Thread");
+    };
 
-    assert_eq!(decoded.content_type, samp::ContentType::Thread);
-
-    let plaintext = samp::decrypt(&decoded, &bob_scalar()).unwrap();
+    let plaintext = samp::decrypt(&payload, &bob_scalar()).unwrap();
     let (thread_ref, _reply_to, _continues, body) =
         samp::decode_thread_content(&plaintext).unwrap();
 
@@ -68,11 +72,10 @@ fn build_channel_create_roundtrip() {
     let session = alice_session();
 
     let remark = session.build_channel_create("test", "desc").unwrap();
-    let decoded = samp::decode_remark(&remark).unwrap();
-
-    assert_eq!(decoded.content_type, samp::ContentType::ChannelCreate);
-
-    let (name, description) = samp::decode_channel_create(&decoded.content).unwrap();
+    let samp::Remark::ChannelCreate { name, description } = samp::decode_remark(&remark).unwrap()
+    else {
+        panic!("expected ChannelCreate");
+    };
     assert_eq!(name, "test");
     assert_eq!(description, "desc");
 }
@@ -87,11 +90,13 @@ fn build_channel_message_roundtrip() {
     session.subscribe_channel(channel_ref);
 
     let remark = session.build_channel_message(0, "chan msg").unwrap();
-    let decoded = samp::decode_remark(&remark).unwrap();
-
-    assert_eq!(decoded.content_type, samp::ContentType::Channel);
-
-    let wire_ref = samp::channel_ref_from_recipient(&decoded.recipient);
+    let samp::Remark::Channel {
+        channel_ref: wire_ref,
+        ..
+    } = samp::decode_remark(&remark).unwrap()
+    else {
+        panic!("expected Channel");
+    };
     assert_eq!(wire_ref, channel_ref);
 }
 
@@ -105,12 +110,12 @@ fn build_group_create_decryptable() {
     let remark = session
         .build_group_create(&ALICE_SEED, &members, "group hello")
         .unwrap();
-    let decoded = samp::decode_remark(&remark).unwrap();
-
-    assert_eq!(decoded.content_type, samp::ContentType::Group);
+    let samp::Remark::Group(payload) = samp::decode_remark(&remark).unwrap() else {
+        panic!("expected Group");
+    };
 
     let plaintext =
-        samp::decrypt_from_group(&decoded.content, &bob_scalar(), &decoded.nonce, Some(2)).unwrap();
+        samp::decrypt_from_group(&payload.content, &bob_scalar(), &payload.nonce, Some(2)).unwrap();
 
     let (_group_ref, _reply_to, _continues, body) =
         samp::decode_thread_content(&plaintext).unwrap();

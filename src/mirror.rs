@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::mpsc::Sender;
 
-use samp::{ContentType, decode_channel_create};
+use samp::Remark;
 
 use crate::chain;
 use crate::error::ChainError;
@@ -318,15 +318,12 @@ async fn resolve_channel_hints(node_url: &str, hints: HashSet<(u32, u16)>, tx: &
 }
 
 fn emit_channel_create(source: &RemarkSource, tx: &Sender<Event>) {
-    if !matches!(source.remark.content_type, ContentType::ChannelCreate) {
-        return;
-    }
-    let Ok((name, description)) = decode_channel_create(&source.remark.content) else {
+    let Remark::ChannelCreate { name, description } = &source.remark else {
         return;
     };
     let _ = tx.send(Event::ChannelDiscovered {
-        name: name.to_string(),
-        description: description.to_string(),
+        name: name.clone(),
+        description: description.clone(),
         creator_ss58: crate::util::ss58_short(&source.sender),
         channel_ref: source.block,
     });
