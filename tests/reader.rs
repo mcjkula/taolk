@@ -142,7 +142,7 @@ fn read_extrinsic_decrypts_for_recipient() {
         samp::encrypt(plaintext, &recipient_ristretto, &nonce, &alice_seed).unwrap();
 
     let remark = samp::encode_encrypted(
-        samp::CONTENT_TYPE_ENCRYPTED,
+        samp::ContentType::Encrypted,
         view_tag,
         &nonce,
         &encrypted_content,
@@ -197,7 +197,7 @@ fn read_extrinsic_skips_message_for_wrong_recipient() {
     let encrypted_content =
         samp::encrypt(plaintext, &recipient_ristretto, &nonce, &alice_seed).unwrap();
     let remark = samp::encode_encrypted(
-        samp::CONTENT_TYPE_ENCRYPTED,
+        samp::ContentType::Encrypted,
         view_tag,
         &nonce,
         &encrypted_content,

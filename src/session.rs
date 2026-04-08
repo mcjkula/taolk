@@ -761,7 +761,7 @@ impl Session {
         let vt = samp::compute_view_tag(seed, &enc_pk, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_encrypted(
-            samp::CONTENT_TYPE_ENCRYPTED,
+            samp::ContentType::Encrypted,
             vt,
             &nonce,
             &encrypted,
@@ -787,7 +787,7 @@ impl Session {
         let vt = samp::compute_view_tag(seed, &enc_pk, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_encrypted(
-            samp::CONTENT_TYPE_THREAD,
+            samp::ContentType::Thread,
             vt,
             &nonce,
             &encrypted,
@@ -817,7 +817,7 @@ impl Session {
         let vt = samp::compute_view_tag(seed, &enc_pk, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_encrypted(
-            samp::CONTENT_TYPE_THREAD,
+            samp::ContentType::Thread,
             vt,
             &nonce,
             &encrypted,
