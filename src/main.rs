@@ -779,8 +779,10 @@ fn run_session(
                     app.set_status("Loading...");
                     let url = mirror_url.clone();
                     let tx = event_tx.clone();
+                    let pk = my_pubkey;
+                    let sc = zeroize::Zeroizing::new(*seed);
                     rt.spawn(async move {
-                        mirror::fetch_channel(&url, channel_ref, tx).await;
+                        mirror::fetch_channel(&url, channel_ref, &pk, &sc, tx).await;
                     });
                 }
             }
