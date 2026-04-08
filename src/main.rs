@@ -1361,54 +1361,54 @@ fn handle_normal_key(
     key: crossterm::event::KeyEvent,
     send_tx: &std::sync::mpsc::Sender<event::Event>,
 ) {
-    if app.view == app::View::ChannelDir {
-        match key.code {
-            KeyCode::Down if app.channel_dir_input.is_empty() => {
-                if !app.session.known_channels.is_empty() {
-                    app.channel_dir_cursor =
-                        (app.channel_dir_cursor + 1).min(app.session.known_channels.len() - 1);
-                }
-            }
-            KeyCode::Up if app.channel_dir_input.is_empty() => {
-                app.channel_dir_cursor = app.channel_dir_cursor.saturating_sub(1);
-            }
-            KeyCode::Enter => {
-                if !app.channel_dir_input.is_empty() {
-                    match parse_channel_ref(&app.channel_dir_input) {
-                        Ok(channel_ref) => {
-                            let idx = app.session.subscribe_channel(channel_ref);
-                            app.view = app::View::Channel(idx);
-                            app.set_status(format!(
-                                "Subscribed to #{}",
-                                app.session.channels[idx].name
-                            ));
-                            app.channel_dir_input.clear();
-                            let _ = send_tx.send(event::Event::FetchBlock {
-                                block_ref: channel_ref,
-                            });
-                            if app.session.has_mirror {
-                                let _ =
-                                    send_tx.send(event::Event::FetchChannelMirror { channel_ref });
-                            }
-                        }
-                        Err(e) => {
-                            app.set_error(format!("Invalid channel ref: {e}"));
-                        }
-                    }
-                } else if let Some(info) = app.session.known_channels.get(app.channel_dir_cursor) {
-                    let channel_ref = info.channel_ref;
-                    if app.session.is_subscribed(&channel_ref) {
-                        if let Some(idx) = app.session.channel_idx(&channel_ref)
-                            && let Some(name) = app.session.unsubscribe_channel(idx)
-                        {
-                            app.set_status(format!("Left #{name}"));
-                        }
-                    } else {
+    if key.code != KeyCode::Char('q') {
+        app.quit_confirm = false;
+    }
+    if app.view == app::View::ChannelDir && handle_channel_dir_key(app, key, send_tx) {
+        return;
+    }
+    handle_global_normal_key(app, key, send_tx);
+}
+
+/// View-local handler for the channel directory. Returns true if the key was
+/// fully consumed (no fall-through to global). The contract:
+///
+/// - Input editing keys (digit/colon, Backspace, Enter, Esc) are always consumed.
+/// - While the user is typing a channel ref input, every other non-modifier key
+///   is dropped (consumed) so global keybinds can't fire under their fingers.
+///   Modifier-keys (Ctrl-c, Ctrl-u, Ctrl-d, etc.) still fall through.
+/// - When browsing (input empty), Up/Down move the channel cursor (consumed)
+///   and `c` enters CreateChannel mode (consumed). Everything else (j/k for
+///   sidebar nav, ?/q/m/n/g/r//, etc.) falls through to the global handler.
+fn handle_channel_dir_key(
+    app: &mut App,
+    key: crossterm::event::KeyEvent,
+    send_tx: &std::sync::mpsc::Sender<event::Event>,
+) -> bool {
+    let typing = !app.channel_dir_input.is_empty();
+    let has_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+    // Always-consumed input editing keys.
+    match key.code {
+        KeyCode::Backspace => {
+            app.channel_dir_input.pop();
+            return true;
+        }
+        KeyCode::Char(c) if !has_ctrl && (c.is_ascii_digit() || c == ':') => {
+            app.channel_dir_input.push(c);
+            return true;
+        }
+        KeyCode::Enter => {
+            if typing {
+                match parse_channel_ref(&app.channel_dir_input) {
+                    Ok(channel_ref) => {
                         let idx = app.session.subscribe_channel(channel_ref);
+                        app.view = app::View::Channel(idx);
                         app.set_status(format!(
                             "Subscribed to #{}",
                             app.session.channels[idx].name
                         ));
+                        app.channel_dir_input.clear();
                         let _ = send_tx.send(event::Event::FetchBlock {
                             block_ref: channel_ref,
                         });
@@ -1416,40 +1416,78 @@ fn handle_normal_key(
                             let _ = send_tx.send(event::Event::FetchChannelMirror { channel_ref });
                         }
                     }
+                    Err(e) => {
+                        app.set_error(format!("Invalid channel ref: {e}"));
+                    }
                 }
-            }
-            KeyCode::Char('c') if app.channel_dir_input.is_empty() => {
-                if !app.check_not_sending() {
-                    return;
-                }
-                app.enter_mode(Mode::CreateChannel);
-            }
-            KeyCode::Esc => {
-                if app.channel_dir_input.is_empty() {
-                    app.view = app::View::Inbox;
+            } else if let Some(info) = app.session.known_channels.get(app.channel_dir_cursor) {
+                let channel_ref = info.channel_ref;
+                if app.session.is_subscribed(&channel_ref) {
+                    if let Some(idx) = app.session.channel_idx(&channel_ref)
+                        && let Some(name) = app.session.unsubscribe_channel(idx)
+                    {
+                        app.set_status(format!("Left #{name}"));
+                    }
                 } else {
-                    app.channel_dir_input.clear();
+                    let idx = app.session.subscribe_channel(channel_ref);
+                    app.set_status(format!("Subscribed to #{}", app.session.channels[idx].name));
+                    let _ = send_tx.send(event::Event::FetchBlock {
+                        block_ref: channel_ref,
+                    });
+                    if app.session.has_mirror {
+                        let _ = send_tx.send(event::Event::FetchChannelMirror { channel_ref });
+                    }
                 }
             }
-            KeyCode::Backspace => {
-                app.channel_dir_input.pop();
-            }
-            KeyCode::Char('q') if app.channel_dir_input.is_empty() => {
-                app.running = false;
-            }
-            KeyCode::Char(c) if c.is_ascii_digit() || c == ':' => {
-                app.channel_dir_input.push(c);
-            }
-            KeyCode::Char('j') | KeyCode::Char('k') | KeyCode::Tab | KeyCode::BackTab => {}
-            _ => {
-                return;
-            }
+            return true;
         }
+        KeyCode::Esc => {
+            if typing {
+                app.channel_dir_input.clear();
+            } else {
+                app.view = app::View::Inbox;
+            }
+            return true;
+        }
+        _ => {}
     }
 
-    if key.code != KeyCode::Char('q') {
-        app.quit_confirm = false;
+    // While typing channel ref input, drop every other non-modifier key so the
+    // user's keystrokes can't accidentally fire global keybinds.
+    if typing && !has_ctrl {
+        return true;
     }
+
+    // Browsing mode (or modifier-key passthrough): only a few view-internal
+    // keys; everything else falls through to the global handler.
+    match key.code {
+        KeyCode::Up if !typing => {
+            app.channel_dir_cursor = app.channel_dir_cursor.saturating_sub(1);
+            true
+        }
+        KeyCode::Down if !typing => {
+            if !app.session.known_channels.is_empty() {
+                app.channel_dir_cursor =
+                    (app.channel_dir_cursor + 1).min(app.session.known_channels.len() - 1);
+            }
+            true
+        }
+        KeyCode::Char('c') if !has_ctrl && !typing => {
+            if !app.check_not_sending() {
+                return true;
+            }
+            app.enter_mode(Mode::CreateChannel);
+            true
+        }
+        _ => false,
+    }
+}
+
+fn handle_global_normal_key(
+    app: &mut App,
+    key: crossterm::event::KeyEvent,
+    send_tx: &std::sync::mpsc::Sender<event::Event>,
+) {
     match key.code {
         KeyCode::Char('?') => {
             app.mode = Mode::Help;
@@ -1557,14 +1595,8 @@ fn handle_normal_key(
         KeyCode::Home => app.scroll_offset = usize::MAX,
         KeyCode::Char('G') | KeyCode::End => app.scroll_offset = 0,
         KeyCode::Char(' ') => app.show_sidebar = !app.show_sidebar,
-        KeyCode::Char('j') | KeyCode::Tab | KeyCode::Down if app.view != app::View::ChannelDir => {
-            app.next_sidebar()
-        }
-        KeyCode::Char('k') | KeyCode::BackTab | KeyCode::Up
-            if app.view != app::View::ChannelDir =>
-        {
-            app.prev_sidebar()
-        }
+        KeyCode::Char('j') | KeyCode::Tab | KeyCode::Down => app.next_sidebar(),
+        KeyCode::Char('k') | KeyCode::BackTab | KeyCode::Up => app.prev_sidebar(),
         _ => {}
     }
 }
