@@ -322,8 +322,8 @@ fn emit_channel_create(source: &RemarkSource, tx: &Sender<Event>) {
         return;
     };
     let _ = tx.send(Event::ChannelDiscovered {
-        name: name.clone(),
-        description: description.clone(),
+        name: name.as_str().to_string(),
+        description: description.as_str().to_string(),
         creator_ss58: crate::util::ss58_short(&source.sender),
         channel_ref: source.block,
     });

@@ -553,7 +553,14 @@ fn dispatch_pending_send(
             return Ok(());
         }
     };
-    let result = build_send_remark(app, &seed, &text);
+    let body = match samp::MessageBody::parse(text.clone()) {
+        Ok(b) => b,
+        Err(e) => {
+            app.set_status(format!("Invalid message: {e}"));
+            return Ok(());
+        }
+    };
+    let result = build_send_remark(app, &seed, &body);
     drop(seed);
     match result {
         Ok(remark) => {
@@ -1219,22 +1226,26 @@ fn run_session(
     Ok(SessionExit::Quit)
 }
 
-fn build_send_remark(app: &App, seed: &[u8; 32], text: &str) -> error::Result<samp::RemarkBytes> {
+fn build_send_remark(
+    app: &App,
+    seed: &[u8; 32],
+    body: &samp::MessageBody,
+) -> error::Result<samp::RemarkBytes> {
     if let (Some((pubkey, _)), Some(ct)) = (&app.msg_recipient, app.msg_type) {
         return match ct {
-            0x01 => app.session.build_public_message(pubkey, text),
-            0x02 => app.session.build_encrypted_message(seed, pubkey, text),
+            0x01 => app.session.build_public_message(pubkey, body),
+            0x02 => app.session.build_encrypted_message(seed, pubkey, body),
             _ => Err(error::SdkError::Other("Invalid message type".into())),
         };
     }
 
     if let (Some((pubkey, _)), None) = (&app.msg_recipient, app.msg_type) {
-        return app.session.build_thread_root(seed, pubkey, text);
+        return app.session.build_thread_root(seed, pubkey, body);
     }
 
     match app.view {
-        app::View::Thread(idx) => app.session.build_thread_reply(seed, idx, text),
-        app::View::Channel(idx) => app.session.build_channel_message(idx, text),
+        app::View::Thread(idx) => app.session.build_thread_reply(seed, idx, body),
+        app::View::Channel(idx) => app.session.build_channel_message(idx, body),
         app::View::Group(idx) => {
             let group = app
                 .session
@@ -1243,9 +1254,9 @@ fn build_send_remark(app: &App, seed: &[u8; 32], text: &str) -> error::Result<sa
                 .ok_or_else(|| error::SdkError::NotFound("No group selected".into()))?;
             if group.group_ref.is_zero() {
                 app.session
-                    .build_group_create(seed, &group.members.clone(), text)
+                    .build_group_create(seed, &group.members.clone(), body)
             } else {
-                app.session.build_group_message(seed, idx, text)
+                app.session.build_group_message(seed, idx, body)
             }
         }
         _ => Err(error::SdkError::Other("Cannot send from this view".into())),
@@ -1849,7 +1860,23 @@ fn handle_create_channel_desc_key(
                 }
             };
             app.pending_channel_desc = Some(desc.clone());
-            match app.session.build_channel_create(&name, &desc) {
+            let name_typed = match samp::ChannelName::parse(name.clone()) {
+                Ok(n) => n,
+                Err(e) => {
+                    app.set_status(format!("Invalid channel name: {e}"));
+                    app.mode = Mode::Normal;
+                    return;
+                }
+            };
+            let desc_typed = match samp::ChannelDescription::parse(desc.clone()) {
+                Ok(d) => d,
+                Err(e) => {
+                    app.set_status(format!("Invalid description: {e}"));
+                    app.mode = Mode::Normal;
+                    return;
+                }
+            };
+            match app.session.build_channel_create(&name_typed, &desc_typed) {
                 Ok(remark) => {
                     app.pending_remark = Some(remark.clone());
                     app.pending_text = None;

@@ -752,16 +752,16 @@ impl Session {
     pub fn build_public_message(
         &self,
         recipient: &Pubkey,
-        body: &str,
+        body: &samp::MessageBody,
     ) -> Result<samp::RemarkBytes> {
-        Ok(samp::encode_public(recipient, body.as_bytes()))
+        Ok(samp::encode_public(recipient, body))
     }
 
     pub fn build_encrypted_message(
         &self,
         seed: &[u8; 32],
         recipient: &Pubkey,
-        body: &str,
+        body: &samp::MessageBody,
     ) -> Result<samp::RemarkBytes> {
         let nonce = samp::Nonce::from_bytes(rand_nonce());
         let sender = samp::Seed::from_bytes(*seed);
@@ -782,7 +782,7 @@ impl Session {
         &self,
         seed: &[u8; 32],
         recipient: &Pubkey,
-        body: &str,
+        body: &samp::MessageBody,
     ) -> Result<samp::RemarkBytes> {
         let nonce = samp::Nonce::from_bytes(rand_nonce());
         let sender = samp::Seed::from_bytes(*seed);
@@ -808,7 +808,7 @@ impl Session {
         &self,
         seed: &[u8; 32],
         thread_idx: usize,
-        body: &str,
+        body: &samp::MessageBody,
     ) -> Result<samp::RemarkBytes> {
         let thread = self
             .threads
@@ -834,14 +834,18 @@ impl Session {
         ))
     }
 
-    pub fn build_channel_create(&self, name: &str, description: &str) -> Result<samp::RemarkBytes> {
-        samp::encode_channel_create(name, description).map_err(|e| SdkError::Other(e.to_string()))
+    pub fn build_channel_create(
+        &self,
+        name: &samp::ChannelName,
+        description: &samp::ChannelDescription,
+    ) -> Result<samp::RemarkBytes> {
+        Ok(samp::encode_channel_create(name, description))
     }
 
     pub fn build_channel_message(
         &self,
         channel_idx: usize,
-        body: &str,
+        body: &samp::MessageBody,
     ) -> Result<samp::RemarkBytes> {
         let channel = self
             .channels
@@ -851,7 +855,7 @@ impl Session {
             channel.channel_ref,
             channel.last_ref(),
             channel.my_last_ref(),
-            body.as_bytes(),
+            body,
         ))
     }
 
@@ -859,7 +863,7 @@ impl Session {
         &self,
         seed: &[u8; 32],
         members: &[Pubkey],
-        body: &str,
+        body: &samp::MessageBody,
     ) -> Result<samp::RemarkBytes> {
         if members.len() > MAX_GROUP_MEMBERS {
             return Err(SdkError::Other(format!(
@@ -891,7 +895,7 @@ impl Session {
         &self,
         seed: &[u8; 32],
         group_idx: usize,
-        body: &str,
+        body: &samp::MessageBody,
     ) -> Result<samp::RemarkBytes> {
         let group = self
             .groups

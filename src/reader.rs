@@ -149,7 +149,7 @@ pub fn process_remark(
                 sender,
                 content_type: ContentType::Public.to_byte(),
                 recipient: *recipient,
-                decrypted_body: String::from_utf8(body.clone()).ok(),
+                decrypted_body: Some(body.as_str().to_string()),
                 thread_ref: BlockRef::ZERO,
                 reply_to: BlockRef::ZERO,
                 continues: BlockRef::ZERO,
@@ -181,8 +181,8 @@ pub fn process_remark(
         Remark::ChannelCreate { name, description } => {
             let creator_ss58 = crate::util::ss58_short(&sender);
             let _ = tx.send(Event::ChannelDiscovered {
-                name: name.clone(),
-                description: description.clone(),
+                name: name.as_str().to_string(),
+                description: description.as_str().to_string(),
                 creator_ss58,
                 channel_ref: BlockRef {
                     block: block_number,
