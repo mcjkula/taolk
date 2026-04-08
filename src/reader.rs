@@ -64,7 +64,7 @@ pub fn read_extrinsic(
     }
 }
 
-fn source_from_extrinsic(
+pub fn source_from_extrinsic(
     ext_hex: &str,
     block_number: u32,
     ext_index: u16,

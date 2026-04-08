@@ -1,38 +1,29 @@
+use std::collections::HashSet;
 use std::sync::mpsc::Sender;
 
-use samp::decode_remark;
+use samp::{ContentType, decode_channel_create};
 
+use crate::chain;
 use crate::error::ChainError;
 use crate::event::Event;
-use crate::reader::{RemarkSource, process_remark};
+use crate::reader::{self, RemarkSource};
 use crate::types::{BlockRef, Pubkey};
 
 #[derive(serde::Deserialize)]
 struct HealthResp {
-    chain: String,
     ss58_prefix: u16,
 }
 
 #[derive(serde::Deserialize)]
-struct ChannelResp {
+struct Hint {
     block: u32,
     index: u16,
-    creator: String,
-    name: String,
-    description: String,
 }
 
-#[derive(serde::Deserialize)]
-struct RemarkResp {
-    block: u32,
-    index: u16,
-    sender: String,
-    timestamp: u64,
-    remark: String,
-}
-
+#[allow(clippy::too_many_arguments)]
 pub async fn sync(
-    mirror_url: &str,
+    mirror_urls: Vec<String>,
+    node_url: &str,
     expected_ss58_prefix: u16,
     seed: &[u8; 32],
     my_pubkey: &Pubkey,
@@ -40,8 +31,10 @@ pub async fn sync(
     last_block: u64,
     tx: Sender<Event>,
 ) {
+    let _ = tx.send(Event::Status("Catching up...".into()));
     if let Err(e) = sync_inner(
-        mirror_url,
+        mirror_urls,
+        node_url,
         expected_ss58_prefix,
         seed,
         my_pubkey,
@@ -51,13 +44,15 @@ pub async fn sync(
     )
     .await
     {
-        let _ = tx.send(Event::Error(format!("Could not reach mirror: {e}")));
+        let _ = tx.send(Event::Error(format!("Could not reach mirrors: {e}")));
     }
     let _ = tx.send(Event::CatchupComplete);
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn sync_inner(
-    mirror_url: &str,
+    mirror_urls: Vec<String>,
+    node_url: &str,
     expected_ss58_prefix: u16,
     seed: &[u8; 32],
     my_pubkey: &Pubkey,
@@ -65,157 +60,255 @@ async fn sync_inner(
     last_block: u64,
     tx: &Sender<Event>,
 ) -> Result<(), ChainError> {
-    let _ = tx.send(Event::Status("Catching up...".into()));
     let client = reqwest::Client::new();
-    let base = mirror_url.trim_end_matches('/');
+    let bases: Vec<String> = mirror_urls
+        .iter()
+        .map(|u| u.trim_end_matches('/').to_string())
+        .collect();
 
-    let health: HealthResp = client
-        .get(format!("{base}/v1/health"))
-        .send()
-        .await
-        .map_err(|e| ChainError::Http(format!("health: {e}")))?
-        .json()
-        .await
-        .map_err(|e| ChainError::Parse(format!("health json: {e}")))?;
-
-    if health.ss58_prefix != expected_ss58_prefix {
-        return Err(ChainError::MirrorChainMismatch {
-            chain: health.chain,
-            got: health.ss58_prefix,
-            expected: expected_ss58_prefix,
-        });
+    let healthy = check_health_all(&client, &bases, expected_ss58_prefix).await;
+    if healthy.is_empty() {
+        return Err(ChainError::Http("no healthy mirrors".into()));
     }
 
-    let channels: Vec<ChannelResp> = client
-        .get(format!("{base}/v1/channels"))
-        .send()
-        .await
-        .map_err(|e| ChainError::Http(format!("channels: {e}")))?
-        .json()
-        .await
-        .map_err(|e| ChainError::Parse(format!("channels json: {e}")))?;
+    let channel_hints = fetch_channel_directory_hints(&client, &healthy).await;
+    let message_hints =
+        fetch_message_hints(&client, &healthy, last_block, &subscribed_channels).await;
 
-    for ch in &channels {
-        let _ = tx.send(Event::ChannelDiscovered {
-            name: ch.name.clone(),
-            description: ch.description.clone(),
-            creator_ss58: ch.creator.clone(),
-            channel_ref: BlockRef {
-                block: ch.block,
-                index: ch.index,
-            },
-        });
-    }
-
-    for ch in &subscribed_channels {
-        let (ch_block, ch_index) = (ch.block, ch.index);
-        let remarks: Vec<RemarkResp> = client
-            .get(format!(
-                "{base}/v1/channels/{ch_block}/{ch_index}/messages?after={last_block}"
-            ))
-            .send()
-            .await
-            .map_err(|e| ChainError::Http(format!("channel messages: {e}")))?
-            .json()
-            .await
-            .map_err(|e| ChainError::Parse(format!("channel messages json: {e}")))?;
-
-        process_remarks(&remarks, my_pubkey, seed, tx);
-    }
-
-    for type_byte in [0x10u8, 0x11, 0x12, 0x15] {
-        let label = match type_byte {
-            0x10 => "public",
-            0x11 => "encrypted",
-            0x12 => "thread",
-            0x15 => "group",
-            _ => unreachable!(),
-        };
-        let remarks = fetch_remarks(&client, base, type_byte, last_block, label).await?;
-        process_remarks(&remarks, my_pubkey, seed, tx);
-    }
+    resolve_channel_hints(node_url, channel_hints, tx).await;
+    resolve_message_hints(node_url, message_hints, my_pubkey, seed, tx).await;
 
     let _ = tx.send(Event::Status("All caught up".into()));
     Ok(())
 }
 
-fn process_remarks(
-    remarks: &[RemarkResp],
-    my_pubkey: &Pubkey,
-    seed: &[u8; 32],
-    tx: &Sender<Event>,
-) {
-    for r in remarks {
-        if let Some(source) = source_from_resp(r) {
-            process_remark(&source, my_pubkey, seed, tx);
-        }
-    }
-}
-
-fn source_from_resp(r: &RemarkResp) -> Option<RemarkSource> {
-    let bytes = hex::decode(&r.remark).ok()?;
-    let remark = decode_remark(&bytes).ok()?;
-    let sender = crate::util::pubkey_from_ss58(&r.sender)?;
-    Some(RemarkSource {
-        sender,
-        remark,
-        block: BlockRef {
-            block: r.block,
-            index: r.index,
-        },
-        timestamp_secs: r.timestamp,
-    })
-}
-
-async fn fetch_remarks(
-    client: &reqwest::Client,
-    base: &str,
-    type_byte: u8,
-    after: u64,
-    label: &str,
-) -> Result<Vec<RemarkResp>, ChainError> {
-    client
-        .get(format!(
-            "{base}/v1/remarks?type=0x{type_byte:02x}&after={after}"
-        ))
-        .send()
-        .await
-        .map_err(|e| ChainError::Http(format!("{label}: {e}")))?
-        .json()
-        .await
-        .map_err(|e| ChainError::Parse(format!("{label} json: {e}")))
-}
-
 pub async fn fetch_channel(
-    mirror_url: &str,
+    mirror_urls: Vec<String>,
+    node_url: &str,
     channel_ref: BlockRef,
     my_pubkey: &Pubkey,
     seed: &[u8; 32],
     tx: Sender<Event>,
 ) {
-    let base = mirror_url.trim_end_matches('/');
     let client = reqwest::Client::new();
-    let (ch_block, ch_index) = (channel_ref.block, channel_ref.index);
+    let bases: Vec<String> = mirror_urls
+        .iter()
+        .map(|u| u.trim_end_matches('/').to_string())
+        .collect();
+    let (b, i) = (channel_ref.block, channel_ref.index);
+    let hints = fetch_per_channel_hints(&client, &bases, b, i, 0).await;
+    resolve_message_hints(node_url, hints, my_pubkey, seed, &tx).await;
+}
 
-    let remarks: Vec<RemarkResp> = match client
-        .get(format!(
-            "{base}/v1/channels/{ch_block}/{ch_index}/messages?after=0"
-        ))
-        .send()
+async fn check_health_all(
+    client: &reqwest::Client,
+    bases: &[String],
+    expected_prefix: u16,
+) -> Vec<String> {
+    let futures = bases.iter().map(|base| async move {
+        let resp: HealthResp = client
+            .get(format!("{base}/v1/health"))
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()?;
+        if resp.ss58_prefix == expected_prefix {
+            Some(base.clone())
+        } else {
+            None
+        }
+    });
+    futures_util::future::join_all(futures)
         .await
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+async fn fetch_channel_directory_hints(
+    client: &reqwest::Client,
+    bases: &[String],
+) -> HashSet<(u32, u16)> {
+    let futures = bases.iter().map(|base| async move {
+        let hints: Vec<Hint> = client
+            .get(format!("{base}/v1/channels"))
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()?;
+        Some(hints)
+    });
+    let mut union = HashSet::new();
+    for hints in futures_util::future::join_all(futures)
+        .await
+        .into_iter()
+        .flatten()
     {
-        Ok(resp) => match resp.json().await {
-            Ok(r) => r,
-            Err(e) => {
-                let _ = tx.send(Event::Error(format!("Could not load messages: {e}")));
-                return;
+        for h in hints {
+            union.insert((h.block, h.index));
+        }
+    }
+    union
+}
+
+async fn fetch_message_hints(
+    client: &reqwest::Client,
+    bases: &[String],
+    last_block: u64,
+    subscribed_channels: &[BlockRef],
+) -> HashSet<(u32, u16)> {
+    let mut union = HashSet::new();
+
+    for ch in subscribed_channels {
+        for hint in fetch_per_channel_hints(client, bases, ch.block, ch.index, last_block).await {
+            union.insert(hint);
+        }
+    }
+
+    for type_byte in [0x10u8, 0x11, 0x12, 0x15] {
+        let futures = bases.iter().map(|base| async move {
+            let hints: Vec<Hint> = client
+                .get(format!(
+                    "{base}/v1/remarks?type=0x{type_byte:02x}&after={last_block}"
+                ))
+                .send()
+                .await
+                .ok()?
+                .json()
+                .await
+                .ok()?;
+            Some(hints)
+        });
+        for hints in futures_util::future::join_all(futures)
+            .await
+            .into_iter()
+            .flatten()
+        {
+            for h in hints {
+                union.insert((h.block, h.index));
             }
-        },
+        }
+    }
+
+    union
+}
+
+async fn fetch_per_channel_hints(
+    client: &reqwest::Client,
+    bases: &[String],
+    ch_block: u32,
+    ch_index: u16,
+    last_block: u64,
+) -> HashSet<(u32, u16)> {
+    let futures = bases.iter().map(|base| async move {
+        let hints: Vec<Hint> = client
+            .get(format!(
+                "{base}/v1/channels/{ch_block}/{ch_index}/messages?after={last_block}"
+            ))
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()?;
+        Some(hints)
+    });
+    let mut union = HashSet::new();
+    for hints in futures_util::future::join_all(futures)
+        .await
+        .into_iter()
+        .flatten()
+    {
+        for h in hints {
+            union.insert((h.block, h.index));
+        }
+    }
+    union
+}
+
+async fn resolve_message_hints(
+    node_url: &str,
+    hints: HashSet<(u32, u16)>,
+    my_pubkey: &Pubkey,
+    seed: &[u8; 32],
+    tx: &Sender<Event>,
+) {
+    if hints.is_empty() {
+        return;
+    }
+    let block_nums: Vec<u32> = hints
+        .iter()
+        .map(|&(b, _)| b)
+        .collect::<HashSet<u32>>()
+        .into_iter()
+        .collect();
+    let blocks = match chain::fetch_blocks(node_url, &block_nums).await {
+        Ok(b) => b,
         Err(e) => {
-            let _ = tx.send(Event::Error(format!("Could not load messages: {e}")));
+            let _ = tx.send(Event::Error(format!("Resolve hints: {e}")));
             return;
         }
     };
+    for (block_num, ext_index) in hints {
+        let Some(block) = blocks.get(&block_num) else {
+            continue;
+        };
+        let Some(ext_hex) = block.extrinsics.get(usize::from(ext_index)) else {
+            continue;
+        };
+        if let Some(source) =
+            reader::source_from_extrinsic(ext_hex, block_num, ext_index, block.timestamp_ms)
+        {
+            reader::process_remark(&source, my_pubkey, seed, tx);
+        }
+    }
+}
 
-    process_remarks(&remarks, my_pubkey, seed, &tx);
+async fn resolve_channel_hints(node_url: &str, hints: HashSet<(u32, u16)>, tx: &Sender<Event>) {
+    if hints.is_empty() {
+        return;
+    }
+    let block_nums: Vec<u32> = hints
+        .iter()
+        .map(|&(b, _)| b)
+        .collect::<HashSet<u32>>()
+        .into_iter()
+        .collect();
+    let blocks = match chain::fetch_blocks(node_url, &block_nums).await {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+    for (block_num, ext_index) in hints {
+        let Some(block) = blocks.get(&block_num) else {
+            continue;
+        };
+        let Some(ext_hex) = block.extrinsics.get(usize::from(ext_index)) else {
+            continue;
+        };
+        let Some(source) =
+            reader::source_from_extrinsic(ext_hex, block_num, ext_index, block.timestamp_ms)
+        else {
+            continue;
+        };
+        emit_channel_create(&source, tx);
+    }
+}
+
+fn emit_channel_create(source: &RemarkSource, tx: &Sender<Event>) {
+    if !matches!(source.remark.content_type, ContentType::ChannelCreate) {
+        return;
+    }
+    let Ok((name, description)) = decode_channel_create(&source.remark.content) else {
+        return;
+    };
+    let _ = tx.send(Event::ChannelDiscovered {
+        name: name.to_string(),
+        description: description.to_string(),
+        creator_ss58: crate::util::ss58_short(&source.sender),
+        channel_ref: source.block,
+    });
 }

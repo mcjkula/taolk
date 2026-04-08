@@ -159,16 +159,14 @@ impl Session {
         if session.has_mirror {
             let subscribed: Vec<BlockRef> =
                 session.channels.iter().map(|c| c.channel_ref).collect();
-            for mirror_url in mirror_urls {
-                let url = mirror_url.clone();
-                let sc = zeroize::Zeroizing::new(*seed);
-                let pk = my_pubkey;
-                let channels = subscribed.clone();
-                let etx = tx.clone();
-                tokio::spawn(async move {
-                    crate::mirror::sync(&url, 42, &sc, &pk, channels, 0, etx).await;
-                });
-            }
+            let urls: Vec<String> = mirror_urls.iter().map(|u| u.to_string()).collect();
+            let node = node_url.to_string();
+            let sc = zeroize::Zeroizing::new(*seed);
+            let pk = my_pubkey;
+            let etx = tx.clone();
+            tokio::spawn(async move {
+                crate::mirror::sync(urls, &node, 42, &sc, &pk, subscribed, 0, etx).await;
+            });
         }
 
         Ok((session, rx))

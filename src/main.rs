@@ -541,16 +541,14 @@ fn run_session(
     if app.session.has_mirror {
         let subscribed: Vec<types::BlockRef> =
             app.session.channels.iter().map(|c| c.channel_ref).collect();
-        for mirror_url in mirror_urls {
-            let url = mirror_url.clone();
-            let sc = zeroize::Zeroizing::new(*seed);
-            let pubkey = my_pubkey;
-            let channels = subscribed.clone();
-            let tx = event_tx.clone();
-            rt.spawn(async move {
-                mirror::sync(&url, 42, &sc, &pubkey, channels, 0, tx).await;
-            });
-        }
+        let urls: Vec<String> = mirror_urls.iter().map(|u| u.to_string()).collect();
+        let node = node_url.to_string();
+        let sc = zeroize::Zeroizing::new(*seed);
+        let pubkey = my_pubkey;
+        let tx = event_tx.clone();
+        rt.spawn(async move {
+            mirror::sync(urls, &node, 42, &sc, &pubkey, subscribed, 0, tx).await;
+        });
     } else {
         app.sound_armed = true;
     }
@@ -775,14 +773,15 @@ fn run_session(
                 });
             }
             TuiEvent::Core(event::Event::FetchChannelMirror { channel_ref }) => {
-                if let Some(mirror_url) = mirror_urls.first() {
+                if !mirror_urls.is_empty() {
                     app.set_status("Loading...");
-                    let url = mirror_url.clone();
+                    let urls: Vec<String> = mirror_urls.iter().map(|u| u.to_string()).collect();
+                    let node = node_url.to_string();
                     let tx = event_tx.clone();
                     let pk = my_pubkey;
                     let sc = zeroize::Zeroizing::new(*seed);
                     rt.spawn(async move {
-                        mirror::fetch_channel(&url, channel_ref, &pk, &sc, tx).await;
+                        mirror::fetch_channel(urls, &node, channel_ref, &pk, &sc, tx).await;
                     });
                 }
             }
