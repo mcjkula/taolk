@@ -17,8 +17,8 @@ pub(crate) const SYSTEM_REMARK_WITH_EVENT: (u8, u8) = (0, 7);
 
 #[derive(Clone)]
 pub struct ChainInfo {
-    pub name: String,
-    pub ss58_prefix: u16,
+    pub name: samp::ChainName,
+    pub ss58_prefix: samp::Ss58Prefix,
     pub chain_params: ChainParams,
     pub account_storage: StorageLayout,
     pub errors: Arc<ErrorTable>,
@@ -74,10 +74,11 @@ pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, ChainError> {
         .await
         .map_err(|e| ChainError::Send(e.to_string()))?;
     let chain_result = read_text_result(&mut ws).await?;
-    let name = chain_result
+    let name_str = chain_result
         .as_str()
         .ok_or(ChainError::MissingField("system_chain"))?
         .to_string();
+    let name = samp::ChainName::parse(name_str).map_err(|_| ChainError::BadShape)?;
 
     let req = json!({"jsonrpc":"2.0","id":5,"method":"system_properties","params":[]});
     ws.send(WsMessage::Text(req.to_string().into()))
@@ -87,7 +88,8 @@ pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, ChainError> {
     let ss58_raw = props["ss58Format"]
         .as_u64()
         .ok_or(ChainError::MissingField("ss58Format"))?;
-    let ss58_prefix = u16::try_from(ss58_raw).map_err(|_| ChainError::BadShape)?;
+    let ss58_raw_u16 = u16::try_from(ss58_raw).map_err(|_| ChainError::BadShape)?;
+    let ss58_prefix = samp::Ss58Prefix::new(ss58_raw_u16).map_err(|_| ChainError::BadShape)?;
 
     Ok(ChainInfo {
         name,

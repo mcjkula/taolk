@@ -1,29 +1,18 @@
-use blake2::Digest;
-
 use crate::types::Pubkey;
 
-const SS58_PREFIX: u8 = 42;
-
 pub fn ss58_from_pubkey(pubkey: &Pubkey) -> String {
-    let mut payload = vec![SS58_PREFIX];
-    payload.extend_from_slice(pubkey.as_bytes());
-    let hash = {
-        let mut hasher = blake2::Blake2b512::new();
-        hasher.update(b"SS58PRE");
-        hasher.update(&payload);
-        hasher.finalize()
-    };
-    payload.extend_from_slice(&hash[..2]);
-    bs58_encode(&payload)
+    pubkey
+        .to_ss58(samp::Ss58Prefix::SUBSTRATE_GENERIC)
+        .as_str()
+        .to_string()
 }
 
 pub fn ss58_short(pubkey: &Pubkey) -> String {
-    let full = ss58_from_pubkey(pubkey);
-    if full.len() > 12 {
-        format!("{}...{}", &full[..6], &full[full.len() - 4..])
-    } else {
-        full
-    }
+    pubkey
+        .to_ss58(samp::Ss58Prefix::SUBSTRATE_GENERIC)
+        .short()
+        .as_str()
+        .to_string()
 }
 
 pub fn truncate(s: &str, max: usize) -> String {
@@ -145,29 +134,16 @@ fn is_base58_byte(b: u8) -> bool {
 
 pub fn ss58_decode(address: &str) -> Result<Pubkey, crate::error::AddressError> {
     use crate::error::AddressError;
-    let decoded = bs58_decode(address).map_err(|_| AddressError::InvalidBase58)?;
-    if decoded.len() < 35 {
-        return Err(AddressError::TooShort);
+    use samp::SampError;
+    match samp::Ss58Address::parse(address) {
+        Ok(addr) => Ok(*addr.pubkey()),
+        Err(SampError::Ss58InvalidBase58) => Err(AddressError::InvalidBase58),
+        Err(SampError::Ss58TooShort | SampError::Ss58PrefixUnsupported(_)) => {
+            Err(AddressError::TooShort)
+        }
+        Err(SampError::Ss58BadChecksum) => Err(AddressError::BadChecksum),
+        Err(_) => Err(AddressError::TooShort),
     }
-    let prefix_len = if decoded[0] < 64 { 1 } else { 2 };
-    let pubkey_end = prefix_len + 32;
-    if decoded.len() < pubkey_end + 2 {
-        return Err(AddressError::TooShort);
-    }
-    let payload = &decoded[..pubkey_end];
-    let expected_checksum = &decoded[pubkey_end..pubkey_end + 2];
-    let hash = {
-        let mut hasher = blake2::Blake2b512::new();
-        hasher.update(b"SS58PRE");
-        hasher.update(payload);
-        hasher.finalize()
-    };
-    if &hash[..2] != expected_checksum {
-        return Err(AddressError::BadChecksum);
-    }
-    let mut pubkey = [0u8; 32];
-    pubkey.copy_from_slice(&decoded[prefix_len..pubkey_end]);
-    Ok(Pubkey::from_bytes(pubkey))
 }
 
 pub fn copy_to_clipboard(text: &str) -> bool {
@@ -256,65 +232,4 @@ fn b64_encode(data: &[u8]) -> String {
         });
     }
     out
-}
-
-fn bs58_decode(input: &str) -> Result<Vec<u8>, ()> {
-    const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    let mut bytes = vec![0u8];
-    for c in input.chars() {
-        let byte = u8::try_from(u32::from(c)).map_err(|_| ())?;
-        let idx = ALPHABET.iter().position(|&a| a == byte).ok_or(())?;
-        let mut carry = idx;
-        for b in bytes.iter_mut() {
-            carry += usize::from(*b) * 58;
-            *b = u8::try_from(carry % 256).unwrap_or(0);
-            carry /= 256;
-        }
-        while carry > 0 {
-            bytes.push(u8::try_from(carry % 256).unwrap_or(0));
-            carry /= 256;
-        }
-    }
-    for c in input.chars() {
-        if c == '1' {
-            bytes.push(0);
-        } else {
-            break;
-        }
-    }
-    bytes.reverse();
-    Ok(bytes)
-}
-
-fn bs58_encode(data: &[u8]) -> String {
-    const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    if data.is_empty() {
-        return String::new();
-    }
-    let mut digits = vec![0u32];
-    for &byte in data {
-        let mut carry = u32::from(byte);
-        for d in digits.iter_mut() {
-            carry += *d * 256;
-            *d = carry % 58;
-            carry /= 58;
-        }
-        while carry > 0 {
-            digits.push(carry % 58);
-            carry /= 58;
-        }
-    }
-    let mut result = String::new();
-    for &b in data {
-        if b == 0 {
-            result.push(char::from(ALPHABET[0]));
-        } else {
-            break;
-        }
-    }
-    for &d in digits.iter().rev() {
-        let idx = d as usize;
-        result.push(char::from(ALPHABET[idx]));
-    }
-    result
 }
