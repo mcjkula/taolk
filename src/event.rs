@@ -11,7 +11,7 @@ pub enum Event {
         continues: BlockRef,
         block_number: u32,
         ext_index: u16,
-        timestamp: samp::Timestamp,
+        timestamp: crate::types::Timestamp,
     },
     NewChannelMessage {
         sender: Pubkey,
@@ -22,7 +22,7 @@ pub enum Event {
         continues: BlockRef,
         block_number: u32,
         ext_index: u16,
-        timestamp: samp::Timestamp,
+        timestamp: crate::types::Timestamp,
     },
     ChannelDiscovered {
         name: String,
@@ -44,13 +44,13 @@ pub enum Event {
         continues: BlockRef,
         block_number: u32,
         ext_index: u16,
-        timestamp: samp::Timestamp,
+        timestamp: crate::types::Timestamp,
     },
     LockedOutbound {
         sender: Pubkey,
         block_number: u32,
         ext_index: u16,
-        timestamp: samp::Timestamp,
+        timestamp: crate::types::Timestamp,
         remark_bytes: samp::RemarkBytes,
     },
     MessageSent,

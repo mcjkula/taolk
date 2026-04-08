@@ -63,7 +63,10 @@ fn read_extrinsic_emits_event_for_samp_remark() {
             assert_eq!(decrypted_body, Some("hello bob".to_string()));
             assert_eq!(block_number, 100);
             assert_eq!(ext_index, 1);
-            assert_eq!(timestamp, samp::Timestamp::from_unix_secs(1_700_000_000));
+            assert_eq!(
+                timestamp,
+                taolk::types::Timestamp::from_unix_secs(1_700_000_000)
+            );
         }
         other => panic!("expected NewMessage, got {:?}", event_debug(&other)),
     }
@@ -171,7 +174,10 @@ fn read_extrinsic_decrypts_for_recipient() {
             assert_eq!(decrypted_body, Some("secret for bob".to_string()));
             assert_eq!(block_number, 200);
             assert_eq!(ext_index, 3);
-            assert_eq!(timestamp, samp::Timestamp::from_unix_secs(1_700_000_000));
+            assert_eq!(
+                timestamp,
+                taolk::types::Timestamp::from_unix_secs(1_700_000_000)
+            );
         }
         other => panic!("expected NewMessage, got {:?}", event_debug(&other)),
     }

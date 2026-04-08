@@ -3,6 +3,27 @@ use zeroize::Zeroizing;
 
 use crate::error::SdkError;
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Timestamp(u64);
+
+impl Timestamp {
+    pub const ZERO: Self = Self(0);
+
+    pub const fn from_unix_secs(secs: u64) -> Self {
+        Self(secs)
+    }
+
+    pub const fn as_unix_secs(self) -> u64 {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for Timestamp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Timestamp({}s)", self.0)
+    }
+}
+
 pub const MESSAGE_BODY_MAX_BYTES: usize = 4096;
 
 #[derive(Clone, PartialEq, Eq, Hash, Default)]
