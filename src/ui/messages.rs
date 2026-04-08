@@ -383,6 +383,53 @@ fn render_standalone(
     render_scrolled(frame, lines, 0, area);
 }
 
+fn title_header_line(
+    title: String,
+    title_color: Color,
+    id_str: String,
+    width: usize,
+) -> Line<'static> {
+    let id_reserve = if id_str.is_empty() {
+        0
+    } else {
+        id_str.len() + 1
+    };
+    let title_display_width = title.chars().count();
+    let left_used = 1 + title_display_width;
+    let pad = width.saturating_sub(left_used + id_reserve);
+    Line::from(vec![
+        Span::styled(
+            format!(" {title}"),
+            Style::default()
+                .fg(title_color)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" ".repeat(pad)),
+        Span::styled(id_str, Style::default().fg(Color::DarkGray)),
+    ])
+}
+
+fn render_threaded(
+    frame: &mut Frame,
+    app: &App,
+    mut lines: Vec<Line<'static>>,
+    messages: &[crate::conversation::ThreadMessage],
+    view: View,
+    area: Rect,
+) {
+    let mut pending_clicks = Vec::new();
+    render_messages(
+        &mut lines,
+        messages,
+        app,
+        usize::from(area.width),
+        &mut pending_clicks,
+    );
+    render_pending(&mut lines, app, view);
+    record_sender_clicks(app, &pending_clicks, lines.len(), app.scroll_offset, area);
+    render_scrolled(frame, lines, app.scroll_offset, area);
+}
+
 fn render_thread(frame: &mut Frame, app: &App, thread_idx: usize, area: Rect) {
     let thread = match app.session.threads.get(thread_idx) {
         Some(t) => t,
@@ -390,47 +437,31 @@ fn render_thread(frame: &mut Frame, app: &App, thread_idx: usize, area: Rect) {
     };
 
     let w = usize::from(area.width);
-    let th_block = thread.thread_ref.block;
-    let th_index = thread.thread_ref.index;
     let id_str = if thread.thread_ref.is_zero() {
         String::new()
     } else {
-        format!("{}:{}", th_block, th_index)
+        format!("{}:{}", thread.thread_ref.block, thread.thread_ref.index)
     };
     let id_reserve = if id_str.is_empty() {
         0
     } else {
         id_str.len() + 1
     };
-    let name_max = w.saturating_sub(2 + id_reserve);
-    let peer = truncate(&thread.peer_ss58, name_max);
-    let left_used = 1 + peer.len();
-    let pad = w.saturating_sub(left_used + id_reserve);
-    let mut lines: Vec<Line> = vec![
-        Line::from(vec![
-            Span::styled(
-                format!(" {peer}"),
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" ".repeat(pad)),
-            Span::styled(id_str, Style::default().fg(Color::DarkGray)),
-        ]),
+    let peer = truncate(&thread.peer_ss58, w.saturating_sub(2 + id_reserve)).to_string();
+
+    let lines = vec![
+        title_header_line(peer, Color::White, id_str, w),
         separator(area.width),
     ];
 
-    let mut pending_clicks = Vec::new();
-    render_messages(
-        &mut lines,
-        &thread.messages,
+    render_threaded(
+        frame,
         app,
-        usize::from(area.width),
-        &mut pending_clicks,
+        lines,
+        &thread.messages,
+        View::Thread(thread_idx),
+        area,
     );
-    render_pending(&mut lines, app, View::Thread(thread_idx));
-    record_sender_clicks(app, &pending_clicks, lines.len(), app.scroll_offset, area);
-    render_scrolled(frame, lines, app.scroll_offset, area);
 }
 
 fn render_channel(frame: &mut Frame, app: &App, chan_idx: usize, area: Rect) {
@@ -440,25 +471,17 @@ fn render_channel(frame: &mut Frame, app: &App, chan_idx: usize, area: Rect) {
     };
 
     let w = usize::from(area.width);
-    let ref_block = channel.channel_ref.block;
-    let ref_index = channel.channel_ref.index;
-    let id_str = format!("{}:{}", ref_block, ref_index);
+    let id_str = format!(
+        "{}:{}",
+        channel.channel_ref.block, channel.channel_ref.index
+    );
     let id_reserve = id_str.len() + 1;
-    let name_max = w.saturating_sub(2 + id_reserve);
-    let title = format!("#{}", truncate(&channel.name, name_max));
-    let left_used = 1 + title.len();
-    let pad = w.saturating_sub(left_used + id_reserve);
+    let title = format!(
+        "#{}",
+        truncate(&channel.name, w.saturating_sub(2 + id_reserve))
+    );
 
-    let mut lines: Vec<Line> = vec![Line::from(vec![
-        Span::styled(
-            format!(" {title}"),
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" ".repeat(pad)),
-        Span::styled(id_str, Style::default().fg(Color::DarkGray)),
-    ])];
+    let mut lines = vec![title_header_line(title, Color::White, id_str, w)];
 
     if !channel.description.is_empty() {
         let desc_max = (usize::from(area.width)).saturating_sub(3);
@@ -470,17 +493,14 @@ fn render_channel(frame: &mut Frame, app: &App, chan_idx: usize, area: Rect) {
 
     lines.push(separator(area.width));
 
-    let mut pending_clicks = Vec::new();
-    render_messages(
-        &mut lines,
-        &channel.messages,
+    render_threaded(
+        frame,
         app,
-        usize::from(area.width),
-        &mut pending_clicks,
+        lines,
+        &channel.messages,
+        View::Channel(chan_idx),
+        area,
     );
-    render_pending(&mut lines, app, View::Channel(chan_idx));
-    record_sender_clicks(app, &pending_clicks, lines.len(), app.scroll_offset, area);
-    render_scrolled(frame, lines, app.scroll_offset, area);
 }
 
 fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
@@ -490,13 +510,34 @@ fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
     };
 
     let w = usize::from(area.width);
-    let ref_block = group.group_ref.block;
-    let ref_index = group.group_ref.index;
     let id_str = if group.group_ref.is_zero() {
         String::new()
     } else {
-        format!("{}:{}", ref_block, ref_index)
+        format!("{}:{}", group.group_ref.block, group.group_ref.index)
     };
+    let id_reserve = if id_str.is_empty() {
+        0
+    } else {
+        id_str.len() + 1
+    };
+    let title = group_member_title(group, app, w.saturating_sub(2 + id_reserve));
+
+    let lines = vec![
+        title_header_line(title, Color::Cyan, id_str, w),
+        separator(area.width),
+    ];
+
+    render_threaded(
+        frame,
+        app,
+        lines,
+        &group.messages,
+        View::Group(group_idx),
+        area,
+    );
+}
+
+fn group_member_title(group: &crate::conversation::Group, app: &App, title_max: usize) -> String {
     let mut member_order: Vec<usize> = (0..group.members.len()).collect();
     if let Some(pos) = member_order
         .iter()
@@ -505,12 +546,6 @@ fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
         let c = member_order.remove(pos);
         member_order.insert(0, c);
     }
-    let id_reserve = if id_str.is_empty() {
-        0
-    } else {
-        id_str.len() + 1
-    };
-    let title_max = w.saturating_sub(2 + id_reserve);
     let mut title = String::new();
     for (i, &mi) in member_order.iter().enumerate() {
         let pk = &group.members[mi];
@@ -542,34 +577,7 @@ fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
         }
         title.push_str(&label);
     }
-    let title_display_width = title.chars().count();
-    let left_used = 1 + title_display_width;
-    let pad = w.saturating_sub(left_used + id_reserve);
-
-    let mut lines: Vec<Line> = vec![Line::from(vec![
-        Span::styled(
-            format!(" {title}"),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" ".repeat(pad)),
-        Span::styled(id_str, Style::default().fg(Color::DarkGray)),
-    ])];
-
-    lines.push(separator(area.width));
-
-    let mut pending_clicks = Vec::new();
-    render_messages(
-        &mut lines,
-        &group.messages,
-        app,
-        usize::from(area.width),
-        &mut pending_clicks,
-    );
-    render_pending(&mut lines, app, View::Group(group_idx));
-    record_sender_clicks(app, &pending_clicks, lines.len(), app.scroll_offset, area);
-    render_scrolled(frame, lines, app.scroll_offset, area);
+    title
 }
 
 fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
