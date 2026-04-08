@@ -25,6 +25,22 @@ pub struct ThreadMessage {
     pub has_gap: bool,
 }
 
+impl ThreadMessage {
+    pub fn from_new(msg: NewMessage, is_mine: bool, has_gap: bool) -> Self {
+        Self {
+            sender_ss58: msg.sender_ss58,
+            timestamp: msg.timestamp,
+            body: msg.body,
+            is_mine,
+            reply_to: msg.reply_to,
+            continues: msg.continues,
+            block_number: msg.block_number,
+            ext_index: msg.ext_index,
+            has_gap,
+        }
+    }
+}
+
 pub struct NewMessage {
     pub sender_ss58: String,
     pub timestamp: DateTime<Utc>,
@@ -74,6 +90,24 @@ pub fn gap_refs(messages: &[ThreadMessage]) -> Vec<BlockRef> {
     refs
 }
 
+pub trait Conversation {
+    fn messages(&self) -> &[ThreadMessage];
+    fn last_read(&self) -> usize;
+
+    fn last_ref(&self) -> BlockRef {
+        last_ref(self.messages())
+    }
+    fn my_last_ref(&self) -> BlockRef {
+        my_last_ref(self.messages())
+    }
+    fn gap_refs(&self) -> Vec<BlockRef> {
+        gap_refs(self.messages())
+    }
+    fn unread(&self) -> usize {
+        self.messages().len().saturating_sub(self.last_read())
+    }
+}
+
 pub struct Thread {
     pub thread_ref: BlockRef,
     pub peer_ss58: String,
@@ -83,18 +117,12 @@ pub struct Thread {
     pub last_read: usize,
 }
 
-impl Thread {
-    pub fn last_ref(&self) -> BlockRef {
-        last_ref(&self.messages)
+impl Conversation for Thread {
+    fn messages(&self) -> &[ThreadMessage] {
+        &self.messages
     }
-    pub fn my_last_ref(&self) -> BlockRef {
-        my_last_ref(&self.messages)
-    }
-    pub fn gap_refs(&self) -> Vec<BlockRef> {
-        gap_refs(&self.messages)
-    }
-    pub fn unread(&self) -> usize {
-        self.messages.len().saturating_sub(self.last_read)
+    fn last_read(&self) -> usize {
+        self.last_read
     }
 }
 
@@ -115,18 +143,12 @@ pub struct Channel {
     pub last_read: usize,
 }
 
-impl Channel {
-    pub fn last_ref(&self) -> BlockRef {
-        last_ref(&self.messages)
+impl Conversation for Channel {
+    fn messages(&self) -> &[ThreadMessage] {
+        &self.messages
     }
-    pub fn my_last_ref(&self) -> BlockRef {
-        my_last_ref(&self.messages)
-    }
-    pub fn gap_refs(&self) -> Vec<BlockRef> {
-        gap_refs(&self.messages)
-    }
-    pub fn unread(&self) -> usize {
-        self.messages.len().saturating_sub(self.last_read)
+    fn last_read(&self) -> usize {
+        self.last_read
     }
 }
 
@@ -139,17 +161,11 @@ pub struct Group {
     pub last_read: usize,
 }
 
-impl Group {
-    pub fn last_ref(&self) -> BlockRef {
-        last_ref(&self.messages)
+impl Conversation for Group {
+    fn messages(&self) -> &[ThreadMessage] {
+        &self.messages
     }
-    pub fn my_last_ref(&self) -> BlockRef {
-        my_last_ref(&self.messages)
-    }
-    pub fn gap_refs(&self) -> Vec<BlockRef> {
-        gap_refs(&self.messages)
-    }
-    pub fn unread(&self) -> usize {
-        self.messages.len().saturating_sub(self.last_read)
+    fn last_read(&self) -> usize {
+        self.last_read
     }
 }

@@ -1,4 +1,5 @@
 use chrono::Utc;
+use taolk::conversation::Conversation;
 use taolk::conversation::{Channel, Group, Thread, ThreadMessage, gap_refs, last_ref, my_last_ref};
 use taolk::types::{BlockRef, Pubkey};
 

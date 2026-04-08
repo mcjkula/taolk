@@ -1,5 +1,5 @@
 use crate::conversation::{
-    Channel, ChannelInfo, Group, InboxMessage, NewMessage, Thread, ThreadMessage,
+    Channel, ChannelInfo, Conversation, Group, InboxMessage, NewMessage, Thread, ThreadMessage,
 };
 use crate::db::Db;
 use crate::error::{Result, SdkError};
@@ -213,7 +213,7 @@ impl Session {
                 draft: String::new(),
                 last_read: msg_count,
             });
-            self.refresh_gaps(i);
+            self.refresh_gaps(crate::db::ConvKind::Thread, i);
         }
 
         for (channel_ref, name, description, creator_ss58, messages) in self.db.load_channels() {
@@ -229,7 +229,7 @@ impl Session {
                 draft: String::new(),
                 last_read: msg_count,
             });
-            self.refresh_channel_gaps(i);
+            self.refresh_gaps(crate::db::ConvKind::Channel, i);
         }
 
         for (channel_ref, name, description, creator_ss58) in self.db.load_known_channels() {
@@ -268,7 +268,7 @@ impl Session {
                 draft: String::new(),
                 last_read: msg_count,
             });
-            self.refresh_group_gaps(i);
+            self.refresh_gaps(crate::db::ConvKind::Group, i);
         }
 
         for (kind, bref, body) in self.db.load_drafts() {
@@ -362,10 +362,13 @@ impl Session {
         self.peer_pubkeys.insert(peer_ss58.clone(), peer);
         self.db.upsert_peer(&peer_ss58, &peer);
 
-        if self.db.has_message_at(BlockRef {
-            block: msg.block_number,
-            index: msg.ext_index,
-        }) {
+        if self.db.has_message_at(
+            crate::db::ConvKind::Thread,
+            BlockRef {
+                block: msg.block_number,
+                index: msg.ext_index,
+            },
+        ) {
             return;
         }
 
@@ -411,20 +414,11 @@ impl Session {
             i
         };
 
-        let has_gap = (msg.reply_to != BlockRef::ZERO && !self.db.has_message_at(msg.reply_to))
-            || (msg.continues != BlockRef::ZERO && !self.db.has_message_at(msg.continues));
+        let has_gap = self
+            .db
+            .has_gap(crate::db::ConvKind::Thread, msg.reply_to, msg.continues);
 
-        let tm = ThreadMessage {
-            sender_ss58: msg.sender_ss58,
-            timestamp: msg.timestamp,
-            body: msg.body,
-            is_mine,
-            reply_to: msg.reply_to,
-            continues: msg.continues,
-            block_number: msg.block_number,
-            ext_index: msg.ext_index,
-            has_gap,
-        };
+        let tm = ThreadMessage::from_new(msg, is_mine, has_gap);
 
         self.db
             .insert_thread_message(thread_ref, &peer_ss58, &tm, tm.block_number, tm.ext_index);
@@ -435,10 +429,13 @@ impl Session {
     }
 
     pub fn add_channel_message(&mut self, channel_ref: BlockRef, msg: NewMessage) {
-        if self.db.has_channel_message_at(BlockRef {
-            block: msg.block_number,
-            index: msg.ext_index,
-        }) {
+        if self.db.has_message_at(
+            crate::db::ConvKind::Channel,
+            BlockRef {
+                block: msg.block_number,
+                index: msg.ext_index,
+            },
+        ) {
             return;
         }
         let idx = match self.channel_index.get(&channel_ref) {
@@ -448,21 +445,11 @@ impl Session {
 
         let is_mine = msg.sender_ss58 == crate::util::ss58_short(&self.pubkey());
 
-        let has_gap = (msg.reply_to != BlockRef::ZERO
-            && !self.db.has_channel_message_at(msg.reply_to))
-            || (msg.continues != BlockRef::ZERO && !self.db.has_channel_message_at(msg.continues));
+        let has_gap = self
+            .db
+            .has_gap(crate::db::ConvKind::Channel, msg.reply_to, msg.continues);
 
-        let tm = ThreadMessage {
-            sender_ss58: msg.sender_ss58,
-            timestamp: msg.timestamp,
-            body: msg.body,
-            is_mine,
-            reply_to: msg.reply_to,
-            continues: msg.continues,
-            block_number: msg.block_number,
-            ext_index: msg.ext_index,
-            has_gap,
-        };
+        let tm = ThreadMessage::from_new(msg, is_mine, has_gap);
 
         self.db
             .insert_channel_message(channel_ref, &tm, tm.block_number, tm.ext_index);
@@ -608,21 +595,14 @@ impl Session {
         i
     }
 
-    pub fn refresh_gaps(&mut self, thread_idx: usize) {
-        if let Some(thread) = self.threads.get_mut(thread_idx) {
-            refresh_message_gaps(&mut thread.messages, |br| self.db.has_message_at(br));
-        }
-    }
-
-    pub fn refresh_channel_gaps(&mut self, chan_idx: usize) {
-        if let Some(ch) = self.channels.get_mut(chan_idx) {
-            refresh_message_gaps(&mut ch.messages, |br| self.db.has_channel_message_at(br));
-        }
-    }
-
-    pub fn refresh_group_gaps(&mut self, group_idx: usize) {
-        if let Some(g) = self.groups.get_mut(group_idx) {
-            refresh_message_gaps(&mut g.messages, |br| self.db.has_group_message_at(br));
+    pub fn refresh_gaps(&mut self, kind: crate::db::ConvKind, idx: usize) {
+        let messages: Option<&mut Vec<ThreadMessage>> = match kind {
+            crate::db::ConvKind::Thread => self.threads.get_mut(idx).map(|t| &mut t.messages),
+            crate::db::ConvKind::Channel => self.channels.get_mut(idx).map(|c| &mut c.messages),
+            crate::db::ConvKind::Group => self.groups.get_mut(idx).map(|g| &mut g.messages),
+        };
+        if let Some(messages) = messages {
+            refresh_message_gaps(messages, |br| self.db.has_message_at(kind, br));
         }
     }
 
@@ -666,10 +646,13 @@ impl Session {
     }
 
     pub fn add_group_message(&mut self, group_ref: BlockRef, msg: NewMessage) {
-        if self.db.has_group_message_at(BlockRef {
-            block: msg.block_number,
-            index: msg.ext_index,
-        }) {
+        if self.db.has_message_at(
+            crate::db::ConvKind::Group,
+            BlockRef {
+                block: msg.block_number,
+                index: msg.ext_index,
+            },
+        ) {
             return;
         }
         let idx = match self.group_index.get(&group_ref) {
@@ -679,21 +662,11 @@ impl Session {
 
         let is_mine = msg.sender_ss58 == crate::util::ss58_short(&self.pubkey());
 
-        let has_gap = (msg.reply_to != BlockRef::ZERO
-            && !self.db.has_group_message_at(msg.reply_to))
-            || (msg.continues != BlockRef::ZERO && !self.db.has_group_message_at(msg.continues));
+        let has_gap = self
+            .db
+            .has_gap(crate::db::ConvKind::Group, msg.reply_to, msg.continues);
 
-        let tm = ThreadMessage {
-            sender_ss58: msg.sender_ss58,
-            timestamp: msg.timestamp,
-            body: msg.body,
-            is_mine,
-            reply_to: msg.reply_to,
-            continues: msg.continues,
-            block_number: msg.block_number,
-            ext_index: msg.ext_index,
-            has_gap,
-        };
+        let tm = ThreadMessage::from_new(msg, is_mine, has_gap);
 
         self.db
             .insert_group_message(group_ref, &tm, tm.block_number, tm.ext_index);

@@ -3,6 +3,7 @@ mod cli_fmt;
 mod cmd;
 mod ui;
 
+use taolk::conversation::Conversation;
 use taolk::{
     audio, chain, config, conversation, db, error, event, extrinsic, mirror, session, types, util,
     wallet,
@@ -808,13 +809,13 @@ fn run_session(
             }
             TuiEvent::Core(event::Event::GapsRefreshed) => {
                 for i in 0..app.session.threads.len() {
-                    app.session.refresh_gaps(i);
+                    app.session.refresh_gaps(taolk::db::ConvKind::Thread, i);
                 }
                 for i in 0..app.session.channels.len() {
-                    app.session.refresh_channel_gaps(i);
+                    app.session.refresh_gaps(taolk::db::ConvKind::Channel, i);
                 }
                 for i in 0..app.session.groups.len() {
-                    app.session.refresh_group_gaps(i);
+                    app.session.refresh_gaps(taolk::db::ConvKind::Group, i);
                 }
                 app.set_status("Loaded");
             }

@@ -220,19 +220,25 @@ fn has_message_at_true() {
     let msg = make_thread_msg("exists", false, 100, 0);
     db.insert_thread_message(thread_ref, "Alice", &msg, 100, 0);
 
-    assert!(db.has_message_at(BlockRef {
-        block: 100,
-        index: 0
-    }));
+    assert!(db.has_message_at(
+        taolk::db::ConvKind::Thread,
+        BlockRef {
+            block: 100,
+            index: 0
+        }
+    ));
 }
 
 #[test]
 fn has_message_at_false() {
     let db = test_db();
-    assert!(!db.has_message_at(BlockRef {
-        block: 999,
-        index: 0
-    }));
+    assert!(!db.has_message_at(
+        taolk::db::ConvKind::Thread,
+        BlockRef {
+            block: 999,
+            index: 0
+        }
+    ));
 }
 
 #[test]
@@ -246,14 +252,20 @@ fn has_channel_message_at() {
     let msg = make_thread_msg("ch msg", false, 300, 1);
     db.insert_channel_message(ch_ref, &msg, 300, 1);
 
-    assert!(db.has_channel_message_at(BlockRef {
-        block: 300,
-        index: 1
-    }));
-    assert!(!db.has_channel_message_at(BlockRef {
-        block: 300,
-        index: 2
-    }));
+    assert!(db.has_message_at(
+        taolk::db::ConvKind::Channel,
+        BlockRef {
+            block: 300,
+            index: 1
+        }
+    ));
+    assert!(!db.has_message_at(
+        taolk::db::ConvKind::Channel,
+        BlockRef {
+            block: 300,
+            index: 2
+        }
+    ));
 }
 
 #[test]
@@ -268,14 +280,20 @@ fn has_group_message_at() {
     let msg = make_thread_msg("grp msg", false, 500, 3);
     db.insert_group_message(group_ref, &msg, 500, 3);
 
-    assert!(db.has_group_message_at(BlockRef {
-        block: 500,
-        index: 3
-    }));
-    assert!(!db.has_group_message_at(BlockRef {
-        block: 500,
-        index: 4
-    }));
+    assert!(db.has_message_at(
+        taolk::db::ConvKind::Group,
+        BlockRef {
+            block: 500,
+            index: 3
+        }
+    ));
+    assert!(!db.has_message_at(
+        taolk::db::ConvKind::Group,
+        BlockRef {
+            block: 500,
+            index: 4
+        }
+    ));
 }
 
 #[test]

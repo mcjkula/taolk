@@ -15,6 +15,23 @@ type GroupRow = (BlockRef, Pubkey, Vec<Pubkey>);
 type ChannelRow = (BlockRef, String, String, String, Vec<ThreadMessage>);
 type ChannelMeta = (BlockRef, String, String, String);
 
+#[derive(Clone, Copy, Debug)]
+pub enum ConvKind {
+    Thread,
+    Channel,
+    Group,
+}
+
+impl ConvKind {
+    fn table(self) -> &'static str {
+        match self {
+            Self::Thread => "thread_messages",
+            Self::Channel => "channel_messages",
+            Self::Group => "group_messages",
+        }
+    }
+}
+
 const DB_KEY_INFO: &[u8] = b"taolk-db-v1";
 
 fn ts(secs: i64) -> chrono::DateTime<Utc> {
@@ -343,14 +360,19 @@ impl Db {
         out
     }
 
-    pub fn has_message_at(&self, block_ref: BlockRef) -> bool {
+    pub fn has_message_at(&self, kind: ConvKind, block_ref: BlockRef) -> bool {
+        let sql = format!(
+            "SELECT 1 FROM {} WHERE block_number = ?1 AND ext_index = ?2",
+            kind.table()
+        );
         self.conn
-            .query_row(
-                "SELECT 1 FROM thread_messages WHERE block_number = ?1 AND ext_index = ?2",
-                params![block_ref.block, block_ref.index],
-                |_| Ok(()),
-            )
+            .query_row(&sql, params![block_ref.block, block_ref.index], |_| Ok(()))
             .is_ok()
+    }
+
+    pub fn has_gap(&self, kind: ConvKind, reply_to: BlockRef, continues: BlockRef) -> bool {
+        (reply_to != BlockRef::ZERO && !self.has_message_at(kind, reply_to))
+            || (continues != BlockRef::ZERO && !self.has_message_at(kind, continues))
     }
 
     pub fn load_inbox(&self) -> (Vec<InboxMessage>, Vec<InboxMessage>) {
@@ -606,16 +628,6 @@ impl Db {
         );
     }
 
-    pub fn has_group_message_at(&self, block_ref: BlockRef) -> bool {
-        self.conn
-            .query_row(
-                "SELECT 1 FROM group_messages WHERE block_number = ?1 AND ext_index = ?2",
-                params![block_ref.block, block_ref.index],
-                |_| Ok(()),
-            )
-            .is_ok()
-    }
-
     pub fn load_group_messages(&self, group_ref: BlockRef) -> Vec<ThreadMessage> {
         let inner = || -> Option<Vec<ThreadMessage>> {
             let mut stmt = self
@@ -684,16 +696,6 @@ impl Db {
                     encrypted, i32::from(msg.is_mine), msg.reply_to.block, msg.reply_to.index,
                     msg.continues.block, msg.continues.index, block_number, ext_index],
         );
-    }
-
-    pub fn has_channel_message_at(&self, block_ref: BlockRef) -> bool {
-        self.conn
-            .query_row(
-                "SELECT 1 FROM channel_messages WHERE block_number = ?1 AND ext_index = ?2",
-                params![block_ref.block, block_ref.index],
-                |_| Ok(()),
-            )
-            .is_ok()
     }
 
     pub fn delete_channel(&self, channel_ref: BlockRef) {
