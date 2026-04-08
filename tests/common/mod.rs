@@ -62,7 +62,7 @@ pub fn session_for(seed: &[u8; 32]) -> Session {
         signing_from_seed(seed),
         Zeroizing::new(*seed),
         true,
-        "ws://test".into(),
+        taolk::types::NodeUrl::parse("ws://test").unwrap(),
         test_chain_info(),
         db,
     )

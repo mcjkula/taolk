@@ -42,7 +42,7 @@ pub struct Session {
     pub my_ss58: String,
     seed: Option<Zeroizing<[u8; 32]>>,
     view_scalar: Zeroizing<[u8; 32]>,
-    pub node_url: String,
+    pub node_url: crate::types::NodeUrl,
     pub chain_info: crate::extrinsic::ChainInfo,
     pub block_number: u64,
     pub inbox: Vec<InboxMessage>,
@@ -68,7 +68,7 @@ impl Session {
         signing: SigningKey,
         seed: Zeroizing<[u8; 32]>,
         keep_seed: bool,
-        node_url: String,
+        node_url: crate::types::NodeUrl,
         chain_info: crate::extrinsic::ChainInfo,
         db: Db,
     ) -> Self {
@@ -138,7 +138,7 @@ impl Session {
             signing,
             Zeroizing::new(*seed),
             true,
-            node_url.to_string(),
+            crate::types::NodeUrl::parse(node_url).map_err(|e| SdkError::Other(e.to_string()))?,
             chain_info,
             db,
         );
@@ -921,7 +921,7 @@ impl Session {
 
     pub async fn submit(&self, remark: &samp::RemarkBytes) -> Result<String> {
         crate::extrinsic::submit_remark(
-            &self.node_url,
+            self.node_url.as_str(),
             remark,
             &self.signing,
             &self.my_ss58,
@@ -933,15 +933,17 @@ impl Session {
 
     pub async fn fetch_balance(&self) -> Result<u128> {
         let pk = self.pubkey();
-        Ok(
-            crate::extrinsic::fetch_balance(&self.node_url, &pk, &self.chain_info.account_storage)
-                .await?,
+        Ok(crate::extrinsic::fetch_balance(
+            self.node_url.as_str(),
+            &pk,
+            &self.chain_info.account_storage,
         )
+        .await?)
     }
 
     pub async fn estimate_fee(&self, remark: &samp::RemarkBytes) -> Result<u128> {
         Ok(crate::extrinsic::estimate_fee(
-            &self.node_url,
+            self.node_url.as_str(),
             remark,
             &self.signing,
             &self.my_ss58,

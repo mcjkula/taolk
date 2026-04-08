@@ -574,7 +574,7 @@ fn dispatch_pending_send(
             let symbol = app.session.token_symbol.clone();
             let decimals = app.session.token_decimals;
             rt.spawn(async move {
-                match extrinsic::estimate_fee(&url, &remark, &signing, &ss58, &ci).await {
+                match extrinsic::estimate_fee(url.as_str(), &remark, &signing, &ss58, &ci).await {
                     Ok(fee) => {
                         let display = util::format_fee(fee, decimals, &symbol);
                         let _ = tx.send(event::Event::FeeEstimated {
@@ -741,11 +741,13 @@ fn run_session(
         chain_info.chain_params.genesis_hash.as_bytes(),
     )?;
     let keep_seed = !cfg.security.require_password_per_send;
+    let node_url_typed = taolk::types::NodeUrl::parse(node_url)
+        .map_err(|e| -> Box<dyn std::error::Error> { format!("invalid node url: {e}").into() })?;
     let session = session::Session::new(
         signing,
         zeroize::Zeroizing::new(*seed),
         keep_seed,
-        node_url.to_string(),
+        node_url_typed,
         chain_info.clone(),
         db,
     );
@@ -776,7 +778,7 @@ fn run_session(
         let keys = app.session.decryption_keys();
         rt.spawn(async move {
             let _ = tx.send(event::Event::Status("Connected".into()));
-            chain::subscribe_blocks(&url, my_pubkey, keys, tx).await;
+            chain::subscribe_blocks(url.as_str(), my_pubkey, keys, tx).await;
         });
     }
 
@@ -874,7 +876,8 @@ fn run_session(
                     let layout = app.session.chain_info.account_storage.clone();
                     let tx = event_tx.clone();
                     rt.spawn(async move {
-                        if let Ok(bal) = extrinsic::fetch_balance(&url, &pk, &layout).await {
+                        if let Ok(bal) = extrinsic::fetch_balance(url.as_str(), &pk, &layout).await
+                        {
                             let _ = tx.send(event::Event::BalanceUpdated(bal));
                         }
                     });
@@ -1039,7 +1042,9 @@ fn run_session(
                 let ci = chain_info.clone();
                 let tx = event_tx.clone();
                 rt.spawn(async move {
-                    match extrinsic::submit_remark(&url, &remark, &signing, &ss58, &ci).await {
+                    match extrinsic::submit_remark(url.as_str(), &remark, &signing, &ss58, &ci)
+                        .await
+                    {
                         Ok(_) => {
                             let _ = tx.send(event::Event::MessageSent);
                         }
@@ -1142,7 +1147,7 @@ fn run_session(
                 let tx = event_tx.clone();
                 let layout = app.session.chain_info.account_storage.clone();
                 rt.spawn(async move {
-                    if let Ok(bal) = extrinsic::fetch_balance(&url, &pk, &layout).await {
+                    if let Ok(bal) = extrinsic::fetch_balance(url.as_str(), &pk, &layout).await {
                         let _ = tx.send(event::Event::BalanceUpdated(bal));
                     }
                 });
@@ -1891,7 +1896,9 @@ fn handle_create_channel_desc_key(
                     let symbol = app.session.token_symbol.clone();
                     let decimals = app.session.token_decimals;
                     rt.spawn(async move {
-                        match extrinsic::estimate_fee(&url, &remark, &signing, &ss58, &ci).await {
+                        match extrinsic::estimate_fee(url.as_str(), &remark, &signing, &ss58, &ci)
+                            .await
+                        {
                             Ok(fee) => {
                                 let display = util::format_fee(fee, decimals, &symbol);
                                 let _ = tx.send(event::Event::FeeEstimated {

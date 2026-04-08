@@ -183,7 +183,7 @@ fn db_roundtrip_then_new_message_same_thread() {
         signing_from_seed(&BOB_SEED),
         Zeroizing::new(BOB_SEED),
         true,
-        "ws://test".into(),
+        taolk::types::NodeUrl::parse("ws://test").unwrap(),
         ci(),
         db,
     );
@@ -239,7 +239,7 @@ fn db_roundtrip_own_sent_then_receive_same_thread() {
         signing_from_seed(&BOB_SEED),
         Zeroizing::new(BOB_SEED),
         true,
-        "ws://test".into(),
+        taolk::types::NodeUrl::parse("ws://test").unwrap(),
         ci(),
         db,
     );
