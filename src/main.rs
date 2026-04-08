@@ -1108,13 +1108,10 @@ fn handle_normal_key(
                 }
             }
             KeyCode::Char('c') if app.channel_dir_input.is_empty() => {
-                if app.sending {
-                    app.set_error("Still sending previous message");
+                if !app.check_not_sending() {
                     return;
                 }
-                app.input.clear();
-                app.cursor_pos = 0;
-                app.mode = Mode::CreateChannel;
+                app.enter_mode(Mode::CreateChannel);
             }
             KeyCode::Esc => {
                 if app.channel_dir_input.is_empty() {
@@ -1168,18 +1165,13 @@ fn handle_normal_key(
             app.mode = Mode::Insert;
         }
         KeyCode::Char('m') => {
-            if app.sending {
-                app.set_error("Still sending previous message");
+            if !app.check_not_sending() {
                 return;
             }
-            app.input.clear();
-            app.cursor_pos = 0;
-            app.mode = Mode::Message;
+            app.enter_mode(Mode::Message);
         }
         KeyCode::Char('n') => {
-            app.input.clear();
-            app.cursor_pos = 0;
-            app.mode = Mode::Compose;
+            app.enter_mode(Mode::Compose);
         }
         KeyCode::Char('c') => {
             app.channel_dir_cursor = 0;
@@ -1188,12 +1180,10 @@ fn handle_normal_key(
             app.view = app::View::ChannelDir;
         }
         KeyCode::Char('g') => {
-            if app.sending {
-                app.set_error("Still sending previous message");
+            if !app.check_not_sending() {
                 return;
             }
-            app.input.clear();
-            app.cursor_pos = 0;
+            app.reset_input();
             app.contact_idx = 0;
             app.pending_group_members.clear();
             let my_pk = app.session.pubkey();
@@ -1224,9 +1214,7 @@ fn handle_normal_key(
         }
         KeyCode::Char('/') => {
             app.search_query.clear();
-            app.input.clear();
-            app.cursor_pos = 0;
-            app.mode = Mode::Search;
+            app.enter_mode(Mode::Search);
         }
         KeyCode::Char('y') if app.view != app::View::ChannelDir => {
             let senders = app.build_picker_senders();
@@ -1267,8 +1255,7 @@ fn handle_insert_key(
         KeyCode::Esc => {
             if app.msg_recipient.is_some() {
                 app.clear_standalone();
-                app.input.clear();
-                app.cursor_pos = 0;
+                app.reset_input();
                 app.set_status("Cancelled");
             } else if !app.input.is_empty() {
                 app.save_draft();
@@ -1305,8 +1292,7 @@ fn handle_insert_key(
             }
         }
         KeyCode::Enter => {
-            if app.sending {
-                app.set_error("Still sending previous message");
+            if !app.check_not_sending() {
                 return;
             }
             {
@@ -1392,9 +1378,7 @@ fn handle_compose_key(app: &mut App, key: crossterm::event::KeyEvent) {
                     }
                     let ss58 = util::ss58_short(&pubkey);
                     app.msg_recipient = Some((pubkey, ss58));
-                    app.input.clear();
-                    app.cursor_pos = 0;
-                    app.mode = Mode::Insert;
+                    app.enter_mode(Mode::Insert);
                 }
                 Err(e) => {
                     app.set_error(format!("Invalid address: {e}"));
@@ -1406,8 +1390,7 @@ fn handle_compose_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 app.contact_idx = 0;
                 app.mode = Mode::Normal;
             } else {
-                app.input.clear();
-                app.cursor_pos = 0;
+                app.reset_input();
             }
         }
         KeyCode::Backspace => {
@@ -1449,8 +1432,7 @@ fn handle_message_key(app: &mut App, key: crossterm::event::KeyEvent) {
                         }
                         let ss58 = util::ss58_short(&pubkey);
                         app.msg_recipient = Some((pubkey, ss58));
-                        app.input.clear();
-                        app.cursor_pos = 0;
+                        app.reset_input();
                     }
                     Err(e) => {
                         app.set_error(format!("Invalid address: {e}"));
@@ -1463,8 +1445,7 @@ fn handle_message_key(app: &mut App, key: crossterm::event::KeyEvent) {
                     app.contact_idx = 0;
                     app.mode = Mode::Normal;
                 } else {
-                    app.input.clear();
-                    app.cursor_pos = 0;
+                    app.reset_input();
                 }
             }
             KeyCode::Backspace => {
@@ -1490,9 +1471,7 @@ fn handle_message_key(app: &mut App, key: crossterm::event::KeyEvent) {
             }
             KeyCode::Esc => {
                 app.clear_standalone();
-                app.input.clear();
-                app.cursor_pos = 0;
-                app.mode = Mode::Normal;
+                app.enter_mode(Mode::Normal);
             }
             _ => {}
         }
@@ -1515,13 +1494,10 @@ fn handle_create_channel_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 return;
             }
             app.pending_channel_name = Some(name);
-            app.input.clear();
-            app.cursor_pos = 0;
-            app.mode = Mode::CreateChannelDesc;
+            app.enter_mode(Mode::CreateChannelDesc);
         }
         KeyCode::Esc => {
-            app.input.clear();
-            app.cursor_pos = 0;
+            app.reset_input();
             app.pending_channel_name = None;
             app.mode = Mode::Normal;
         }
@@ -1644,8 +1620,7 @@ fn handle_create_group_members_key(
                     } else {
                         app.pending_group_members.push((pk, ss58));
                     }
-                    app.input.clear();
-                    app.cursor_pos = 0;
+                    app.reset_input();
                     app.contact_idx = 0;
                 } else if input.len() >= 46 {
                     if let Some(pk) = util::pubkey_from_ss58(&input) {
@@ -1664,8 +1639,7 @@ fn handle_create_group_members_key(
                             app.session.peer_pubkeys.insert(short.clone(), pk);
                             app.session.db.upsert_peer(&short, &pk);
                         }
-                        app.input.clear();
-                        app.cursor_pos = 0;
+                        app.reset_input();
                         app.contact_idx = 0;
                     } else {
                         app.set_error("Invalid address");
@@ -1688,8 +1662,7 @@ fn handle_create_group_members_key(
                 .collect();
             let idx = app.session.create_pending_group(creator_pubkey, members);
             app.view = app::View::Group(idx);
-            app.input.clear();
-            app.cursor_pos = 0;
+            app.reset_input();
             app.scroll_offset = 0;
             app.mode = Mode::Insert;
         }
@@ -1711,8 +1684,7 @@ fn handle_create_group_members_key(
         }
         KeyCode::Esc => {
             if !app.input.is_empty() {
-                app.input.clear();
-                app.cursor_pos = 0;
+                app.reset_input();
                 app.contact_idx = 0;
             } else {
                 app.pending_group_members.clear();
@@ -1870,9 +1842,7 @@ fn handle_confirm_key(
             app.pending_view = view;
             app.pending_text = text;
             app.clear_draft();
-            app.input.clear();
-            app.cursor_pos = 0;
-            app.mode = Mode::Normal;
+            app.enter_mode(Mode::Normal);
         }
         KeyCode::Esc => {
             app.pending_remark = None;

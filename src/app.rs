@@ -126,6 +126,24 @@ impl App {
         self.set_error(translated);
     }
 
+    pub fn reset_input(&mut self) {
+        self.input.clear();
+        self.cursor_pos = 0;
+    }
+
+    pub fn enter_mode(&mut self, mode: Mode) {
+        self.reset_input();
+        self.mode = mode;
+    }
+
+    pub fn check_not_sending(&mut self) -> bool {
+        if self.sending {
+            self.set_error("Still sending previous message");
+            return false;
+        }
+        true
+    }
+
     pub fn current_status(&self) -> Option<(&str, bool)> {
         self.status_message
             .as_ref()
