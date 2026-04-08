@@ -3,7 +3,7 @@ use crate::conversation::{
 };
 use crate::db::Db;
 use crate::error::{Result, SdkError};
-use crate::secret::{Seed, SigningKey};
+use crate::secret::{DecryptionKeys, Seed, SigningKey};
 use crate::types::{BlockRef, Pubkey};
 use chrono::{DateTime, Utc};
 use curve25519_dalek::scalar::Scalar;
@@ -153,9 +153,9 @@ impl Session {
         {
             let url = node_url.to_string();
             let etx = tx.clone();
-            let sc = zeroize::Zeroizing::new(*seed);
+            let keys = session.decryption_keys();
             tokio::spawn(async move {
-                crate::chain::subscribe_blocks(&url, my_pubkey, sc, etx).await;
+                crate::chain::subscribe_blocks(&url, my_pubkey, keys, etx).await;
             });
         }
 
@@ -165,7 +165,7 @@ impl Session {
                 session.channels.iter().map(|c| c.channel_ref).collect();
             let urls: Vec<String> = mirror_urls.iter().map(|u| u.to_string()).collect();
             let node = node_url.to_string();
-            let sc = zeroize::Zeroizing::new(*seed);
+            let keys = session.decryption_keys();
             let pk = my_pubkey;
             let etx = tx.clone();
             let chain_name = session.chain_info.name.clone();
@@ -176,7 +176,7 @@ impl Session {
                     &node,
                     &chain_name,
                     ss58_prefix,
-                    &sc,
+                    &keys,
                     &pk,
                     subscribed,
                     0,
@@ -203,6 +203,10 @@ impl Session {
 
     pub fn view_scalar(&self) -> Scalar {
         Scalar::from_bytes_mod_order(*self.view_scalar)
+    }
+
+    pub fn decryption_keys(&self) -> DecryptionKeys {
+        DecryptionKeys::new(*self.view_scalar, Some(*self.seed))
     }
 
     pub fn ss58(&self) -> &str {

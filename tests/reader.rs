@@ -4,20 +4,26 @@ use common::{build_remark_ext, signing_from_seed as signing};
 use std::sync::mpsc;
 use taolk::event::Event;
 use taolk::reader::{self, ReadContext};
+use taolk::secret::DecryptionKeys;
 use taolk::types::Pubkey;
 
 fn ext_to_hex(ext_bytes: &[u8]) -> String {
     format!("0x{}", hex::encode(ext_bytes))
 }
 
+fn make_keys(seed: &[u8; 32]) -> DecryptionKeys {
+    let view_scalar = samp::sr25519_signing_scalar(seed).to_bytes();
+    DecryptionKeys::new(view_scalar, Some(*seed))
+}
+
 fn make_ctx<'a>(
-    seed: &'a [u8; 32],
+    keys: &'a DecryptionKeys,
     pubkey: &'a Pubkey,
     tx: &'a mpsc::Sender<Event>,
 ) -> ReadContext<'a> {
     ReadContext {
         my_pubkey: pubkey,
-        seed,
+        keys,
         tx,
     }
 }
@@ -36,7 +42,8 @@ fn read_extrinsic_emits_event_for_samp_remark() {
     let hex = ext_to_hex(&ext);
 
     let (tx, rx) = mpsc::channel();
-    let ctx = make_ctx(&bob_seed, &bob_pubkey, &tx);
+    let keys = make_keys(&bob_seed);
+    let ctx = make_ctx(&keys, &bob_pubkey, &tx);
     reader::read_extrinsic(&hex, &ctx, 100, 1, 1_700_000_000_000);
 
     match rx.try_recv() {
@@ -73,7 +80,8 @@ fn read_extrinsic_ignores_non_samp_remark() {
     let hex = ext_to_hex(&ext);
 
     let (tx, rx) = mpsc::channel();
-    let ctx = make_ctx(&alice_seed, &alice_pubkey, &tx);
+    let keys = make_keys(&alice_seed);
+    let ctx = make_ctx(&keys, &alice_pubkey, &tx);
     reader::read_extrinsic(&hex, &ctx, 100, 0, 0);
 
     assert!(
@@ -144,7 +152,8 @@ fn read_extrinsic_decrypts_for_recipient() {
     let hex = ext_to_hex(&ext);
 
     let (tx, rx) = mpsc::channel();
-    let ctx = make_ctx(&bob_seed, &bob_pubkey, &tx);
+    let keys = make_keys(&bob_seed);
+    let ctx = make_ctx(&keys, &bob_pubkey, &tx);
     reader::read_extrinsic(&hex, &ctx, 200, 3, 1_700_000_000_000);
 
     match rx.try_recv() {
@@ -198,7 +207,8 @@ fn read_extrinsic_skips_message_for_wrong_recipient() {
     let hex = ext_to_hex(&ext);
 
     let (tx, rx) = mpsc::channel();
-    let ctx = make_ctx(&charlie_seed, &charlie_pubkey, &tx);
+    let keys = make_keys(&charlie_seed);
+    let ctx = make_ctx(&keys, &charlie_pubkey, &tx);
     reader::read_extrinsic(&hex, &ctx, 200, 3, 0);
 
     assert!(

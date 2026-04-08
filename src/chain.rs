@@ -4,11 +4,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
-use zeroize::Zeroizing;
 
 use crate::error::ChainError;
 use crate::event::{ConnState, Event};
 use crate::reader;
+use crate::secret::DecryptionKeys;
 use crate::types::Pubkey;
 
 const PIPELINE_WINDOW: usize = 32;
@@ -127,11 +127,11 @@ pub async fn fetch_and_process_extrinsic(
     block_num: u32,
     ext_index: u16,
     my_pubkey: Pubkey,
-    seed: Zeroizing<[u8; 32]>,
+    keys: DecryptionKeys,
     tx: Sender<Event>,
 ) {
     let result =
-        fetch_extrinsic_inner(node_url, block_num, ext_index, &my_pubkey, &seed, &tx).await;
+        fetch_extrinsic_inner(node_url, block_num, ext_index, &my_pubkey, &keys, &tx).await;
     if let Err(e) = result {
         let _ = tx.send(Event::Error(format!(
             "Load block {block_num}:{ext_index}: {e}"
@@ -144,14 +144,14 @@ async fn fetch_extrinsic_inner(
     block_num: u32,
     ext_index: u16,
     my_pubkey: &Pubkey,
-    seed: &[u8; 32],
+    keys: &DecryptionKeys,
     tx: &Sender<Event>,
 ) -> Result<(), ChainError> {
     let block = fetch_block(node_url, block_num).await?;
     if let Some(ext_hex) = block.extrinsics.get(usize::from(ext_index)) {
         let ctx = reader::ReadContext {
             my_pubkey,
-            seed,
+            keys,
             tx,
         };
         reader::read_extrinsic(ext_hex, &ctx, block_num, ext_index, block.timestamp_ms);
@@ -180,13 +180,13 @@ async fn next_text(
 pub async fn subscribe_blocks(
     node_url: &str,
     my_pubkey: Pubkey,
-    seed: Zeroizing<[u8; 32]>,
+    keys: DecryptionKeys,
     tx: Sender<Event>,
 ) {
     let mut delay: u32 = 1;
     loop {
         let _ = tx.send(Event::ConnectionStatus(ConnState::Connected));
-        match run_subscription(node_url, &my_pubkey, &seed, &tx).await {
+        match run_subscription(node_url, &my_pubkey, &keys, &tx).await {
             Ok(()) => return,
             Err(e) => {
                 let _ = tx.send(Event::Status(format!("Chain disconnected: {e}")));
@@ -205,7 +205,7 @@ pub async fn subscribe_blocks(
 async fn run_subscription(
     node_url: &str,
     my_pubkey: &Pubkey,
-    seed: &[u8; 32],
+    keys: &DecryptionKeys,
     tx: &Sender<Event>,
 ) -> Result<(), ChainError> {
     let (mut ws, _) = connect_async(node_url)
@@ -266,7 +266,7 @@ async fn run_subscription(
             } else if let Some(block) = result.get("block") {
                 let ctx = reader::ReadContext {
                     my_pubkey,
-                    seed,
+                    keys,
                     tx,
                 };
                 reader::read_block(block, &ctx);

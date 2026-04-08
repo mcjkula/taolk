@@ -7,6 +7,7 @@ use crate::chain;
 use crate::error::ChainError;
 use crate::event::Event;
 use crate::reader::{self, RemarkSource};
+use crate::secret::DecryptionKeys;
 use crate::types::{BlockRef, Pubkey};
 
 #[derive(serde::Deserialize)]
@@ -27,7 +28,7 @@ pub async fn sync(
     node_url: &str,
     expected_chain: &str,
     expected_ss58_prefix: u16,
-    seed: &[u8; 32],
+    keys: &DecryptionKeys,
     my_pubkey: &Pubkey,
     subscribed_channels: Vec<BlockRef>,
     last_block: u64,
@@ -39,7 +40,7 @@ pub async fn sync(
         node_url,
         expected_chain,
         expected_ss58_prefix,
-        seed,
+        keys,
         my_pubkey,
         subscribed_channels,
         last_block,
@@ -58,7 +59,7 @@ async fn sync_inner(
     node_url: &str,
     expected_chain: &str,
     expected_ss58_prefix: u16,
-    seed: &[u8; 32],
+    keys: &DecryptionKeys,
     my_pubkey: &Pubkey,
     subscribed_channels: Vec<BlockRef>,
     last_block: u64,
@@ -82,7 +83,7 @@ async fn sync_inner(
         fetch_message_hints(&client, &healthy, last_block, &subscribed_channels).await;
 
     resolve_channel_hints(node_url, channel_hints, tx).await;
-    resolve_message_hints(node_url, message_hints, my_pubkey, seed, tx).await;
+    resolve_message_hints(node_url, message_hints, my_pubkey, keys, tx).await;
 
     let _ = tx.send(Event::Status("All caught up".into()));
     Ok(())
@@ -96,7 +97,7 @@ pub async fn fetch_channel(
     expected_ss58_prefix: u16,
     channel_ref: BlockRef,
     my_pubkey: &Pubkey,
-    seed: &[u8; 32],
+    keys: &DecryptionKeys,
     tx: Sender<Event>,
 ) {
     let client = reqwest::Client::new();
@@ -113,7 +114,7 @@ pub async fn fetch_channel(
     }
     let (b, i) = (channel_ref.block, channel_ref.index);
     let hints = fetch_per_channel_hints(&client, &healthy, b, i, 0).await;
-    resolve_message_hints(node_url, hints, my_pubkey, seed, &tx).await;
+    resolve_message_hints(node_url, hints, my_pubkey, keys, &tx).await;
 }
 
 async fn check_health_all(
@@ -251,7 +252,7 @@ async fn resolve_message_hints(
     node_url: &str,
     hints: HashSet<(u32, u16)>,
     my_pubkey: &Pubkey,
-    seed: &[u8; 32],
+    keys: &DecryptionKeys,
     tx: &Sender<Event>,
 ) {
     if hints.is_empty() {
@@ -280,7 +281,7 @@ async fn resolve_message_hints(
         if let Some(source) =
             reader::source_from_extrinsic(ext_hex, block_num, ext_index, block.timestamp_ms)
         {
-            reader::process_remark(&source, my_pubkey, seed, tx);
+            reader::process_remark(&source, my_pubkey, keys, tx);
         }
     }
 }

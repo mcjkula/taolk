@@ -530,10 +530,10 @@ fn run_session(
     {
         let url = node_url.to_string();
         let tx = event_tx.clone();
-        let sc = zeroize::Zeroizing::new(*seed);
+        let keys = app.session.decryption_keys();
         rt.spawn(async move {
             let _ = tx.send(event::Event::Status("Connected".into()));
-            chain::subscribe_blocks(&url, my_pubkey, sc, tx).await;
+            chain::subscribe_blocks(&url, my_pubkey, keys, tx).await;
         });
     }
 
@@ -543,7 +543,7 @@ fn run_session(
             app.session.channels.iter().map(|c| c.channel_ref).collect();
         let urls: Vec<String> = mirror_urls.iter().map(|u| u.to_string()).collect();
         let node = node_url.to_string();
-        let sc = zeroize::Zeroizing::new(*seed);
+        let keys = app.session.decryption_keys();
         let pubkey = my_pubkey;
         let tx = event_tx.clone();
         let chain_name = chain_info.name.clone();
@@ -554,7 +554,7 @@ fn run_session(
                 &node,
                 &chain_name,
                 ss58_prefix,
-                &sc,
+                &keys,
                 &pubkey,
                 subscribed,
                 0,
@@ -792,7 +792,7 @@ fn run_session(
                     let node = node_url.to_string();
                     let tx = event_tx.clone();
                     let pk = my_pubkey;
-                    let sc = zeroize::Zeroizing::new(*seed);
+                    let keys = app.session.decryption_keys();
                     let chain_name = chain_info.name.clone();
                     let ss58_prefix = chain_info.ss58_prefix;
                     rt.spawn(async move {
@@ -803,7 +803,7 @@ fn run_session(
                             ss58_prefix,
                             channel_ref,
                             &pk,
-                            &sc,
+                            &keys,
                             tx,
                         )
                         .await;
@@ -814,14 +814,14 @@ fn run_session(
                 app.set_status("Loading...");
                 let url = node_url.to_string();
                 let tx = event_tx.clone();
-                let sc = zeroize::Zeroizing::new(*seed);
+                let keys = app.session.decryption_keys();
                 rt.spawn(async move {
                     chain::fetch_and_process_extrinsic(
                         &url,
                         block_ref.block,
                         block_ref.index,
                         my_pubkey,
-                        sc,
+                        keys,
                         tx.clone(),
                     )
                     .await;

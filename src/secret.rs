@@ -1,10 +1,34 @@
 use bip39::Mnemonic;
+use curve25519_dalek::scalar::Scalar;
 use hmac::Hmac;
 use schnorrkel::keys::{ExpansionMode, MiniSecretKey};
 use sha2::Sha512;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::types::Pubkey;
+
+#[derive(Clone)]
+pub struct DecryptionKeys {
+    view_scalar: Zeroizing<[u8; 32]>,
+    seed: Option<Zeroizing<[u8; 32]>>,
+}
+
+impl DecryptionKeys {
+    pub fn new(view_scalar: [u8; 32], seed: Option<[u8; 32]>) -> Self {
+        Self {
+            view_scalar: Zeroizing::new(view_scalar),
+            seed: seed.map(Zeroizing::new),
+        }
+    }
+
+    pub fn scalar(&self) -> Scalar {
+        Scalar::from_bytes_mod_order(*self.view_scalar)
+    }
+
+    pub fn seed(&self) -> Option<&[u8; 32]> {
+        self.seed.as_deref()
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]

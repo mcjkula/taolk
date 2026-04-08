@@ -9,11 +9,12 @@ use std::sync::mpsc::Sender;
 
 use crate::event::Event;
 use crate::extrinsic::{SYSTEM_REMARK, SYSTEM_REMARK_WITH_EVENT};
+use crate::secret::DecryptionKeys;
 use crate::types::{BlockRef, Pubkey};
 
 pub struct ReadContext<'a> {
     pub my_pubkey: &'a Pubkey,
-    pub seed: &'a [u8; 32],
+    pub keys: &'a DecryptionKeys,
     pub tx: &'a Sender<Event>,
 }
 
@@ -47,7 +48,7 @@ pub fn read_block(block: &Value, ctx: &ReadContext) {
         if let Some(source) =
             source_from_extrinsic(ext_hex, block_number, ext_index_u16, block_ts_ms)
         {
-            process_remark(&source, ctx.my_pubkey, ctx.seed, ctx.tx);
+            process_remark(&source, ctx.my_pubkey, ctx.keys, ctx.tx);
         }
     }
 }
@@ -60,7 +61,7 @@ pub fn read_extrinsic(
     block_ts_ms: u64,
 ) {
     if let Some(source) = source_from_extrinsic(ext_hex, block_number, ext_index, block_ts_ms) {
-        process_remark(&source, ctx.my_pubkey, ctx.seed, ctx.tx);
+        process_remark(&source, ctx.my_pubkey, ctx.keys, ctx.tx);
     }
 }
 
@@ -128,7 +129,7 @@ pub fn extract_block_timestamp(extrinsics: &[Value]) -> u64 {
 pub fn process_remark(
     source: &RemarkSource,
     my_pubkey: &Pubkey,
-    seed: &[u8; 32],
+    keys: &DecryptionKeys,
     tx: &Sender<Event>,
 ) {
     let sender = source.sender;
@@ -157,9 +158,9 @@ pub fn process_remark(
         }
         ContentType::Encrypted | ContentType::Thread => {
             let is_mine = sender == *my_pubkey;
+            let scalar = keys.scalar();
 
             if !is_mine {
-                let scalar = samp::sr25519_signing_scalar(seed);
                 let tag = match samp::check_view_tag(remark, &scalar) {
                     Ok(t) => t,
                     Err(_) => return,
@@ -170,9 +171,11 @@ pub fn process_remark(
             }
 
             let plaintext = if is_mine {
+                let Some(seed) = keys.seed() else {
+                    return;
+                };
                 samp::decrypt_as_sender(remark, seed)
             } else {
-                let scalar = samp::sr25519_signing_scalar(seed);
                 samp::decrypt(remark, &scalar)
             };
 
@@ -182,7 +185,10 @@ pub fn process_remark(
             };
 
             let mut recipient = remark.recipient;
-            if is_mine && let Ok(r) = samp::unseal_recipient(remark, seed) {
+            if is_mine
+                && let Some(seed) = keys.seed()
+                && let Ok(r) = samp::unseal_recipient(remark, seed)
+            {
                 recipient = r;
             }
 
@@ -253,7 +259,7 @@ pub fn process_remark(
             }
         }
         ContentType::Group => {
-            let scalar = samp::sr25519_signing_scalar(seed);
+            let scalar = keys.scalar();
 
             let plaintext =
                 match samp::decrypt_from_group(&remark.content, &scalar, &remark.nonce, None) {
