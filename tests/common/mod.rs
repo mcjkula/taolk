@@ -61,6 +61,7 @@ pub fn session_for(seed: &[u8; 32]) -> Session {
     Session::new(
         signing_from_seed(seed),
         Zeroizing::new(*seed),
+        true,
         "ws://test".into(),
         test_chain_info(),
         db,

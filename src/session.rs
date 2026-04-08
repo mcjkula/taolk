@@ -40,7 +40,7 @@ pub struct Session {
     signing: Arc<SigningKey>,
     pubkey: Pubkey,
     pub my_ss58: String,
-    seed: Zeroizing<[u8; 32]>,
+    seed: Option<Zeroizing<[u8; 32]>>,
     view_scalar: Zeroizing<[u8; 32]>,
     pub node_url: String,
     pub chain_info: crate::extrinsic::ChainInfo,
@@ -67,6 +67,7 @@ impl Session {
     pub fn new(
         signing: SigningKey,
         seed: Zeroizing<[u8; 32]>,
+        keep_seed: bool,
         node_url: String,
         chain_info: crate::extrinsic::ChainInfo,
         db: Db,
@@ -74,6 +75,7 @@ impl Session {
         let pubkey = signing.public_key();
         let my_ss58 = crate::util::ss58_from_pubkey(&pubkey);
         let view_scalar = Zeroizing::new(samp::sr25519_signing_scalar(&seed).to_bytes());
+        let seed = if keep_seed { Some(seed) } else { None };
         Self {
             signing: Arc::new(signing),
             pubkey,
@@ -130,6 +132,7 @@ impl Session {
         let mut session = Self::new(
             signing,
             Zeroizing::new(*seed),
+            true,
             node_url.to_string(),
             chain_info,
             db,
@@ -206,11 +209,11 @@ impl Session {
     }
 
     pub fn decryption_keys(&self) -> DecryptionKeys {
-        DecryptionKeys::new(*self.view_scalar, Some(*self.seed))
+        DecryptionKeys::new(*self.view_scalar, self.seed.as_deref().copied())
     }
 
-    pub fn cached_seed(&self) -> &[u8; 32] {
-        &self.seed
+    pub fn cached_seed(&self) -> Option<&[u8; 32]> {
+        self.seed.as_deref()
     }
 
     pub fn ss58(&self) -> &str {

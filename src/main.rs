@@ -472,6 +472,197 @@ fn run_lock_screen(
     }
 }
 
+/// Returns a usable seed for one signing/encryption operation. In normal mode this hands
+/// back the cached session seed. In ephemeral mode (`security.require_password_per_send`),
+/// this opens a password prompt modal and returns the freshly-derived seed; the caller is
+/// responsible for dropping it as soon as the operation completes.
+fn acquire_seed(
+    app: &App,
+    wallet_name: &str,
+    require_password: bool,
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    events: &TuiEventHandler,
+) -> Result<Option<zeroize::Zeroizing<[u8; 32]>>, Box<dyn std::error::Error>> {
+    if !require_password {
+        return Ok(app
+            .session
+            .cached_seed()
+            .map(|s| zeroize::Zeroizing::new(*s)));
+    }
+    Ok(prompt_password_modal(terminal, events, wallet_name)?
+        .map(|seed| zeroize::Zeroizing::new(*seed.as_bytes())))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dispatch_pending_send(
+    app: &mut App,
+    text: String,
+    wallet_name: &str,
+    require_password: bool,
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    events: &TuiEventHandler,
+    send_tx: &std::sync::mpsc::Sender<event::Event>,
+    rt: &tokio::runtime::Runtime,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let seed = match acquire_seed(app, wallet_name, require_password, terminal, events)? {
+        Some(s) => s,
+        None => {
+            app.set_status("Cancelled");
+            return Ok(());
+        }
+    };
+    let result = build_send_remark(app, &seed, &text);
+    drop(seed);
+    match result {
+        Ok(remark) => {
+            app.pending_remark = Some(remark.clone());
+            app.pending_text = Some(text);
+            app.pending_fee = None;
+            app.mode = Mode::Confirm;
+
+            let signing = app.session.signing();
+            let ss58 = app.session.my_ss58.clone();
+            let ci = app.session.chain_info.clone();
+            let url = app.session.node_url.clone();
+            let tx = send_tx.clone();
+            let symbol = app.session.token_symbol.clone();
+            let decimals = app.session.token_decimals;
+            rt.spawn(async move {
+                match extrinsic::estimate_fee(&url, &remark, &signing, &ss58, &ci).await {
+                    Ok(fee) => {
+                        let display = util::format_fee(fee, decimals, &symbol);
+                        let _ = tx.send(event::Event::FeeEstimated {
+                            fee_display: display,
+                            fee_raw: Some(fee),
+                        });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(event::Event::FeeEstimated {
+                            fee_display: format!("error: {e}"),
+                            fee_raw: None,
+                        });
+                    }
+                }
+            });
+        }
+        Err(reason) => {
+            app.set_error(format!("Cannot send: {reason}"));
+        }
+    }
+    Ok(())
+}
+
+fn prompt_password_modal(
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    events: &TuiEventHandler,
+    wallet_name: &str,
+) -> Result<Option<taolk::secret::Seed>, Box<dyn std::error::Error>> {
+    use ratatui::layout::Rect;
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+
+    let mut password = zeroize::Zeroizing::new(String::new());
+    let mut error_msg: Option<String> = None;
+
+    loop {
+        terminal.draw(|frame| {
+            let area = frame.area();
+            let want_w = 48.min(area.width);
+            let want_h = 7u16.min(area.height);
+            let rect = crate::ui::modal::centered_rect(area, want_w, want_h);
+
+            frame.render_widget(Clear, rect);
+            let block = Block::default()
+                .title(Span::styled(
+                    format!(" Confirm password — {wallet_name} "),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ))
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan));
+            let inner = block.inner(rect);
+            frame.render_widget(block, rect);
+
+            let mut lines: Vec<Line> = Vec::new();
+            lines.push(Line::raw(""));
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled("Password: ", Style::default().fg(Color::White)),
+            ]));
+            if let Some(err) = &error_msg {
+                lines.push(Line::raw(""));
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(err.clone(), Style::default().fg(Color::Red)),
+                ]));
+            } else {
+                lines.push(Line::raw(""));
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(
+                        "Enter sign \u{00B7} Esc cancel",
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+            }
+            frame.render_widget(Paragraph::new(lines), inner);
+
+            let cursor_x = inner.x + 2 + "Password: ".len() as u16;
+            let cursor_y = inner.y + 1;
+            if cursor_x < inner.x + inner.width && cursor_y < inner.y + inner.height {
+                frame.set_cursor_position(Rect {
+                    x: cursor_x,
+                    y: cursor_y,
+                    width: 1,
+                    height: 1,
+                });
+            }
+        })?;
+
+        match events.next()? {
+            TuiEvent::Key(key) => match key.code {
+                KeyCode::Enter => match wallet::open(
+                    wallet_name,
+                    &taolk::secret::Password::new((*password).clone()),
+                ) {
+                    Ok(seed) => {
+                        password.clear();
+                        return Ok(Some(seed));
+                    }
+                    Err(wallet::WalletError::WrongPassword) => {
+                        password.clear();
+                        error_msg = Some("Wrong password".into());
+                    }
+                    Err(e) => {
+                        password.clear();
+                        error_msg = Some(format!("{e}"));
+                    }
+                },
+                KeyCode::Esc => {
+                    password.clear();
+                    return Ok(None);
+                }
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    password.clear();
+                    return Ok(None);
+                }
+                KeyCode::Char(c) => {
+                    error_msg = None;
+                    password.push(c);
+                }
+                KeyCode::Backspace => {
+                    error_msg = None;
+                    password.pop();
+                }
+                _ => {}
+            },
+            TuiEvent::Tick | TuiEvent::Core(_) | TuiEvent::Mouse(_) => {}
+        }
+    }
+}
+
 fn run_session(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     events: &TuiEventHandler,
@@ -499,9 +690,11 @@ fn run_session(
     };
 
     let db = db::Db::open(wallet_name, seed, &chain_info.chain_params.genesis_hash)?;
+    let keep_seed = !cfg.security.require_password_per_send;
     let session = session::Session::new(
         signing,
         zeroize::Zeroizing::new(*seed),
+        keep_seed,
         node_url.to_string(),
         chain_info.clone(),
         db,
@@ -569,6 +762,19 @@ fn run_session(
     app.set_status("Connected");
 
     while app.running {
+        if let Some(text) = app.pending_send_text.take() {
+            dispatch_pending_send(
+                &mut app,
+                text,
+                wallet_name,
+                cfg.security.require_password_per_send,
+                terminal,
+                events,
+                &event_tx,
+                &rt,
+            )?;
+        }
+
         terminal.draw(|frame| ui::render(frame, &app))?;
 
         if cfg.security.lock_timeout > 0 && last_activity.elapsed() > lock_timeout {
@@ -1050,7 +1256,7 @@ fn handle_key(
 ) {
     match app.mode {
         Mode::Normal => handle_normal_key(app, key, send_tx),
-        Mode::Insert => handle_insert_key(app, key, send_tx, rt),
+        Mode::Insert => handle_insert_key(app, key),
         Mode::Confirm => handle_confirm_key(app, key, send_tx),
         Mode::Compose => handle_compose_key(app, key),
         Mode::Message => handle_message_key(app, key),
@@ -1267,12 +1473,7 @@ fn handle_normal_key(
     }
 }
 
-fn handle_insert_key(
-    app: &mut App,
-    key: crossterm::event::KeyEvent,
-    send_tx: &std::sync::mpsc::Sender<event::Event>,
-    rt: &tokio::runtime::Runtime,
-) {
+fn handle_insert_key(app: &mut App, key: crossterm::event::KeyEvent) {
     match key.code {
         KeyCode::Esc => {
             if app.msg_recipient.is_some() {
@@ -1317,47 +1518,9 @@ fn handle_insert_key(
             if !app.check_not_sending() {
                 return;
             }
-            {
-                let text = app.input.clone();
-                let seed = *app.session.cached_seed();
-                match build_send_remark(app, &seed, &text) {
-                    Ok(remark) => {
-                        app.pending_remark = Some(remark.clone());
-                        app.pending_text = Some(text);
-                        app.pending_fee = None;
-                        app.mode = Mode::Confirm;
-
-                        let signing = app.session.signing();
-                        let ss58 = app.session.my_ss58.clone();
-                        let ci = app.session.chain_info.clone();
-                        let url = app.session.node_url.clone();
-                        let tx = send_tx.clone();
-                        let symbol = app.session.token_symbol.clone();
-                        let decimals = app.session.token_decimals;
-                        rt.spawn(async move {
-                            match extrinsic::estimate_fee(&url, &remark, &signing, &ss58, &ci).await
-                            {
-                                Ok(fee) => {
-                                    let display = util::format_fee(fee, decimals, &symbol);
-                                    let _ = tx.send(event::Event::FeeEstimated {
-                                        fee_display: display,
-                                        fee_raw: Some(fee),
-                                    });
-                                }
-                                Err(e) => {
-                                    let _ = tx.send(event::Event::FeeEstimated {
-                                        fee_display: format!("error: {e}"),
-                                        fee_raw: None,
-                                    });
-                                }
-                            }
-                        });
-                    }
-                    Err(reason) => {
-                        app.set_error(format!("Cannot send: {reason}"));
-                    }
-                }
-            }
+            // Defer encryption + remark build to the main loop, which has access to the
+            // terminal/events needed for the password prompt in ephemeral mode.
+            app.pending_send_text = Some(app.input.clone());
         }
         _ => {
             handle_text_input(app, key);
