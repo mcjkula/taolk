@@ -88,10 +88,14 @@ pub fn br(block: u32, index: u16) -> BlockRef {
     BlockRef { block, index }
 }
 
-pub fn build_remark_ext(remark: &[u8], sk: &SigningKey, nonce: u32) -> Vec<u8> {
+pub fn build_remark_ext(
+    remark: &samp::RemarkBytes,
+    sk: &SigningKey,
+    nonce: u32,
+) -> samp::ExtrinsicBytes {
     let mut args = Vec::new();
     samp::scale::encode_compact(remark.len() as u64, &mut args);
-    args.extend_from_slice(remark);
+    args.extend_from_slice(remark.as_bytes());
     let ci = test_chain_info();
     let pk = sk.public_key();
     samp::extrinsic::build_signed_extrinsic(

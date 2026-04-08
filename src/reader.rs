@@ -21,7 +21,7 @@ pub struct ReadContext<'a> {
 pub struct RemarkSource {
     pub sender: Pubkey,
     pub remark: Remark,
-    pub remark_bytes: Vec<u8>,
+    pub remark_bytes: samp::RemarkBytes,
     pub block: BlockRef,
     pub timestamp_secs: u64,
 }
@@ -72,7 +72,8 @@ pub fn source_from_extrinsic(
     ext_index: u16,
     block_ts_ms: u64,
 ) -> Option<RemarkSource> {
-    let ext_bytes = hex::decode(ext_hex.trim_start_matches("0x")).ok()?;
+    let ext_bytes =
+        samp::ExtrinsicBytes::from_bytes(hex::decode(ext_hex.trim_start_matches("0x")).ok()?);
     let sender = samp_extract_signer(&ext_bytes)?;
     let remark_bytes = extract_remark_from_call(&ext_bytes)?;
     let remark = decode_remark(&remark_bytes).ok()?;
@@ -88,14 +89,14 @@ pub fn source_from_extrinsic(
     })
 }
 
-fn extract_remark_from_call(ext_bytes: &[u8]) -> Option<Vec<u8>> {
+fn extract_remark_from_call(ext_bytes: &samp::ExtrinsicBytes) -> Option<samp::RemarkBytes> {
     let call = extract_call(ext_bytes)?;
     let pair = (call.pallet, call.call);
     if pair != SYSTEM_REMARK && pair != SYSTEM_REMARK_WITH_EVENT {
         return None;
     }
     let (payload, _) = decode_bytes(call.args)?;
-    Some(payload.to_vec())
+    Some(samp::RemarkBytes::from_bytes(payload.to_vec()))
 }
 
 pub fn extract_block_timestamp(extrinsics: &[Value]) -> u64 {
@@ -220,7 +221,7 @@ pub fn process_remark(
                 };
 
             let (group_ref, reply_to, continues, body_bytes) =
-                match decode_group_content(&plaintext) {
+                match decode_group_content(plaintext.as_bytes()) {
                     Ok(r) => r,
                     Err(_) => return,
                 };
@@ -335,7 +336,7 @@ fn process_one_to_one(
     }
 
     let (body, thread_ref, reply_to, continues) = if is_thread {
-        match decode_thread_content(&plaintext) {
+        match decode_thread_content(plaintext.as_bytes()) {
             Ok((thread, reply_to, continues, body_bytes)) => {
                 let body = String::from_utf8(body_bytes.to_vec()).ok();
                 (body, thread, reply_to, continues)
@@ -344,7 +345,7 @@ fn process_one_to_one(
         }
     } else {
         (
-            String::from_utf8(plaintext).ok(),
+            String::from_utf8(plaintext.into_bytes()).ok(),
             BlockRef::ZERO,
             BlockRef::ZERO,
             BlockRef::ZERO,

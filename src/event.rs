@@ -51,7 +51,7 @@ pub enum Event {
         block_number: u32,
         ext_index: u16,
         timestamp: u64,
-        remark_bytes: Vec<u8>,
+        remark_bytes: samp::RemarkBytes,
     },
     MessageSent,
     BlockUpdate(u64),
@@ -62,7 +62,7 @@ pub enum Event {
         channel_ref: BlockRef,
     },
     SubmitRemark {
-        remark: Vec<u8>,
+        remark: samp::RemarkBytes,
     },
     GapsRefreshed,
     FeeEstimated {

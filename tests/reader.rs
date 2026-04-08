@@ -7,8 +7,8 @@ use taolk::reader::{self, ReadContext};
 use taolk::secret::DecryptionKeys;
 use taolk::types::Pubkey;
 
-fn ext_to_hex(ext_bytes: &[u8]) -> String {
-    format!("0x{}", hex::encode(ext_bytes))
+fn ext_to_hex(ext_bytes: &samp::ExtrinsicBytes) -> String {
+    format!("0x{}", hex::encode(ext_bytes.as_bytes()))
 }
 
 fn make_keys(seed: &[u8; 32]) -> DecryptionKeys {
@@ -75,8 +75,8 @@ fn read_extrinsic_ignores_non_samp_remark() {
     let alice_sk = signing(&alice_seed);
     let alice_pubkey = alice_sk.public_key();
 
-    let remark = b"not a samp message";
-    let ext = build_remark_ext(remark, &alice_sk, 0);
+    let remark = samp::RemarkBytes::from_bytes(b"not a samp message".to_vec());
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
     let hex = ext_to_hex(&ext);
 
     let (tx, rx) = mpsc::channel();
@@ -109,7 +109,7 @@ fn extract_block_timestamp_from_inherent() {
     full.push(len << 2);
     full.extend_from_slice(&payload);
 
-    let hex = ext_to_hex(&full);
+    let hex = format!("0x{}", hex::encode(&full));
     let extrinsics = vec![serde_json::Value::String(hex)];
 
     let result = reader::extract_block_timestamp(&extrinsics);
@@ -133,13 +133,13 @@ fn read_extrinsic_decrypts_for_recipient() {
     let bob_sk = signing(&bob_seed);
     let bob_pubkey = bob_sk.public_key();
 
-    let plaintext = b"secret for bob";
+    let plaintext = samp::Plaintext::from_bytes(b"secret for bob".to_vec());
     let nonce = samp::Nonce::from_bytes([0x01; 12]);
     let alice_samp_seed = samp::Seed::from_bytes(alice_seed);
 
     let view_tag = samp::compute_view_tag(&alice_samp_seed, &bob_ristretto_pub, &nonce).unwrap();
     let encrypted_content =
-        samp::encrypt(plaintext, &bob_ristretto_pub, &nonce, &alice_samp_seed).unwrap();
+        samp::encrypt(&plaintext, &bob_ristretto_pub, &nonce, &alice_samp_seed).unwrap();
 
     let remark = samp::encode_encrypted(
         samp::ContentType::Encrypted,
@@ -189,13 +189,13 @@ fn read_extrinsic_skips_message_for_wrong_recipient() {
     let charlie_sk = signing(&charlie_seed);
     let charlie_pubkey = charlie_sk.public_key();
 
-    let plaintext = b"for bob only";
+    let plaintext = samp::Plaintext::from_bytes(b"for bob only".to_vec());
     let nonce = samp::Nonce::from_bytes([0x02; 12]);
     let alice_samp_seed = samp::Seed::from_bytes(alice_seed);
 
     let view_tag = samp::compute_view_tag(&alice_samp_seed, &bob_ristretto_pub, &nonce).unwrap();
     let encrypted_content =
-        samp::encrypt(plaintext, &bob_ristretto_pub, &nonce, &alice_samp_seed).unwrap();
+        samp::encrypt(&plaintext, &bob_ristretto_pub, &nonce, &alice_samp_seed).unwrap();
     let remark = samp::encode_encrypted(
         samp::ContentType::Encrypted,
         view_tag,

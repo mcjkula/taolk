@@ -25,7 +25,7 @@ pub struct LockedOutbound {
     pub block_number: u32,
     pub ext_index: u16,
     pub timestamp: u64,
-    pub remark_bytes: Vec<u8>,
+    pub remark_bytes: samp::RemarkBytes,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -49,7 +49,7 @@ pub struct App {
     pub channel_dir_cursor: usize,
     pub channel_dir_input: String,
     pub status_message: Option<(String, Instant, u64, bool)>,
-    pub pending_remark: Option<Vec<u8>>,
+    pub pending_remark: Option<samp::RemarkBytes>,
     pub pending_text: Option<String>,
     pub pending_fee: Option<String>,
     pub pending_view: Option<View>,

@@ -44,7 +44,7 @@ fn build_encrypted_message_decryptable() {
     };
 
     let plaintext = samp::decrypt(&payload, &bob_scalar()).unwrap();
-    assert_eq!(std::str::from_utf8(&plaintext).unwrap(), "hello");
+    assert_eq!(std::str::from_utf8(plaintext.as_bytes()).unwrap(), "hello");
 }
 
 #[test]
@@ -61,7 +61,7 @@ fn build_thread_root_decryptable() {
 
     let plaintext = samp::decrypt(&payload, &bob_scalar()).unwrap();
     let (thread_ref, _reply_to, _continues, body) =
-        samp::decode_thread_content(&plaintext).unwrap();
+        samp::decode_thread_content(plaintext.as_bytes()).unwrap();
 
     assert_eq!(thread_ref, BlockRef::ZERO);
     assert_eq!(std::str::from_utf8(body).unwrap(), "thread start");
@@ -118,7 +118,7 @@ fn build_group_create_decryptable() {
         samp::decrypt_from_group(&payload.content, &bob_scalar(), &payload.nonce, Some(2)).unwrap();
 
     let (_group_ref, _reply_to, _continues, body) =
-        samp::decode_thread_content(&plaintext).unwrap();
+        samp::decode_thread_content(plaintext.as_bytes()).unwrap();
 
     let (member_list, text) = samp::decode_group_members(body).unwrap();
     assert_eq!(member_list.len(), 2);

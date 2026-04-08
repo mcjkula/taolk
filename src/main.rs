@@ -1219,7 +1219,7 @@ fn run_session(
     Ok(SessionExit::Quit)
 }
 
-fn build_send_remark(app: &App, seed: &[u8; 32], text: &str) -> error::Result<Vec<u8>> {
+fn build_send_remark(app: &App, seed: &[u8; 32], text: &str) -> error::Result<samp::RemarkBytes> {
     if let (Some((pubkey, _)), Some(ct)) = (&app.msg_recipient, app.msg_type) {
         return match ct {
             0x01 => app.session.build_public_message(pubkey, text),

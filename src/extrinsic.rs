@@ -186,21 +186,21 @@ async fn read_text_result_raw(
     }
 }
 
-fn build_remark_call_args(remark: &[u8]) -> Result<Vec<u8>, ChainError> {
+fn build_remark_call_args(remark: &samp::RemarkBytes) -> Result<Vec<u8>, ChainError> {
     let remark_len = u64::try_from(remark.len())
         .map_err(|_| ChainError::MessageTooLong { len: remark.len() })?;
     let mut args = Vec::with_capacity(remark.len() + 5);
     samp::scale::encode_compact(remark_len, &mut args);
-    args.extend_from_slice(remark);
+    args.extend_from_slice(remark.as_bytes());
     Ok(args)
 }
 
 fn build_remark_with_event(
-    remark: &[u8],
+    remark: &samp::RemarkBytes,
     signing: &crate::secret::SigningKey,
     nonce: u32,
     chain_info: &ChainInfo,
-) -> Result<Vec<u8>, ChainError> {
+) -> Result<samp::ExtrinsicBytes, ChainError> {
     let args = build_remark_call_args(remark)?;
     let public_key = signing.public_key();
     build_signed_extrinsic(
@@ -217,7 +217,7 @@ fn build_remark_with_event(
 
 pub async fn estimate_fee(
     node_url: &str,
-    remark: &[u8],
+    remark: &samp::RemarkBytes,
     signing: &crate::secret::SigningKey,
     ss58: &str,
     chain_info: &ChainInfo,
@@ -240,7 +240,7 @@ pub async fn estimate_fee(
     let ext = build_remark_with_event(remark, signing, nonce, &chain_info)?;
 
     let mut params = Vec::new();
-    params.extend_from_slice(&ext);
+    params.extend_from_slice(ext.as_bytes());
     let ext_len =
         u32::try_from(ext.len()).map_err(|_| ChainError::MessageTooLong { len: ext.len() })?;
     params.extend_from_slice(&ext_len.to_le_bytes());
@@ -357,7 +357,7 @@ fn twox128(data: &[u8]) -> [u8; 16] {
 
 pub async fn submit_remark(
     node_url: &str,
-    remark: &[u8],
+    remark: &samp::RemarkBytes,
     signing: &crate::secret::SigningKey,
     ss58: &str,
     chain_info: &ChainInfo,
@@ -378,7 +378,7 @@ pub async fn submit_remark(
     let nonce = u32::try_from(nonce_raw).map_err(|_| ChainError::SpecVersionOverflow(nonce_raw))?;
 
     let ext = build_remark_with_event(remark, signing, nonce, &chain_info)?;
-    let hex = format!("0x{}", hex::encode(&ext));
+    let hex = format!("0x{}", hex::encode(ext.as_bytes()));
     let watch_req =
         json!({"jsonrpc":"2.0","id":2,"method":"author_submitAndWatchExtrinsic","params":[hex]});
     ws.send(WsMessage::Text(watch_req.to_string().into()))

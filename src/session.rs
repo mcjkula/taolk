@@ -749,7 +749,11 @@ impl Session {
             .collect()
     }
 
-    pub fn build_public_message(&self, recipient: &Pubkey, body: &str) -> Result<Vec<u8>> {
+    pub fn build_public_message(
+        &self,
+        recipient: &Pubkey,
+        body: &str,
+    ) -> Result<samp::RemarkBytes> {
         Ok(samp::encode_public(recipient, body.as_bytes()))
     }
 
@@ -758,10 +762,11 @@ impl Session {
         seed: &[u8; 32],
         recipient: &Pubkey,
         body: &str,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<samp::RemarkBytes> {
         let nonce = samp::Nonce::from_bytes(rand_nonce());
         let sender = samp::Seed::from_bytes(*seed);
-        let encrypted = samp::encrypt(body.as_bytes(), recipient, &nonce, &sender)
+        let plaintext = samp::Plaintext::from_bytes(body.as_bytes().to_vec());
+        let encrypted = samp::encrypt(&plaintext, recipient, &nonce, &sender)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         let vt = samp::compute_view_tag(&sender, recipient, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
@@ -778,15 +783,15 @@ impl Session {
         seed: &[u8; 32],
         recipient: &Pubkey,
         body: &str,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<samp::RemarkBytes> {
         let nonce = samp::Nonce::from_bytes(rand_nonce());
         let sender = samp::Seed::from_bytes(*seed);
-        let plaintext = samp::encode_thread_content(
+        let plaintext = samp::Plaintext::from_bytes(samp::encode_thread_content(
             BlockRef::ZERO,
             BlockRef::ZERO,
             BlockRef::ZERO,
             body.as_bytes(),
-        );
+        ));
         let encrypted = samp::encrypt(&plaintext, recipient, &nonce, &sender)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         let vt = samp::compute_view_tag(&sender, recipient, &nonce)
@@ -804,19 +809,19 @@ impl Session {
         seed: &[u8; 32],
         thread_idx: usize,
         body: &str,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<samp::RemarkBytes> {
         let thread = self
             .threads
             .get(thread_idx)
             .ok_or_else(|| SdkError::NotFound("Thread not found".into()))?;
         let nonce = samp::Nonce::from_bytes(rand_nonce());
         let sender = samp::Seed::from_bytes(*seed);
-        let plaintext = samp::encode_thread_content(
+        let plaintext = samp::Plaintext::from_bytes(samp::encode_thread_content(
             thread.thread_ref,
             thread.last_ref(),
             thread.my_last_ref(),
             body.as_bytes(),
-        );
+        ));
         let encrypted = samp::encrypt(&plaintext, &thread.peer_pubkey, &nonce, &sender)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         let vt = samp::compute_view_tag(&sender, &thread.peer_pubkey, &nonce)
@@ -829,11 +834,15 @@ impl Session {
         ))
     }
 
-    pub fn build_channel_create(&self, name: &str, description: &str) -> Result<Vec<u8>> {
+    pub fn build_channel_create(&self, name: &str, description: &str) -> Result<samp::RemarkBytes> {
         samp::encode_channel_create(name, description).map_err(|e| SdkError::Other(e.to_string()))
     }
 
-    pub fn build_channel_message(&self, channel_idx: usize, body: &str) -> Result<Vec<u8>> {
+    pub fn build_channel_message(
+        &self,
+        channel_idx: usize,
+        body: &str,
+    ) -> Result<samp::RemarkBytes> {
         let channel = self
             .channels
             .get(channel_idx)
@@ -851,7 +860,7 @@ impl Session {
         seed: &[u8; 32],
         members: &[Pubkey],
         body: &str,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<samp::RemarkBytes> {
         if members.len() > MAX_GROUP_MEMBERS {
             return Err(SdkError::Other(format!(
                 "Group too large: max {MAX_GROUP_MEMBERS} members supported"
@@ -861,12 +870,12 @@ impl Session {
         let sender = samp::Seed::from_bytes(*seed);
         let mut body_bytes = samp::encode_group_members(members);
         body_bytes.extend_from_slice(body.as_bytes());
-        let plaintext = samp::encode_thread_content(
+        let plaintext = samp::Plaintext::from_bytes(samp::encode_thread_content(
             BlockRef::ZERO,
             BlockRef::ZERO,
             BlockRef::ZERO,
             &body_bytes,
-        );
+        ));
         let (eph_pubkey, capsules, ciphertext) =
             samp::encrypt_for_group(&plaintext, members, &nonce, &sender)
                 .map_err(|e| SdkError::Encryption(e.to_string()))?;
@@ -883,19 +892,19 @@ impl Session {
         seed: &[u8; 32],
         group_idx: usize,
         body: &str,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<samp::RemarkBytes> {
         let group = self
             .groups
             .get(group_idx)
             .ok_or_else(|| SdkError::NotFound("Group not found".into()))?;
         let nonce = samp::Nonce::from_bytes(rand_nonce());
         let sender = samp::Seed::from_bytes(*seed);
-        let plaintext = samp::encode_thread_content(
+        let plaintext = samp::Plaintext::from_bytes(samp::encode_thread_content(
             group.group_ref,
             group.last_ref(),
             group.my_last_ref(),
             body.as_bytes(),
-        );
+        ));
         let (eph_pubkey, capsules, ciphertext) =
             samp::encrypt_for_group(&plaintext, &group.members, &nonce, &sender)
                 .map_err(|e| SdkError::Encryption(e.to_string()))?;
@@ -907,7 +916,7 @@ impl Session {
         ))
     }
 
-    pub async fn submit(&self, remark: &[u8]) -> Result<String> {
+    pub async fn submit(&self, remark: &samp::RemarkBytes) -> Result<String> {
         crate::extrinsic::submit_remark(
             &self.node_url,
             remark,
@@ -927,7 +936,7 @@ impl Session {
         )
     }
 
-    pub async fn estimate_fee(&self, remark: &[u8]) -> Result<u128> {
+    pub async fn estimate_fee(&self, remark: &samp::RemarkBytes) -> Result<u128> {
         Ok(crate::extrinsic::estimate_fee(
             &self.node_url,
             remark,
