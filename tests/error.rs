@@ -1,5 +1,6 @@
+use samp::metadata::Error as MetadataError;
 use std::error::Error;
-use taolk::error::{AddressError, ChainError, ConfigError, MetadataError, SdkError, WalletError};
+use taolk::error::{AddressError, ChainError, ConfigError, SdkError, WalletError};
 
 #[test]
 fn wallet_error_wrong_password_display() {
@@ -148,7 +149,7 @@ fn metadata_error_shape_lists_context_and_kind() {
 }
 
 #[test]
-fn metadata_error_account_info_short_lists_byte_counts() {
+fn metadata_error_storage_value_too_short_lists_byte_counts() {
     let err = MetadataError::AccountInfoShort { need: 64, got: 16 };
     let s = err.to_string();
     assert!(s.contains("64"));
@@ -216,12 +217,9 @@ fn sdk_error_chain_propagates_via_from() {
 
 #[test]
 fn sdk_error_metadata_propagates_via_from() {
-    let inner = MetadataError::AccountInfoMissing;
+    let inner = MetadataError::Scale("eof".into());
     let err: SdkError = inner.into();
-    assert!(matches!(
-        err,
-        SdkError::Metadata(MetadataError::AccountInfoMissing)
-    ));
+    assert!(matches!(err, SdkError::Metadata(MetadataError::Scale(_))));
 }
 
 #[test]

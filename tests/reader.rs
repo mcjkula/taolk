@@ -1,9 +1,9 @@
 mod common;
 
-use common::{signing_from_seed as signing, test_chain_info as ci};
+use common::{build_remark_ext, signing_from_seed as signing, test_chain_info as ci};
 use std::sync::mpsc;
 use taolk::event::Event;
-use taolk::extrinsic;
+use taolk::extrinsic::ChainInfo;
 use taolk::reader::{self, ReadContext};
 use taolk::types::Pubkey;
 
@@ -15,11 +15,13 @@ fn make_ctx<'a>(
     seed: &'a [u8; 32],
     pubkey: &'a Pubkey,
     tx: &'a mpsc::Sender<Event>,
+    chain_info: &'a ChainInfo,
 ) -> ReadContext<'a> {
     ReadContext {
         my_pubkey: pubkey,
         seed,
         tx,
+        chain_info,
     }
 }
 
@@ -33,11 +35,12 @@ fn read_extrinsic_emits_event_for_samp_remark() {
     let bob_pubkey = signing(&bob_seed).public_key();
 
     let remark = samp::encode_public(&bob_pubkey.0, b"hello bob");
-    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_sk, 0, &ci()).unwrap();
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
     let hex = ext_to_hex(&ext);
 
     let (tx, rx) = mpsc::channel();
-    let ctx = make_ctx(&bob_seed, &bob_pubkey, &tx);
+    let chain_info = ci();
+    let ctx = make_ctx(&bob_seed, &bob_pubkey, &tx, &chain_info);
     reader::read_extrinsic(&hex, &ctx, 100, 1, 1_700_000_000_000);
 
     match rx.try_recv() {
@@ -70,11 +73,12 @@ fn read_extrinsic_ignores_non_samp_remark() {
     let alice_pubkey = alice_sk.public_key();
 
     let remark = b"not a samp message";
-    let ext = extrinsic::build_remark_extrinsic(remark, &alice_sk, 0, &ci()).unwrap();
+    let ext = build_remark_ext(remark, &alice_sk, 0);
     let hex = ext_to_hex(&ext);
 
     let (tx, rx) = mpsc::channel();
-    let ctx = make_ctx(&alice_seed, &alice_pubkey, &tx);
+    let chain_info = ci();
+    let ctx = make_ctx(&alice_seed, &alice_pubkey, &tx, &chain_info);
     reader::read_extrinsic(&hex, &ctx, 100, 0, 0);
 
     assert!(
@@ -141,11 +145,12 @@ fn read_extrinsic_decrypts_for_recipient() {
         &encrypted_content,
     );
 
-    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_sk, 0, &ci()).unwrap();
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
     let hex = ext_to_hex(&ext);
 
     let (tx, rx) = mpsc::channel();
-    let ctx = make_ctx(&bob_seed, &bob_pubkey, &tx);
+    let chain_info = ci();
+    let ctx = make_ctx(&bob_seed, &bob_pubkey, &tx, &chain_info);
     reader::read_extrinsic(&hex, &ctx, 200, 3, 1_700_000_000_000);
 
     match rx.try_recv() {
@@ -195,11 +200,12 @@ fn read_extrinsic_skips_message_for_wrong_recipient() {
         &encrypted_content,
     );
 
-    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_sk, 0, &ci()).unwrap();
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
     let hex = ext_to_hex(&ext);
 
     let (tx, rx) = mpsc::channel();
-    let ctx = make_ctx(&charlie_seed, &charlie_pubkey, &tx);
+    let chain_info = ci();
+    let ctx = make_ctx(&charlie_seed, &charlie_pubkey, &tx, &chain_info);
     reader::read_extrinsic(&hex, &ctx, 200, 3, 0);
 
     assert!(

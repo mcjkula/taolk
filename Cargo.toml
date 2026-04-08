@@ -20,7 +20,7 @@ strip = true
 codegen-units = 1
 
 [dependencies]
-samp = { git = "https://github.com/samp-org/samp", rev = "a38bb13c1b8e98bb2ead1fe77623779e6cf00aab" }
+samp = { path = "../../../skilaboo/rust" }
 tokio = { version = "1", features = ["full"] }
 schnorrkel = "0.11"
 curve25519-dalek = { version = "4", features = ["digest"] }
@@ -32,7 +32,6 @@ serde_json = "1"
 hex = "0.4"
 futures-util = "0.3"
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
-parity-scale-codec = { version = "3.7", features = ["derive"] }
 chrono = "0.4"
 blake2 = "0.10"
 getrandom = "0.3"

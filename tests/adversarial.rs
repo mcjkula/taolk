@@ -1,5 +1,3 @@
-use taolk::error::MetadataError;
-use taolk::metadata::Metadata;
 use taolk::secret::{Password, Phrase, PhraseError, Seed};
 use taolk::wallet;
 use tempfile::TempDir;
@@ -126,30 +124,6 @@ fn phrase_parse_invalid_word_rejected() {
 #[test]
 fn phrase_parse_empty_rejected() {
     assert!(Phrase::parse("").is_err());
-}
-
-#[test]
-fn metadata_garbage_bytes_returns_typed_error() {
-    let garbage = vec![0xFFu8; 256];
-    let err = Metadata::from_runtime_metadata(&garbage).unwrap_err();
-    assert!(matches!(err, MetadataError::Scale(_)));
-}
-
-#[test]
-fn metadata_only_magic_bytes_returns_typed_error() {
-    let magic_only = vec![0x6du8, 0x65, 0x74, 0x61];
-    let err = Metadata::from_runtime_metadata(&magic_only).unwrap_err();
-    assert!(matches!(err, MetadataError::Scale(_)));
-}
-
-#[test]
-fn metadata_magic_plus_v15_returns_version_error() {
-    let mut bytes = vec![0x6du8, 0x65, 0x74, 0x61];
-    bytes.push(15);
-    let err = Metadata::from_runtime_metadata(&bytes).unwrap_err();
-    let s = err.to_string();
-    assert!(s.contains("version"));
-    assert!(s.contains("15"));
 }
 
 #[test]

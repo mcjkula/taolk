@@ -121,7 +121,7 @@ impl Session {
             .await
             .unwrap_or_else(|_| ("TAO".into(), 9));
 
-        let db = Db::open(wallet_name, seed, &chain_info.genesis_hash)?;
+        let db = Db::open(wallet_name, seed, &chain_info.chain_params.genesis_hash)?;
 
         let mut session = Self::new(
             signing,
@@ -137,7 +137,7 @@ impl Session {
         if let Ok(bal) = crate::extrinsic::fetch_balance(
             node_url,
             &my_pubkey,
-            &session.chain_info.account_info_layout,
+            &session.chain_info.account_storage,
         )
         .await
         {
@@ -150,8 +150,9 @@ impl Session {
             let url = node_url.to_string();
             let etx = tx.clone();
             let sc = zeroize::Zeroizing::new(*seed);
+            let ci = session.chain_info.clone();
             tokio::spawn(async move {
-                crate::chain::subscribe_blocks(&url, my_pubkey, sc, etx).await;
+                crate::chain::subscribe_blocks(&url, my_pubkey, sc, ci, etx).await;
             });
         }
 
@@ -878,12 +879,10 @@ impl Session {
 
     pub async fn fetch_balance(&self) -> Result<u128> {
         let pk = self.pubkey();
-        Ok(crate::extrinsic::fetch_balance(
-            &self.node_url,
-            &pk,
-            &self.chain_info.account_info_layout,
+        Ok(
+            crate::extrinsic::fetch_balance(&self.node_url, &pk, &self.chain_info.account_storage)
+                .await?,
         )
-        .await?)
     }
 
     pub async fn estimate_fee(&self, remark: &[u8]) -> Result<u128> {

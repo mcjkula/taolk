@@ -1,9 +1,10 @@
 #![allow(dead_code)]
 
 use chrono::{DateTime, Utc};
+use samp::extrinsic::ChainParams;
+use samp::metadata::StorageLayout;
 use taolk::db::Db;
 use taolk::extrinsic::ChainInfo;
-use taolk::metadata::AccountInfoLayout;
 use taolk::secret::{Seed, SigningKey};
 use taolk::session::Session;
 use taolk::types::{BlockRef, Pubkey};
@@ -36,14 +37,18 @@ pub fn dave_pubkey() -> Pubkey {
 
 pub fn test_chain_info() -> ChainInfo {
     ChainInfo {
-        genesis_hash: [0; 32],
-        spec_version: 1,
-        tx_version: 1,
-        account_info_layout: AccountInfoLayout {
-            free_offset: 16,
-            free_width: 8,
+        chain_params: ChainParams {
+            genesis_hash: [0; 32],
+            spec_version: 1,
+            tx_version: 1,
+        },
+        account_storage: StorageLayout {
+            offset: 16,
+            width: 8,
         },
         errors: Default::default(),
+        system_remark: (0, 9),
+        system_remark_with_event: (0, 7),
     }
 }
 
@@ -80,4 +85,22 @@ pub fn now() -> DateTime<Utc> {
 
 pub fn br(block: u32, index: u16) -> BlockRef {
     BlockRef { block, index }
+}
+
+pub fn build_remark_ext(remark: &[u8], sk: &SigningKey, nonce: u32) -> Vec<u8> {
+    let mut args = Vec::new();
+    samp::scale::encode_compact(remark.len() as u64, &mut args);
+    args.extend_from_slice(remark);
+    let ci = test_chain_info();
+    let pk = *sk.public_key();
+    samp::extrinsic::build_signed_extrinsic(
+        ci.system_remark_with_event.0,
+        ci.system_remark_with_event.1,
+        &args,
+        &pk,
+        |msg| sk.sign(msg),
+        nonce,
+        &ci.chain_params,
+    )
+    .expect("build extrinsic")
 }

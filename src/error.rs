@@ -50,7 +50,9 @@ pub enum ChainError {
     #[error("unexpected response shape")]
     BadShape,
     #[error("metadata: {0}")]
-    Metadata(#[from] MetadataError),
+    Metadata(#[from] samp::metadata::Error),
+    #[error("extrinsic: {0}")]
+    ExtrinsicBuild(#[from] samp::extrinsic::Error),
     #[error("message too long: {len} bytes (max u32::MAX)")]
     MessageTooLong { len: usize },
     #[error("spec/tx version overflow: {0}")]
@@ -65,40 +67,6 @@ pub enum ChainError {
     },
     #[error("http: {0}")]
     Http(String),
-}
-
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum MetadataError {
-    #[error("scale decode: {0}")]
-    Scale(String),
-    #[error("type id {0} missing from registry")]
-    TypeIdMissing(u32),
-    #[error("non-sequential type id {got} (expected {expected})")]
-    NonSequential { got: u32, expected: u32 },
-    #[error("{ctx} is not a {kind}")]
-    Shape {
-        ctx: &'static str,
-        kind: &'static str,
-    },
-    #[error("type id {0} has variable width")]
-    VariableWidth(u32),
-    #[error("storage entry not found: {0}")]
-    StorageNotFound(&'static str),
-    #[error("AccountInfo.data not found")]
-    AccountInfoMissing,
-    #[error("unknown TypeDef tag {0}")]
-    UnknownTypeDef(u8),
-    #[error("unknown StorageEntryType tag {0}")]
-    UnknownStorageEntryType(u8),
-    #[error("invalid Option tag {0}")]
-    InvalidOptionTag(u8),
-    #[error("unknown primitive tag {0}")]
-    UnknownPrimitive(u8),
-    #[error("account_info too short: need {need} bytes, got {got}")]
-    AccountInfoShort { need: usize, got: usize },
-    #[error("composite empty")]
-    CompositeEmpty,
 }
 
 #[derive(Debug, Error)]
@@ -130,7 +98,7 @@ pub enum SdkError {
     #[error(transparent)]
     Config(#[from] ConfigError),
     #[error(transparent)]
-    Metadata(#[from] MetadataError),
+    Metadata(#[from] samp::metadata::Error),
     #[error("database: {0}")]
     Database(String),
     #[error("not found: {0}")]

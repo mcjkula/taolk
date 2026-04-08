@@ -1,3 +1,5 @@
+use samp::extrinsic::{extract_call, extract_signer as samp_extract_signer};
+use samp::scale::{decode_bytes, decode_compact};
 use samp::{
     ContentType, decode_channel_content, decode_channel_create, decode_group_content,
     decode_group_members, decode_remark, decode_thread_content,
@@ -6,12 +8,14 @@ use serde_json::Value;
 use std::sync::mpsc::Sender;
 
 use crate::event::Event;
+use crate::extrinsic::ChainInfo;
 use crate::types::{BlockRef, Pubkey};
 
 pub struct ReadContext<'a> {
     pub my_pubkey: &'a Pubkey,
     pub seed: &'a [u8; 32],
     pub tx: &'a Sender<Event>,
+    pub chain_info: &'a ChainInfo,
 }
 
 pub fn read_block(block: &Value, ctx: &ReadContext) {
@@ -38,7 +42,7 @@ pub fn read_block(block: &Value, ctx: &ReadContext) {
         };
 
         let signer = extract_signer(&ext_bytes);
-        let remark = extract_remark(&ext_bytes);
+        let remark = extract_remark(&ext_bytes, ctx.chain_info);
 
         let ext_index_u16 = u16::try_from(ext_index).unwrap_or(u16::MAX);
         if let (Some(sender), Some(remark_data)) = (signer, remark) {
@@ -67,7 +71,7 @@ pub fn read_extrinsic(
     };
 
     let signer = extract_signer(&ext_bytes);
-    let remark = extract_remark(&ext_bytes);
+    let remark = extract_remark(&ext_bytes, ctx.chain_info);
 
     if let (Some(sender), Some(remark_data)) = (signer, remark) {
         process_remark(
@@ -81,70 +85,18 @@ pub fn read_extrinsic(
     }
 }
 
-const SIGNED_BIT: u8 = 0x80;
-const ADDR_TYPE_ACCOUNT: u8 = 0x00;
-const SIGNED_HEADER_LEN: usize = 99;
-const MIN_SIGNED_EXTRINSIC: usize = 103;
-const MIN_SIGNER_PAYLOAD: usize = 34;
-const SYSTEM_PALLET: u8 = 0x00;
-const REMARK_WITH_EVENT_CALL: u8 = 0x07;
-const REMARK_CALL: u8 = 0x09;
-
-fn extract_remark(ext_bytes: &[u8]) -> Option<Vec<u8>> {
-    let (_, prefix_len) = decode_compact_prefix(ext_bytes)?;
-    let payload = &ext_bytes[prefix_len..];
-
-    if payload.len() < MIN_SIGNED_EXTRINSIC || payload[0] & SIGNED_BIT == 0 {
-        return None;
-    }
-
-    let mut offset = SIGNED_HEADER_LEN;
-    if offset >= payload.len() {
-        return None;
-    }
-    if payload[offset] != 0x00 {
-        offset += 2;
-    } else {
-        offset += 1;
-    }
-    let (_, nonce_len) = decode_compact_prefix(&payload[offset..])?;
-    offset += nonce_len;
-    let (_, tip_len) = decode_compact_prefix(&payload[offset..])?;
-    offset += tip_len;
-    offset += 1;
-
-    if offset + 2 >= payload.len() {
-        return None;
-    }
-    let pallet = payload[offset];
-    let call = payload[offset + 1];
-    offset += 2;
-
-    if pallet != SYSTEM_PALLET || (call != REMARK_WITH_EVENT_CALL && call != REMARK_CALL) {
-        return None;
-    }
-
-    let (remark_len, compact_len) = decode_compact_prefix(&payload[offset..])?;
-    offset += compact_len;
-
-    if offset + remark_len > payload.len() {
-        return None;
-    }
-    Some(payload[offset..offset + remark_len].to_vec())
+fn extract_signer(ext_bytes: &[u8]) -> Option<Pubkey> {
+    samp_extract_signer(ext_bytes).map(Pubkey)
 }
 
-fn extract_signer(ext_bytes: &[u8]) -> Option<Pubkey> {
-    let (_, prefix_len) = decode_compact_prefix(ext_bytes)?;
-    let payload = &ext_bytes[prefix_len..];
-    if payload.len() < MIN_SIGNER_PAYLOAD
-        || payload[0] & SIGNED_BIT == 0
-        || payload[1] != ADDR_TYPE_ACCOUNT
-    {
+fn extract_remark(ext_bytes: &[u8], chain_info: &ChainInfo) -> Option<Vec<u8>> {
+    let call = extract_call(ext_bytes)?;
+    let pair = (call.pallet, call.call);
+    if pair != chain_info.system_remark && pair != chain_info.system_remark_with_event {
         return None;
     }
-    let mut account = [0u8; 32];
-    account.copy_from_slice(&payload[2..34]);
-    Some(Pubkey(account))
+    let (payload, _) = decode_bytes(call.args)?;
+    Some(payload.to_vec())
 }
 
 pub fn extract_block_timestamp(extrinsics: &[Value]) -> u64 {
@@ -157,7 +109,7 @@ pub fn extract_block_timestamp(extrinsics: &[Value]) -> u64 {
             Ok(b) => b,
             Err(_) => continue,
         };
-        let (_, prefix_len) = match decode_compact_prefix(&ext_bytes) {
+        let (_, prefix_len) = match decode_compact(&ext_bytes) {
             Some(v) => v,
             None => continue,
         };
@@ -168,72 +120,13 @@ pub fn extract_block_timestamp(extrinsics: &[Value]) -> u64 {
         if payload.len() < 4 {
             continue;
         }
-        if let Some((ts_ms, _)) = decode_compact_u64(&payload[3..])
+        if let Some((ts_ms, _)) = decode_compact(&payload[3..])
             && ts_ms > 1_000_000_000_000
         {
             return ts_ms;
         }
     }
     0
-}
-
-fn decode_compact_u64(data: &[u8]) -> Option<(u64, usize)> {
-    if data.is_empty() {
-        return None;
-    }
-    let mode = data[0] & 0b11;
-    match mode {
-        0b00 => Some((u64::from(data[0] >> 2), 1)),
-        0b01 => {
-            if data.len() < 2 {
-                return None;
-            }
-            let raw = u16::from_le_bytes([data[0], data[1]]);
-            Some((u64::from(raw >> 2), 2))
-        }
-        0b10 => {
-            if data.len() < 4 {
-                return None;
-            }
-            let raw = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-            Some((u64::from(raw >> 2), 4))
-        }
-        _ => {
-            let bytes_following = usize::from(data[0] >> 2) + 4;
-            if data.len() < 1 + bytes_following {
-                return None;
-            }
-            let mut buf = [0u8; 8];
-            let copy_len = bytes_following.min(8);
-            buf[..copy_len].copy_from_slice(&data[1..1 + copy_len]);
-            Some((u64::from_le_bytes(buf), 1 + bytes_following))
-        }
-    }
-}
-
-fn decode_compact_prefix(data: &[u8]) -> Option<(usize, usize)> {
-    if data.is_empty() {
-        return None;
-    }
-    let mode = data[0] & 0b11;
-    match mode {
-        0b00 => Some((usize::from(data[0] >> 2), 1)),
-        0b01 => {
-            if data.len() < 2 {
-                return None;
-            }
-            let raw = u16::from_le_bytes([data[0], data[1]]);
-            Some((usize::from(raw >> 2), 2))
-        }
-        0b10 => {
-            if data.len() < 4 {
-                return None;
-            }
-            let raw = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-            usize::try_from(raw >> 2).ok().map(|v| (v, 4))
-        }
-        _ => None,
-    }
 }
 
 fn process_remark(

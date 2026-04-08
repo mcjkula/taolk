@@ -3,29 +3,22 @@ use std::time::Duration;
 
 use blake2::Digest;
 use futures_util::{SinkExt, StreamExt};
-use parity_scale_codec::{Compact, Encode};
+use samp::extrinsic::{ChainParams, build_signed_extrinsic};
+use samp::metadata::{ErrorTable, Metadata, StorageLayout};
+use samp::scale::decode_compact;
 use serde_json::{Value, json};
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 
 use crate::error::ChainError;
-use crate::metadata::{AccountInfoLayout, ErrorTable, Metadata};
 use crate::types::Pubkey;
-
-const PALLET_SYSTEM: u8 = 0x00;
-const CALL_REMARK_WITH_EVENT: u8 = 0x07;
-const ERA_IMMORTAL: u8 = 0x00;
-const METADATA_HASH_DISABLED: u8 = 0x00;
-const EXT_VERSION_SIGNED: u8 = 0x84;
-const ADDR_TYPE_ID: u8 = 0x00;
-const SIG_TYPE_SR25519: u8 = 0x01;
 
 #[derive(Clone)]
 pub struct ChainInfo {
-    pub genesis_hash: [u8; 32],
-    pub spec_version: u32,
-    pub tx_version: u32,
-    pub account_info_layout: AccountInfoLayout,
+    pub chain_params: ChainParams,
+    pub account_storage: StorageLayout,
     pub errors: Arc<ErrorTable>,
+    pub system_remark: (u8, u8),
+    pub system_remark_with_event: (u8, u8),
 }
 
 pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, ChainError> {
@@ -69,78 +62,27 @@ pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, ChainError> {
         .as_str()
         .ok_or(ChainError::MissingField("state_getMetadata result"))?;
     let metadata_bytes = hex::decode(metadata_hex.trim_start_matches("0x"))?;
-    let parsed = Metadata::from_runtime_metadata(&metadata_bytes)?;
+    let metadata = Metadata::from_runtime_metadata(&metadata_bytes)?;
+
+    let account_storage = metadata.storage_layout("System", "Account", &["data", "free"])?;
+    let system_remark = metadata
+        .find_call_index("System", "remark")
+        .ok_or(ChainError::MissingField("System.remark"))?;
+    let system_remark_with_event = metadata
+        .find_call_index("System", "remark_with_event")
+        .ok_or(ChainError::MissingField("System.remark_with_event"))?;
 
     Ok(ChainInfo {
-        genesis_hash: genesis_bytes,
-        spec_version,
-        tx_version,
-        account_info_layout: parsed.layout,
-        errors: Arc::new(parsed.errors),
+        chain_params: ChainParams {
+            genesis_hash: genesis_bytes,
+            spec_version,
+            tx_version,
+        },
+        account_storage,
+        errors: Arc::new(metadata.errors().clone()),
+        system_remark,
+        system_remark_with_event,
     })
-}
-
-pub fn build_remark_extrinsic(
-    remark: &[u8],
-    signing: &crate::secret::SigningKey,
-    nonce: u32,
-    chain_info: &ChainInfo,
-) -> Result<Vec<u8>, ChainError> {
-    let account_id = *signing.public_key();
-
-    let mut call_data = Vec::new();
-    call_data.push(PALLET_SYSTEM);
-    call_data.push(CALL_REMARK_WITH_EVENT);
-    let remark_len = u32::try_from(remark.len())
-        .map_err(|_| ChainError::MessageTooLong { len: remark.len() })?;
-    Compact(remark_len).encode_to(&mut call_data);
-    call_data.extend_from_slice(remark);
-
-    let tip: u8 = 0x00;
-
-    let mut signing_payload = Vec::new();
-    signing_payload.extend_from_slice(&call_data);
-    signing_payload.push(ERA_IMMORTAL);
-    Compact(nonce).encode_to(&mut signing_payload);
-    signing_payload.push(tip);
-    signing_payload.push(METADATA_HASH_DISABLED);
-    signing_payload.extend_from_slice(&chain_info.spec_version.to_le_bytes());
-    signing_payload.extend_from_slice(&chain_info.tx_version.to_le_bytes());
-    signing_payload.extend_from_slice(&chain_info.genesis_hash);
-    signing_payload.extend_from_slice(&chain_info.genesis_hash);
-    signing_payload.push(0x00);
-
-    let to_sign = if signing_payload.len() > 256 {
-        let mut hasher = blake2::Blake2b::<blake2::digest::typenum::U32>::new();
-        hasher.update(&signing_payload);
-        hasher.finalize().to_vec()
-    } else {
-        signing_payload
-    };
-
-    let signature = signing.sign(&to_sign);
-
-    let mut extrinsic_payload = Vec::new();
-    extrinsic_payload.push(EXT_VERSION_SIGNED);
-    extrinsic_payload.push(ADDR_TYPE_ID);
-    extrinsic_payload.extend_from_slice(&account_id);
-    extrinsic_payload.push(SIG_TYPE_SR25519);
-    extrinsic_payload.extend_from_slice(&signature);
-    extrinsic_payload.push(ERA_IMMORTAL);
-    Compact(nonce).encode_to(&mut extrinsic_payload);
-    extrinsic_payload.push(tip);
-    extrinsic_payload.push(METADATA_HASH_DISABLED);
-    extrinsic_payload.extend_from_slice(&call_data);
-
-    let mut full = Vec::new();
-    let payload_len =
-        u32::try_from(extrinsic_payload.len()).map_err(|_| ChainError::MessageTooLong {
-            len: extrinsic_payload.len(),
-        })?;
-    Compact(payload_len).encode_to(&mut full);
-    full.extend_from_slice(&extrinsic_payload);
-
-    Ok(full)
 }
 
 async fn refresh_signing_params(
@@ -173,11 +115,15 @@ async fn refresh_signing_params(
         .map_err(|_| ChainError::SpecVersionOverflow(tx_version_raw))?;
 
     Ok(ChainInfo {
-        genesis_hash,
-        spec_version,
-        tx_version,
-        account_info_layout: base.account_info_layout.clone(),
+        chain_params: ChainParams {
+            genesis_hash,
+            spec_version,
+            tx_version,
+        },
+        account_storage: base.account_storage.clone(),
         errors: base.errors.clone(),
+        system_remark: base.system_remark,
+        system_remark_with_event: base.system_remark_with_event,
     })
 }
 
@@ -223,6 +169,36 @@ async fn read_text_result_raw(
     }
 }
 
+fn build_remark_call_args(remark: &[u8]) -> Result<Vec<u8>, ChainError> {
+    let remark_len = u64::try_from(remark.len())
+        .map_err(|_| ChainError::MessageTooLong { len: remark.len() })?;
+    let mut args = Vec::with_capacity(remark.len() + 5);
+    samp::scale::encode_compact(remark_len, &mut args);
+    args.extend_from_slice(remark);
+    Ok(args)
+}
+
+fn build_remark_with_event(
+    remark: &[u8],
+    signing: &crate::secret::SigningKey,
+    nonce: u32,
+    chain_info: &ChainInfo,
+) -> Result<Vec<u8>, ChainError> {
+    let args = build_remark_call_args(remark)?;
+    let public_key = *signing.public_key();
+    let (pallet_idx, call_idx) = chain_info.system_remark_with_event;
+    build_signed_extrinsic(
+        pallet_idx,
+        call_idx,
+        &args,
+        &public_key,
+        |msg| signing.sign(msg),
+        nonce,
+        &chain_info.chain_params,
+    )
+    .map_err(ChainError::from)
+}
+
 pub async fn estimate_fee(
     node_url: &str,
     remark: &[u8],
@@ -245,13 +221,13 @@ pub async fn estimate_fee(
     let nonce_raw = nonce_result.as_u64().ok_or(ChainError::BadShape)?;
     let nonce = u32::try_from(nonce_raw).map_err(|_| ChainError::SpecVersionOverflow(nonce_raw))?;
 
-    let ext = build_remark_extrinsic(remark, signing, nonce, &chain_info)?;
+    let ext = build_remark_with_event(remark, signing, nonce, &chain_info)?;
 
     let mut params = Vec::new();
     params.extend_from_slice(&ext);
     let ext_len =
         u32::try_from(ext.len()).map_err(|_| ChainError::MessageTooLong { len: ext.len() })?;
-    ext_len.encode_to(&mut params);
+    params.extend_from_slice(&ext_len.to_le_bytes());
 
     let params_hex = format!("0x{}", hex::encode(&params));
     let req = json!({
@@ -269,8 +245,8 @@ pub async fn estimate_fee(
     let bytes = hex::decode(result_hex.trim_start_matches("0x"))?;
 
     let mut offset = 0;
-    offset += scale_compact_len(&bytes, offset)?;
-    offset += scale_compact_len(&bytes, offset)?;
+    offset += compact_len(&bytes, offset)?;
+    offset += compact_len(&bytes, offset)?;
     offset += 1;
 
     if offset >= bytes.len() {
@@ -320,7 +296,7 @@ pub async fn fetch_token_info(node_url: &str) -> Result<(String, u32), ChainErro
 pub async fn fetch_balance(
     node_url: &str,
     pubkey: &Pubkey,
-    layout: &AccountInfoLayout,
+    layout: &StorageLayout,
 ) -> Result<u128, ChainError> {
     let (mut ws, _) = connect_async(node_url)
         .await
@@ -348,7 +324,7 @@ pub async fn fetch_balance(
     }
     let hex_str = result.as_str().ok_or(ChainError::BadShape)?;
     let data = hex::decode(hex_str.trim_start_matches("0x"))?;
-    Ok(layout.decode_free(&data)?)
+    Ok(layout.decode_uint(&data)?)
 }
 
 fn twox128(data: &[u8]) -> [u8; 16] {
@@ -385,7 +361,7 @@ pub async fn submit_remark(
     let nonce_raw = nonce_result.as_u64().ok_or(ChainError::BadShape)?;
     let nonce = u32::try_from(nonce_raw).map_err(|_| ChainError::SpecVersionOverflow(nonce_raw))?;
 
-    let ext = build_remark_extrinsic(remark, signing, nonce, &chain_info)?;
+    let ext = build_remark_with_event(remark, signing, nonce, &chain_info)?;
     let hex = format!("0x{}", hex::encode(&ext));
     let watch_req =
         json!({"jsonrpc":"2.0","id":2,"method":"author_submitAndWatchExtrinsic","params":[hex]});
@@ -425,20 +401,9 @@ pub async fn submit_remark(
     }
 }
 
-fn scale_compact_len(data: &[u8], offset: usize) -> Result<usize, ChainError> {
-    if offset >= data.len() {
-        return Err(ChainError::BadShape);
-    }
-    match data[offset] & 0b11 {
-        0b00 => Ok(1),
-        0b01 => Ok(2),
-        0b10 => Ok(4),
-        0b11 => {
-            let extra = usize::from(data[offset] >> 2) + 4;
-            Ok(1 + extra)
-        }
-        _ => unreachable!(),
-    }
+fn compact_len(data: &[u8], offset: usize) -> Result<usize, ChainError> {
+    let (_, consumed) = decode_compact(&data[offset..]).ok_or(ChainError::BadShape)?;
+    Ok(consumed)
 }
 
 fn hex_to_32(hex_str: &str) -> Result<[u8; 32], ChainError> {

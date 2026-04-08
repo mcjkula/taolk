@@ -497,7 +497,7 @@ fn run_session(
         }
     };
 
-    let db = db::Db::open(wallet_name, seed, &chain_info.genesis_hash)?;
+    let db = db::Db::open(wallet_name, seed, &chain_info.chain_params.genesis_hash)?;
     let session = session::Session::new(
         signing,
         zeroize::Zeroizing::new(*seed),
@@ -517,7 +517,7 @@ fn run_session(
     if let Ok(bal) = rt.block_on(extrinsic::fetch_balance(
         node_url,
         &my_pubkey,
-        &chain_info.account_info_layout,
+        &chain_info.account_storage,
     )) {
         app.session.balance = Some(bal);
     }
@@ -530,9 +530,10 @@ fn run_session(
         let url = node_url.to_string();
         let tx = event_tx.clone();
         let sc = zeroize::Zeroizing::new(*seed);
+        let ci = chain_info.clone();
         rt.spawn(async move {
             let _ = tx.send(event::Event::Status("Connected".into()));
-            chain::subscribe_blocks(&url, my_pubkey, sc, tx).await;
+            chain::subscribe_blocks(&url, my_pubkey, sc, ci, tx).await;
         });
     }
 
@@ -592,7 +593,7 @@ fn run_session(
                 if new_block {
                     let url = node_url.to_string();
                     let pk = my_pubkey;
-                    let layout = app.session.chain_info.account_info_layout.clone();
+                    let layout = app.session.chain_info.account_storage.clone();
                     let tx = event_tx.clone();
                     rt.spawn(async move {
                         if let Ok(bal) = extrinsic::fetch_balance(&url, &pk, &layout).await {
@@ -788,6 +789,7 @@ fn run_session(
                 let url = node_url.to_string();
                 let tx = event_tx.clone();
                 let sc = zeroize::Zeroizing::new(*seed);
+                let ci = app.session.chain_info.clone();
                 rt.spawn(async move {
                     chain::fetch_and_process_extrinsic(
                         &url,
@@ -795,6 +797,7 @@ fn run_session(
                         block_ref.index,
                         my_pubkey,
                         sc,
+                        ci,
                         tx.clone(),
                     )
                     .await;
@@ -846,7 +849,7 @@ fn run_session(
                 let url = node_url.to_string();
                 let pk = my_pubkey;
                 let tx = event_tx.clone();
-                let layout = app.session.chain_info.account_info_layout.clone();
+                let layout = app.session.chain_info.account_storage.clone();
                 rt.spawn(async move {
                     if let Ok(bal) = extrinsic::fetch_balance(&url, &pk, &layout).await {
                         let _ = tx.send(event::Event::BalanceUpdated(bal));
