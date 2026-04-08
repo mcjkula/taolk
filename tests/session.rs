@@ -5,8 +5,8 @@ use taolk::conversation::NewMessage;
 use taolk::types::{BlockRef, Pubkey};
 use taolk::util;
 
-const ALICE_PUB: Pubkey = Pubkey([1u8; 32]);
-const CHARLIE_PUB: Pubkey = Pubkey([3u8; 32]);
+const ALICE_PUB: Pubkey = Pubkey::from_bytes([1u8; 32]);
+const CHARLIE_PUB: Pubkey = Pubkey::from_bytes([3u8; 32]);
 
 #[test]
 fn received_message_goes_to_inbox() {

@@ -139,7 +139,7 @@ impl SigningKey {
     }
 
     pub fn public_key(&self) -> Pubkey {
-        Pubkey(self.inner.public.to_bytes())
+        Pubkey::from_bytes(self.inner.public.to_bytes())
     }
 
     pub fn keypair(&self) -> &schnorrkel::Keypair {

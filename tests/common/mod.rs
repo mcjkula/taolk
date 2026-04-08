@@ -40,7 +40,7 @@ pub fn test_chain_info() -> ChainInfo {
         name: "Test".into(),
         ss58_prefix: 42,
         chain_params: ChainParams {
-            genesis_hash: [0; 32],
+            genesis_hash: samp::GenesisHash::from_bytes([0; 32]),
             spec_version: 1,
             tx_version: 1,
         },
@@ -93,13 +93,13 @@ pub fn build_remark_ext(remark: &[u8], sk: &SigningKey, nonce: u32) -> Vec<u8> {
     samp::scale::encode_compact(remark.len() as u64, &mut args);
     args.extend_from_slice(remark);
     let ci = test_chain_info();
-    let pk = *sk.public_key();
+    let pk = sk.public_key();
     samp::extrinsic::build_signed_extrinsic(
         0,
         7,
         &args,
         &pk,
-        |msg| sk.sign(msg),
+        |msg| samp::Signature::from_bytes(sk.sign(msg)),
         nonce,
         &ci.chain_params,
     )

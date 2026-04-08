@@ -93,7 +93,7 @@ pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, ChainError> {
         name,
         ss58_prefix,
         chain_params: ChainParams {
-            genesis_hash: genesis_bytes,
+            genesis_hash: samp::GenesisHash::from_bytes(genesis_bytes),
             spec_version,
             tx_version,
         },
@@ -135,7 +135,7 @@ async fn refresh_signing_params(
         name: base.name.clone(),
         ss58_prefix: base.ss58_prefix,
         chain_params: ChainParams {
-            genesis_hash,
+            genesis_hash: samp::GenesisHash::from_bytes(genesis_hash),
             spec_version,
             tx_version,
         },
@@ -202,13 +202,13 @@ fn build_remark_with_event(
     chain_info: &ChainInfo,
 ) -> Result<Vec<u8>, ChainError> {
     let args = build_remark_call_args(remark)?;
-    let public_key = *signing.public_key();
+    let public_key = signing.public_key();
     build_signed_extrinsic(
         SYSTEM_REMARK_WITH_EVENT.0,
         SYSTEM_REMARK_WITH_EVENT.1,
         &args,
         &public_key,
-        |msg| signing.sign(msg),
+        |msg| samp::Signature::from_bytes(signing.sign(msg)),
         nonce,
         &chain_info.chain_params,
     )
@@ -322,9 +322,9 @@ pub async fn fetch_balance(
     key.extend_from_slice(&twox128(b"System"));
     key.extend_from_slice(&twox128(b"Account"));
     let mut hasher = blake2::Blake2b::<blake2::digest::typenum::U16>::new();
-    hasher.update(pubkey.0);
+    hasher.update(*pubkey.as_bytes());
     key.extend_from_slice(&hasher.finalize());
-    key.extend_from_slice(&pubkey.0);
+    key.extend_from_slice(pubkey.as_bytes());
 
     let req = json!({
         "jsonrpc":"2.0","id":1,"method":"state_getStorage",

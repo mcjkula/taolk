@@ -12,7 +12,7 @@ fn ext_to_hex(ext_bytes: &[u8]) -> String {
 }
 
 fn make_keys(seed: &[u8; 32]) -> DecryptionKeys {
-    let view_scalar = samp::sr25519_signing_scalar(seed).to_bytes();
+    let view_scalar = samp::sr25519_signing_scalar(&samp::Seed::from_bytes(*seed)).to_bytes();
     DecryptionKeys::new(view_scalar, Some(*seed))
 }
 
@@ -37,7 +37,7 @@ fn read_extrinsic_emits_event_for_samp_remark() {
     let bob_seed = [0xBB; 32];
     let bob_pubkey = signing(&bob_seed).public_key();
 
-    let remark = samp::encode_public(&bob_pubkey.0, b"hello bob");
+    let remark = samp::encode_public(&bob_pubkey, b"hello bob");
     let ext = build_remark_ext(&remark, &alice_sk, 0);
     let hex = ext_to_hex(&ext);
 
@@ -129,17 +129,17 @@ fn read_extrinsic_decrypts_for_recipient() {
     let alice_pubkey = alice_sk.public_key();
 
     let bob_seed = [0xBB; 32];
-    let bob_ristretto_pub = samp::public_from_seed(&bob_seed);
+    let bob_ristretto_pub = samp::public_from_seed(&samp::Seed::from_bytes(bob_seed));
     let bob_sk = signing(&bob_seed);
     let bob_pubkey = bob_sk.public_key();
 
     let plaintext = b"secret for bob";
-    let nonce: [u8; 12] = [0x01; 12];
+    let nonce = samp::Nonce::from_bytes([0x01; 12]);
+    let alice_samp_seed = samp::Seed::from_bytes(alice_seed);
 
-    let recipient_ristretto = curve25519_dalek::ristretto::CompressedRistretto(bob_ristretto_pub);
-    let view_tag = samp::compute_view_tag(&alice_seed, &recipient_ristretto, &nonce).unwrap();
+    let view_tag = samp::compute_view_tag(&alice_samp_seed, &bob_ristretto_pub, &nonce).unwrap();
     let encrypted_content =
-        samp::encrypt(plaintext, &recipient_ristretto, &nonce, &alice_seed).unwrap();
+        samp::encrypt(plaintext, &bob_ristretto_pub, &nonce, &alice_samp_seed).unwrap();
 
     let remark = samp::encode_encrypted(
         samp::ContentType::Encrypted,
@@ -183,19 +183,19 @@ fn read_extrinsic_skips_message_for_wrong_recipient() {
     let alice_sk = signing(&alice_seed);
 
     let bob_seed = [0xBB; 32];
-    let bob_ristretto_pub = samp::public_from_seed(&bob_seed);
+    let bob_ristretto_pub = samp::public_from_seed(&samp::Seed::from_bytes(bob_seed));
 
     let charlie_seed = [0xCC; 32];
     let charlie_sk = signing(&charlie_seed);
     let charlie_pubkey = charlie_sk.public_key();
 
     let plaintext = b"for bob only";
-    let nonce: [u8; 12] = [0x02; 12];
+    let nonce = samp::Nonce::from_bytes([0x02; 12]);
+    let alice_samp_seed = samp::Seed::from_bytes(alice_seed);
 
-    let recipient_ristretto = curve25519_dalek::ristretto::CompressedRistretto(bob_ristretto_pub);
-    let view_tag = samp::compute_view_tag(&alice_seed, &recipient_ristretto, &nonce).unwrap();
+    let view_tag = samp::compute_view_tag(&alice_samp_seed, &bob_ristretto_pub, &nonce).unwrap();
     let encrypted_content =
-        samp::encrypt(plaintext, &recipient_ristretto, &nonce, &alice_seed).unwrap();
+        samp::encrypt(plaintext, &bob_ristretto_pub, &nonce, &alice_samp_seed).unwrap();
     let remark = samp::encode_encrypted(
         samp::ContentType::Encrypted,
         view_tag,

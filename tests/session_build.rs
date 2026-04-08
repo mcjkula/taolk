@@ -6,11 +6,11 @@ use taolk::types::{BlockRef, Pubkey};
 const BOB_SAMP_SEED: [u8; 32] = [0xBB; 32];
 
 fn bob_scalar() -> curve25519_dalek::scalar::Scalar {
-    samp::sr25519_signing_scalar(&BOB_SAMP_SEED)
+    samp::sr25519_signing_scalar(&samp::Seed::from_bytes(BOB_SAMP_SEED))
 }
 
 fn bob_pubkey() -> Pubkey {
-    Pubkey(samp::public_from_seed(&BOB_SAMP_SEED))
+    samp::public_from_seed(&samp::Seed::from_bytes(BOB_SAMP_SEED))
 }
 
 #[test]
@@ -23,7 +23,7 @@ fn build_public_message_roundtrip() {
     let decoded = samp::decode_remark(&remark).unwrap();
 
     assert_eq!(decoded.content_type, samp::ContentType::Public);
-    assert_eq!(decoded.recipient, recipient.0);
+    assert_eq!(&decoded.recipient, recipient.as_bytes());
     assert_eq!(std::str::from_utf8(&decoded.content).unwrap(), body);
 }
 
@@ -98,9 +98,9 @@ fn build_channel_message_roundtrip() {
 #[test]
 fn build_group_create_decryptable() {
     let session = alice_session();
-    let alice_pk = samp::public_from_seed(&ALICE_SEED);
-    let bob_pk = samp::public_from_seed(&BOB_SAMP_SEED);
-    let members = vec![Pubkey(alice_pk), Pubkey(bob_pk)];
+    let alice_pk = samp::public_from_seed(&samp::Seed::from_bytes(ALICE_SEED));
+    let bob_pk = samp::public_from_seed(&samp::Seed::from_bytes(BOB_SAMP_SEED));
+    let members = vec![alice_pk, bob_pk];
 
     let remark = session
         .build_group_create(&ALICE_SEED, &members, "group hello")

@@ -731,7 +731,11 @@ fn run_session(
         }
     };
 
-    let db = db::Db::open(wallet_name, seed, &chain_info.chain_params.genesis_hash)?;
+    let db = db::Db::open(
+        wallet_name,
+        seed,
+        chain_info.chain_params.genesis_hash.as_bytes(),
+    )?;
     let keep_seed = !cfg.security.require_password_per_send;
     let session = session::Session::new(
         signing,

@@ -2,41 +2,40 @@ use taolk::types::{BlockRef, Pubkey};
 
 #[test]
 fn pubkey_equality() {
-    let a = Pubkey([0xAA; 32]);
-    let b = Pubkey([0xAA; 32]);
+    let a = Pubkey::from_bytes([0xAA; 32]);
+    let b = Pubkey::from_bytes([0xAA; 32]);
     assert_eq!(a, b);
 }
 
 #[test]
 fn pubkey_inequality() {
-    let a = Pubkey([0xAA; 32]);
-    let b = Pubkey([0xBB; 32]);
+    let a = Pubkey::from_bytes([0xAA; 32]);
+    let b = Pubkey::from_bytes([0xBB; 32]);
     assert_ne!(a, b);
 }
 
 #[test]
 fn pubkey_zero() {
-    assert_eq!(Pubkey::ZERO.0, [0u8; 32]);
+    assert_eq!(Pubkey::ZERO.as_bytes(), &[0u8; 32]);
 }
 
 #[test]
-fn pubkey_deref_to_bytes() {
-    let pk = Pubkey([0xCC; 32]);
-    let bytes: &[u8; 32] = &pk;
-    assert_eq!(bytes, &[0xCC; 32]);
+fn pubkey_as_bytes() {
+    let pk = Pubkey::from_bytes([0xCC; 32]);
+    assert_eq!(pk.as_bytes(), &[0xCC; 32]);
 }
 
 #[test]
-fn pubkey_from_array() {
-    let pk = Pubkey::from([1u8; 32]);
-    assert_eq!(pk.0, [1u8; 32]);
+fn pubkey_from_bytes_round_trip() {
+    let pk = Pubkey::from_bytes([1u8; 32]);
+    assert_eq!(pk.as_bytes(), &[1u8; 32]);
 }
 
 #[test]
-fn pubkey_into_array() {
-    let pk = Pubkey([0xDD; 32]);
-    let bytes: [u8; 32] = pk.into();
-    assert_eq!(bytes, pk.0);
+fn pubkey_into_bytes() {
+    let pk = Pubkey::from_bytes([0xDD; 32]);
+    let bytes: [u8; 32] = pk.into_bytes();
+    assert_eq!(bytes, [0xDD; 32]);
 }
 
 #[test]

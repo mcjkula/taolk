@@ -11,8 +11,8 @@ use taolk::types::Pubkey;
 use taolk::util;
 use zeroize::Zeroizing;
 
-const ALICE_PUB: Pubkey = Pubkey([1u8; 32]);
-const CHARLIE_PUB: Pubkey = Pubkey([3u8; 32]);
+const ALICE_PUB: Pubkey = Pubkey::from_bytes([1u8; 32]);
+const CHARLIE_PUB: Pubkey = Pubkey::from_bytes([3u8; 32]);
 
 #[test]
 fn two_messages_same_thread() {

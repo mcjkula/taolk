@@ -3,13 +3,13 @@ use taolk::util;
 
 #[test]
 fn ss58_from_pubkey_deterministic() {
-    let pk = Pubkey([0xAA; 32]);
+    let pk = Pubkey::from_bytes([0xAA; 32]);
     assert_eq!(util::ss58_from_pubkey(&pk), util::ss58_from_pubkey(&pk));
 }
 
 #[test]
 fn ss58_from_pubkey_starts_with_5() {
-    let pk = Pubkey([0xAA; 32]);
+    let pk = Pubkey::from_bytes([0xAA; 32]);
     let addr = util::ss58_from_pubkey(&pk);
     assert!(
         addr.starts_with('5'),
@@ -19,7 +19,7 @@ fn ss58_from_pubkey_starts_with_5() {
 
 #[test]
 fn ss58_decode_roundtrip() {
-    let pk = Pubkey([0xBB; 32]);
+    let pk = Pubkey::from_bytes([0xBB; 32]);
     let addr = util::ss58_from_pubkey(&pk);
     let decoded = util::ss58_decode(&addr).unwrap();
     assert_eq!(decoded, pk);
@@ -32,7 +32,7 @@ fn ss58_decode_invalid_base58() {
 
 #[test]
 fn ss58_decode_wrong_checksum() {
-    let pk = Pubkey([0xCC; 32]);
+    let pk = Pubkey::from_bytes([0xCC; 32]);
     let mut addr = util::ss58_from_pubkey(&pk);
     let last = addr.pop().unwrap();
     let replacement = if last == 'A' { 'B' } else { 'A' };
@@ -42,7 +42,7 @@ fn ss58_decode_wrong_checksum() {
 
 #[test]
 fn ss58_short_format() {
-    let pk = Pubkey([0xDD; 32]);
+    let pk = Pubkey::from_bytes([0xDD; 32]);
     let short = util::ss58_short(&pk);
     assert_eq!(short.len(), 13);
     assert!(short.contains("..."));
@@ -50,7 +50,7 @@ fn ss58_short_format() {
 
 #[test]
 fn pubkey_from_ss58_valid() {
-    let pk = Pubkey([0xEE; 32]);
+    let pk = Pubkey::from_bytes([0xEE; 32]);
     let addr = util::ss58_from_pubkey(&pk);
     assert_eq!(util::pubkey_from_ss58(&addr), Some(pk));
 }

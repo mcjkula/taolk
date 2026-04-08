@@ -327,7 +327,7 @@ impl Db {
     pub fn upsert_peer(&self, ss58_short: &str, pubkey: &Pubkey) {
         let _ = self.conn.execute(
             "INSERT OR REPLACE INTO peers (ss58_short, pubkey) VALUES (?1, ?2)",
-            params![ss58_short, &pubkey.0[..]],
+            params![ss58_short, &pubkey.as_bytes()[..]],
         );
     }
 
@@ -340,7 +340,7 @@ impl Db {
                     let blob: Vec<u8> = row.get(0)?;
                     let mut key = [0u8; 32];
                     key.copy_from_slice(&blob);
-                    Ok(Pubkey(key))
+                    Ok(Pubkey::from_bytes(key))
                 },
             )
             .ok()
@@ -358,7 +358,7 @@ impl Db {
             if blob.len() == 32 {
                 key.copy_from_slice(&blob);
             }
-            Ok((ss58, Pubkey(key)))
+            Ok((ss58, Pubkey::from_bytes(key)))
         });
         if let Ok(rows) = rows {
             for entry in rows.flatten() {
@@ -559,14 +559,17 @@ impl Db {
 
     pub fn insert_group(&self, group_ref: BlockRef, creator_pubkey: &Pubkey, members: &[Pubkey]) {
         let nonce = group_nonce(group_ref.block, group_ref.index);
-        let members_raw: Vec<u8> = members.iter().flat_map(|pk| pk.0.iter().copied()).collect();
+        let members_raw: Vec<u8> = members
+            .iter()
+            .flat_map(|pk| pk.as_bytes().iter().copied())
+            .collect();
         let encrypted_members = self
             .cipher
             .encrypt(Nonce::from_slice(&nonce), members_raw.as_slice())
             .unwrap_or_default();
         let _ = self.conn.execute(
             "INSERT OR IGNORE INTO groups (group_block, group_index, creator_pubkey, members) VALUES (?1, ?2, ?3, ?4)",
-            params![group_ref.block, group_ref.index, &creator_pubkey.0[..], encrypted_members],
+            params![group_ref.block, group_ref.index, &creator_pubkey.as_bytes()[..], encrypted_members],
         );
     }
 
@@ -606,10 +609,14 @@ impl Db {
                         .map(|c| {
                             let mut pk = [0u8; 32];
                             pk.copy_from_slice(c);
-                            Pubkey(pk)
+                            Pubkey::from_bytes(pk)
                         })
                         .collect();
-                    Some((BlockRef { block, index }, Pubkey(creator_bytes), members))
+                    Some((
+                        BlockRef { block, index },
+                        Pubkey::from_bytes(creator_bytes),
+                        members,
+                    ))
                 })
                 .collect();
             Some(rows)

@@ -73,7 +73,7 @@ pub fn source_from_extrinsic(
     block_ts_ms: u64,
 ) -> Option<RemarkSource> {
     let ext_bytes = hex::decode(ext_hex.trim_start_matches("0x")).ok()?;
-    let sender = samp_extract_signer(&ext_bytes).map(Pubkey)?;
+    let sender = samp_extract_signer(&ext_bytes)?;
     let remark_bytes = extract_remark_from_call(&ext_bytes)?;
     let remark = decode_remark(&remark_bytes).ok()?;
     Some(RemarkSource {
@@ -142,13 +142,13 @@ pub fn process_remark(
 
     match remark.content_type {
         ContentType::Public => {
-            if remark.recipient != my_pubkey.0 && sender != *my_pubkey {
+            if &remark.recipient != my_pubkey.as_bytes() && sender != *my_pubkey {
                 return;
             }
             let _ = tx.send(Event::NewMessage {
                 sender,
                 content_type: remark.content_type.to_byte(),
-                recipient: Pubkey(remark.recipient),
+                recipient: Pubkey::from_bytes(remark.recipient),
                 decrypted_body: String::from_utf8(remark.content.clone()).ok(),
                 thread_ref: BlockRef::ZERO,
                 reply_to: BlockRef::ZERO,
@@ -173,7 +173,7 @@ pub fn process_remark(
             }
 
             let plaintext = if is_mine {
-                let Some(seed) = keys.seed() else {
+                let Some(seed_bytes) = keys.seed() else {
                     let _ = tx.send(Event::LockedOutbound {
                         sender,
                         block_number,
@@ -183,7 +183,8 @@ pub fn process_remark(
                     });
                     return;
                 };
-                samp::decrypt_as_sender(remark, seed)
+                let sender_seed = samp::Seed::from_bytes(*seed_bytes);
+                samp::decrypt_as_sender(remark, &sender_seed)
             } else {
                 samp::decrypt(remark, &scalar)
             };
@@ -195,10 +196,10 @@ pub fn process_remark(
 
             let mut recipient = remark.recipient;
             if is_mine
-                && let Some(seed) = keys.seed()
-                && let Ok(r) = samp::unseal_recipient(remark, seed)
+                && let Some(seed_bytes) = keys.seed()
+                && let Ok(r) = samp::unseal_recipient(remark, &samp::Seed::from_bytes(*seed_bytes))
             {
-                recipient = r;
+                recipient = *r.as_bytes();
             }
 
             let ct = remark.content_type.to_byte();
@@ -222,7 +223,7 @@ pub fn process_remark(
             let _ = tx.send(Event::NewMessage {
                 sender,
                 content_type: ct,
-                recipient: Pubkey(recipient),
+                recipient: Pubkey::from_bytes(recipient),
                 decrypted_body: body,
                 thread_ref,
                 reply_to,
@@ -287,7 +288,7 @@ pub fn process_remark(
                     Ok(r) => r,
                     Err(_) => return,
                 };
-                let members = members.into_iter().map(Pubkey).collect();
+                let members: Vec<Pubkey> = members;
                 let _ = tx.send(Event::GroupDiscovered {
                     creator_pubkey: sender,
                     group_ref: BlockRef {

@@ -74,7 +74,8 @@ impl Session {
     ) -> Self {
         let pubkey = signing.public_key();
         let my_ss58 = crate::util::ss58_from_pubkey(&pubkey);
-        let view_scalar = Zeroizing::new(samp::sr25519_signing_scalar(&seed).to_bytes());
+        let view_scalar =
+            Zeroizing::new(samp::sr25519_signing_scalar(&samp::Seed::from_bytes(*seed)).to_bytes());
         let seed = if keep_seed { Some(seed) } else { None };
         Self {
             signing: Arc::new(signing),
@@ -127,7 +128,11 @@ impl Session {
             .await
             .unwrap_or_else(|_| ("TAO".into(), 9));
 
-        let db = Db::open(wallet_name, seed, &chain_info.chain_params.genesis_hash)?;
+        let db = Db::open(
+            wallet_name,
+            seed,
+            chain_info.chain_params.genesis_hash.as_bytes(),
+        )?;
 
         let mut session = Self::new(
             signing,
@@ -745,7 +750,7 @@ impl Session {
     }
 
     pub fn build_public_message(&self, recipient: &Pubkey, body: &str) -> Result<Vec<u8>> {
-        Ok(samp::encode_public(&recipient.0, body.as_bytes()))
+        Ok(samp::encode_public(recipient, body.as_bytes()))
     }
 
     pub fn build_encrypted_message(
@@ -754,11 +759,11 @@ impl Session {
         recipient: &Pubkey,
         body: &str,
     ) -> Result<Vec<u8>> {
-        let nonce = rand_nonce();
-        let enc_pk = curve25519_dalek::ristretto::CompressedRistretto(recipient.0);
-        let encrypted = samp::encrypt(body.as_bytes(), &enc_pk, &nonce, seed)
+        let nonce = samp::Nonce::from_bytes(rand_nonce());
+        let sender = samp::Seed::from_bytes(*seed);
+        let encrypted = samp::encrypt(body.as_bytes(), recipient, &nonce, &sender)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
-        let vt = samp::compute_view_tag(seed, &enc_pk, &nonce)
+        let vt = samp::compute_view_tag(&sender, recipient, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_encrypted(
             samp::ContentType::Encrypted,
@@ -774,17 +779,17 @@ impl Session {
         recipient: &Pubkey,
         body: &str,
     ) -> Result<Vec<u8>> {
-        let nonce = rand_nonce();
+        let nonce = samp::Nonce::from_bytes(rand_nonce());
+        let sender = samp::Seed::from_bytes(*seed);
         let plaintext = samp::encode_thread_content(
             BlockRef::ZERO,
             BlockRef::ZERO,
             BlockRef::ZERO,
             body.as_bytes(),
         );
-        let enc_pk = curve25519_dalek::ristretto::CompressedRistretto(recipient.0);
-        let encrypted = samp::encrypt(&plaintext, &enc_pk, &nonce, seed)
+        let encrypted = samp::encrypt(&plaintext, recipient, &nonce, &sender)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
-        let vt = samp::compute_view_tag(seed, &enc_pk, &nonce)
+        let vt = samp::compute_view_tag(&sender, recipient, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_encrypted(
             samp::ContentType::Thread,
@@ -804,17 +809,17 @@ impl Session {
             .threads
             .get(thread_idx)
             .ok_or_else(|| SdkError::NotFound("Thread not found".into()))?;
-        let nonce = rand_nonce();
+        let nonce = samp::Nonce::from_bytes(rand_nonce());
+        let sender = samp::Seed::from_bytes(*seed);
         let plaintext = samp::encode_thread_content(
             thread.thread_ref,
             thread.last_ref(),
             thread.my_last_ref(),
             body.as_bytes(),
         );
-        let enc_pk = curve25519_dalek::ristretto::CompressedRistretto(thread.peer_pubkey.0);
-        let encrypted = samp::encrypt(&plaintext, &enc_pk, &nonce, seed)
+        let encrypted = samp::encrypt(&plaintext, &thread.peer_pubkey, &nonce, &sender)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
-        let vt = samp::compute_view_tag(seed, &enc_pk, &nonce)
+        let vt = samp::compute_view_tag(&sender, &thread.peer_pubkey, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_encrypted(
             samp::ContentType::Thread,
@@ -852,9 +857,9 @@ impl Session {
                 "Group too large: max {MAX_GROUP_MEMBERS} members supported"
             )));
         }
-        let nonce = rand_nonce();
-        let raw_members: Vec<[u8; 32]> = members.iter().map(|pk| pk.0).collect();
-        let mut body_bytes = samp::encode_group_members(&raw_members);
+        let nonce = samp::Nonce::from_bytes(rand_nonce());
+        let sender = samp::Seed::from_bytes(*seed);
+        let mut body_bytes = samp::encode_group_members(members);
         body_bytes.extend_from_slice(body.as_bytes());
         let plaintext = samp::encode_thread_content(
             BlockRef::ZERO,
@@ -863,7 +868,7 @@ impl Session {
             &body_bytes,
         );
         let (eph_pubkey, capsules, ciphertext) =
-            samp::encrypt_for_group(&plaintext, &raw_members, &nonce, seed)
+            samp::encrypt_for_group(&plaintext, members, &nonce, &sender)
                 .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_group(
             &nonce,
@@ -883,16 +888,16 @@ impl Session {
             .groups
             .get(group_idx)
             .ok_or_else(|| SdkError::NotFound("Group not found".into()))?;
-        let nonce = rand_nonce();
+        let nonce = samp::Nonce::from_bytes(rand_nonce());
+        let sender = samp::Seed::from_bytes(*seed);
         let plaintext = samp::encode_thread_content(
             group.group_ref,
             group.last_ref(),
             group.my_last_ref(),
             body.as_bytes(),
         );
-        let raw_members: Vec<[u8; 32]> = group.members.iter().map(|pk| pk.0).collect();
         let (eph_pubkey, capsules, ciphertext) =
-            samp::encrypt_for_group(&plaintext, &raw_members, &nonce, seed)
+            samp::encrypt_for_group(&plaintext, &group.members, &nonce, &sender)
                 .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_group(
             &nonce,

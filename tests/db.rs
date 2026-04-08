@@ -156,8 +156,8 @@ fn group_insert_and_load() {
         block: 400,
         index: 0,
     };
-    let creator = Pubkey([1u8; 32]);
-    let members = vec![Pubkey([2u8; 32]), Pubkey([3u8; 32])];
+    let creator = Pubkey::from_bytes([1u8; 32]);
+    let members = vec![Pubkey::from_bytes([2u8; 32]), Pubkey::from_bytes([3u8; 32])];
     db.insert_group(group_ref, &creator, &members);
 
     let groups = db.load_groups();
@@ -165,8 +165,8 @@ fn group_insert_and_load() {
     assert_eq!(groups[0].0, group_ref);
     assert_eq!(groups[0].1, creator);
     assert_eq!(groups[0].2.len(), 2);
-    assert_eq!(groups[0].2[0], Pubkey([2u8; 32]));
-    assert_eq!(groups[0].2[1], Pubkey([3u8; 32]));
+    assert_eq!(groups[0].2[0], Pubkey::from_bytes([2u8; 32]));
+    assert_eq!(groups[0].2[1], Pubkey::from_bytes([3u8; 32]));
 }
 
 #[test]
@@ -176,8 +176,8 @@ fn group_message_insert_and_load() {
         block: 400,
         index: 0,
     };
-    let creator = Pubkey([1u8; 32]);
-    db.insert_group(group_ref, &creator, &[Pubkey([2u8; 32])]);
+    let creator = Pubkey::from_bytes([1u8; 32]);
+    db.insert_group(group_ref, &creator, &[Pubkey::from_bytes([2u8; 32])]);
 
     let msg = make_thread_msg("group hello", false, 500, 0);
     db.insert_threaded_message(taolk::db::ConvKind::Group, group_ref, &msg, 500, 0);
@@ -191,7 +191,7 @@ fn group_message_insert_and_load() {
 #[test]
 fn peer_upsert_and_get() {
     let db = test_db();
-    let pk = Pubkey([0x42; 32]);
+    let pk = Pubkey::from_bytes([0x42; 32]);
     db.upsert_peer("Ali..xyz", &pk);
 
     let got = db.get_peer_pubkey("Ali..xyz");
@@ -201,8 +201,8 @@ fn peer_upsert_and_get() {
 #[test]
 fn peer_upsert_overwrites() {
     let db = test_db();
-    let pk1 = Pubkey([0x01; 32]);
-    let pk2 = Pubkey([0x02; 32]);
+    let pk1 = Pubkey::from_bytes([0x01; 32]);
+    let pk2 = Pubkey::from_bytes([0x02; 32]);
     db.upsert_peer("Ali..xyz", &pk1);
     db.upsert_peer("Ali..xyz", &pk2);
 
@@ -275,7 +275,7 @@ fn has_group_message_at() {
         block: 400,
         index: 0,
     };
-    let creator = Pubkey([1u8; 32]);
+    let creator = Pubkey::from_bytes([1u8; 32]);
     db.insert_group(group_ref, &creator, &[]);
     let msg = make_thread_msg("grp msg", false, 500, 3);
     db.insert_threaded_message(taolk::db::ConvKind::Group, group_ref, &msg, 500, 3);

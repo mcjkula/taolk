@@ -6,7 +6,7 @@ const SS58_PREFIX: u8 = 42;
 
 pub fn ss58_from_pubkey(pubkey: &Pubkey) -> String {
     let mut payload = vec![SS58_PREFIX];
-    payload.extend_from_slice(&pubkey.0);
+    payload.extend_from_slice(pubkey.as_bytes());
     let hash = {
         let mut hasher = blake2::Blake2b512::new();
         hasher.update(b"SS58PRE");
@@ -167,7 +167,7 @@ pub fn ss58_decode(address: &str) -> Result<Pubkey, crate::error::AddressError> 
     }
     let mut pubkey = [0u8; 32];
     pubkey.copy_from_slice(&decoded[prefix_len..pubkey_end]);
-    Ok(Pubkey(pubkey))
+    Ok(Pubkey::from_bytes(pubkey))
 }
 
 pub fn copy_to_clipboard(text: &str) -> bool {
