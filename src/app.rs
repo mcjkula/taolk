@@ -20,6 +20,14 @@ pub enum Mode {
     Help,
 }
 
+pub struct LockedOutbound {
+    pub sender: Pubkey,
+    pub block_number: u32,
+    pub ext_index: u16,
+    pub timestamp: u64,
+    pub remark_bytes: Vec<u8>,
+}
+
 #[derive(PartialEq, Clone, Copy)]
 pub enum View {
     Inbox,
@@ -46,6 +54,8 @@ pub struct App {
     pub pending_fee: Option<String>,
     pub pending_view: Option<View>,
     pub pending_send_text: Option<String>,
+    pub locked_outbound: Vec<LockedOutbound>,
+    pub pending_unlock_all: bool,
     pub frame: u32,
     pub sending: bool,
     pub msg_recipient: Option<(Pubkey, String)>,
@@ -89,6 +99,8 @@ impl App {
             pending_fee: None,
             pending_view: None,
             pending_send_text: None,
+            locked_outbound: Vec::new(),
+            pending_unlock_all: false,
             frame: 0,
             sending: false,
             msg_recipient: None,

@@ -5,8 +5,8 @@ mod ui;
 
 use taolk::conversation::Conversation;
 use taolk::{
-    audio, chain, config, conversation, db, error, event, extrinsic, mirror, session, types, util,
-    wallet,
+    audio, chain, config, conversation, db, error, event, extrinsic, mirror, reader, session,
+    types, util, wallet,
 };
 
 use app::{App, Mode};
@@ -493,6 +493,48 @@ fn acquire_seed(
         .map(|seed| zeroize::Zeroizing::new(*seed.as_bytes())))
 }
 
+fn dispatch_unlock_all(
+    app: &mut App,
+    wallet_name: &str,
+    require_password: bool,
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    events: &TuiEventHandler,
+    send_tx: &std::sync::mpsc::Sender<event::Event>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let seed = match acquire_seed(app, wallet_name, require_password, terminal, events)? {
+        Some(s) => s,
+        None => {
+            app.set_status("Cancelled");
+            return Ok(());
+        }
+    };
+    let my_pubkey = app.session.pubkey();
+    let view_scalar = app.session.view_scalar();
+    let keys = taolk::secret::DecryptionKeys::new(view_scalar.to_bytes(), Some(*seed));
+    let pending: Vec<app::LockedOutbound> = std::mem::take(&mut app.locked_outbound);
+    let mut unlocked = 0usize;
+    for entry in pending {
+        let Ok(remark) = samp::decode_remark(&entry.remark_bytes) else {
+            continue;
+        };
+        let source = reader::RemarkSource {
+            sender: entry.sender,
+            remark,
+            remark_bytes: entry.remark_bytes,
+            block: types::BlockRef {
+                block: entry.block_number,
+                index: entry.ext_index,
+            },
+            timestamp_secs: entry.timestamp,
+        };
+        reader::process_remark(&source, &my_pubkey, &keys, send_tx);
+        unlocked += 1;
+    }
+    drop(seed);
+    app.set_status(format!("Unlocked {unlocked} message(s)"));
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn dispatch_pending_send(
     app: &mut App,
@@ -772,6 +814,17 @@ fn run_session(
                 events,
                 &event_tx,
                 &rt,
+            )?;
+        }
+        if app.pending_unlock_all {
+            app.pending_unlock_all = false;
+            dispatch_unlock_all(
+                &mut app,
+                wallet_name,
+                cfg.security.require_password_per_send,
+                terminal,
+                events,
+                &event_tx,
             )?;
         }
 
@@ -1101,6 +1154,27 @@ fn run_session(
             }
             TuiEvent::Core(event::Event::CatchupComplete) => {
                 app.sound_armed = true;
+            }
+            TuiEvent::Core(event::Event::LockedOutbound {
+                sender,
+                block_number,
+                ext_index,
+                timestamp,
+                remark_bytes,
+            }) => {
+                if !app
+                    .locked_outbound
+                    .iter()
+                    .any(|m| m.block_number == block_number && m.ext_index == ext_index)
+                {
+                    app.locked_outbound.push(app::LockedOutbound {
+                        sender,
+                        block_number,
+                        ext_index,
+                        timestamp,
+                        remark_bytes,
+                    });
+                }
             }
             TuiEvent::Core(event::Event::Error(e)) => {
                 if app.sending {
@@ -1454,6 +1528,13 @@ fn handle_normal_key(
         }
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.scroll_offset = app.scroll_offset.saturating_add(10);
+        }
+        KeyCode::Char('U') => {
+            if app.locked_outbound.is_empty() {
+                app.set_status("No locked messages");
+            } else {
+                app.pending_unlock_all = true;
+            }
         }
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.scroll_offset = app.scroll_offset.saturating_sub(10);

@@ -46,6 +46,13 @@ pub enum Event {
         ext_index: u16,
         timestamp: u64,
     },
+    LockedOutbound {
+        sender: Pubkey,
+        block_number: u32,
+        ext_index: u16,
+        timestamp: u64,
+        remark_bytes: Vec<u8>,
+    },
     MessageSent,
     BlockUpdate(u64),
     FetchBlock {

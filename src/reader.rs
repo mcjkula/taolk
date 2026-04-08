@@ -21,6 +21,7 @@ pub struct ReadContext<'a> {
 pub struct RemarkSource {
     pub sender: Pubkey,
     pub remark: Remark,
+    pub remark_bytes: Vec<u8>,
     pub block: BlockRef,
     pub timestamp_secs: u64,
 }
@@ -78,6 +79,7 @@ pub fn source_from_extrinsic(
     Some(RemarkSource {
         sender,
         remark,
+        remark_bytes,
         block: BlockRef {
             block: block_number,
             index: ext_index,
@@ -172,6 +174,13 @@ pub fn process_remark(
 
             let plaintext = if is_mine {
                 let Some(seed) = keys.seed() else {
+                    let _ = tx.send(Event::LockedOutbound {
+                        sender,
+                        block_number,
+                        ext_index,
+                        timestamp,
+                        remark_bytes: source.remark_bytes.clone(),
+                    });
                     return;
                 };
                 samp::decrypt_as_sender(remark, seed)

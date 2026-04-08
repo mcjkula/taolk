@@ -166,7 +166,21 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         .as_ref()
         .map_or(0, |s| u16::try_from(s.width()).unwrap_or(u16::MAX));
 
-    let right_width = u16::try_from(balance_str.len()).unwrap_or(u16::MAX)
+    let locked_str = if app.locked_outbound.is_empty() {
+        String::new()
+    } else {
+        format!(" \u{1F512} {} (U) ", app.locked_outbound.len())
+    };
+    let locked_span = Span::styled(
+        locked_str.clone(),
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    );
+
+    let right_width = u16::try_from(locked_str.chars().count()).unwrap_or(u16::MAX)
+        + u16::try_from(balance_str.len()).unwrap_or(u16::MAX)
         + u16::try_from(block_str.len()).unwrap_or(u16::MAX)
         + reconnect_width;
     let mode_width = u16::try_from(mode.width()).unwrap_or(u16::MAX);
@@ -189,6 +203,9 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let mut spans = vec![mode, status_span, pad_span];
     if let Some(rc) = reconnect {
         spans.push(rc);
+    }
+    if !locked_str.is_empty() {
+        spans.push(locked_span);
     }
     spans.push(balance_span);
     spans.push(block_span);
