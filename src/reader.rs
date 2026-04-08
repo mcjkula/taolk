@@ -208,11 +208,10 @@ pub fn process_remark(
         Remark::Group(payload) => {
             let scalar = keys.scalar();
 
-            let plaintext =
-                match samp::decrypt_from_group(&payload.content, &scalar, &payload.nonce, None) {
-                    Ok(pt) => pt,
-                    Err(_) => return,
-                };
+            let plaintext = match samp::decrypt_from_group(payload, &scalar, None) {
+                Ok(pt) => pt,
+                Err(_) => return,
+            };
 
             let (group_ref, reply_to, continues, body_bytes) =
                 match decode_group_content(plaintext.as_bytes()) {

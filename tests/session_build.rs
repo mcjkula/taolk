@@ -117,8 +117,7 @@ fn build_group_create_decryptable() {
         panic!("expected Group");
     };
 
-    let plaintext =
-        samp::decrypt_from_group(&payload.content, &bob_scalar(), &payload.nonce, Some(2)).unwrap();
+    let plaintext = samp::decrypt_from_group(&payload, &bob_scalar(), Some(2)).unwrap();
 
     let (_group_ref, _reply_to, _continues, body) =
         samp::decode_thread_content(plaintext.as_bytes()).unwrap();
