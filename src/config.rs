@@ -28,6 +28,7 @@ pub struct Network {
 #[serde(default)]
 pub struct Security {
     pub lock_timeout: u64,
+    pub require_password_per_send: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -60,7 +61,10 @@ impl Default for Network {
 
 impl Default for Security {
     fn default() -> Self {
-        Self { lock_timeout: 300 }
+        Self {
+            lock_timeout: 300,
+            require_password_per_send: false,
+        }
     }
 }
 
@@ -138,6 +142,13 @@ pub const KEYS: &[KeyDef] = &[
         field: "lock_timeout",
         description: "Auto-lock timeout in seconds (0=off)",
         default_display: "300",
+    },
+    KeyDef {
+        key: "security.require_password_per_send",
+        section: "security",
+        field: "require_password_per_send",
+        description: "Re-prompt password before each send (ephemeral seed)",
+        default_display: "false",
     },
     KeyDef {
         key: "ui.sidebar_width",
@@ -232,6 +243,9 @@ pub fn get_value(config: &Config, key: &str) -> String {
             }
         }
         "security.lock_timeout" => config.security.lock_timeout.to_string(),
+        "security.require_password_per_send" => {
+            config.security.require_password_per_send.to_string()
+        }
         "ui.sidebar_width" => config.ui.sidebar_width.to_string(),
         "ui.mouse" => config.ui.mouse.to_string(),
         "ui.timestamp_format" => config.ui.timestamp_format.clone(),
@@ -292,7 +306,7 @@ pub fn set_key(key: &str, raw: &[String]) -> Result<String, ConfigError> {
             let v: u16 = parse_val(raw, "a number (0-65535)")?;
             toml::Value::Integer(i64::from(v))
         }
-        "ui.mouse" => toml::Value::Boolean(parse_bool(raw)?),
+        "ui.mouse" | "security.require_password_per_send" => toml::Value::Boolean(parse_bool(raw)?),
         "notifications.enabled"
         | "notifications.dm"
         | "notifications.ambient"
