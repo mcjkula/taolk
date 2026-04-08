@@ -12,13 +12,14 @@ use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 use crate::error::ChainError;
 use crate::types::Pubkey;
 
+pub(crate) const SYSTEM_REMARK: (u8, u8) = (0, 9);
+pub(crate) const SYSTEM_REMARK_WITH_EVENT: (u8, u8) = (0, 7);
+
 #[derive(Clone)]
 pub struct ChainInfo {
     pub chain_params: ChainParams,
     pub account_storage: StorageLayout,
     pub errors: Arc<ErrorTable>,
-    pub system_remark: (u8, u8),
-    pub system_remark_with_event: (u8, u8),
 }
 
 pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, ChainError> {
@@ -65,12 +66,6 @@ pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, ChainError> {
     let metadata = Metadata::from_runtime_metadata(&metadata_bytes)?;
 
     let account_storage = metadata.storage_layout("System", "Account", &["data", "free"])?;
-    let system_remark = metadata
-        .find_call_index("System", "remark")
-        .ok_or(ChainError::MissingField("System.remark"))?;
-    let system_remark_with_event = metadata
-        .find_call_index("System", "remark_with_event")
-        .ok_or(ChainError::MissingField("System.remark_with_event"))?;
 
     Ok(ChainInfo {
         chain_params: ChainParams {
@@ -80,8 +75,6 @@ pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, ChainError> {
         },
         account_storage,
         errors: Arc::new(metadata.errors().clone()),
-        system_remark,
-        system_remark_with_event,
     })
 }
 
@@ -122,8 +115,6 @@ async fn refresh_signing_params(
         },
         account_storage: base.account_storage.clone(),
         errors: base.errors.clone(),
-        system_remark: base.system_remark,
-        system_remark_with_event: base.system_remark_with_event,
     })
 }
 
@@ -186,10 +177,9 @@ fn build_remark_with_event(
 ) -> Result<Vec<u8>, ChainError> {
     let args = build_remark_call_args(remark)?;
     let public_key = *signing.public_key();
-    let (pallet_idx, call_idx) = chain_info.system_remark_with_event;
     build_signed_extrinsic(
-        pallet_idx,
-        call_idx,
+        SYSTEM_REMARK_WITH_EVENT.0,
+        SYSTEM_REMARK_WITH_EVENT.1,
         &args,
         &public_key,
         |msg| signing.sign(msg),

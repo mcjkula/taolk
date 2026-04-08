@@ -7,7 +7,6 @@ use zeroize::Zeroizing;
 
 use crate::error::ChainError;
 use crate::event::{ConnState, Event};
-use crate::extrinsic::ChainInfo;
 use crate::reader;
 use crate::types::Pubkey;
 
@@ -17,19 +16,10 @@ pub async fn fetch_and_process_extrinsic(
     ext_index: u16,
     my_pubkey: Pubkey,
     seed: Zeroizing<[u8; 32]>,
-    chain_info: ChainInfo,
     tx: Sender<Event>,
 ) {
-    let result = fetch_extrinsic_inner(
-        node_url,
-        block_num,
-        ext_index,
-        &my_pubkey,
-        &seed,
-        &chain_info,
-        &tx,
-    )
-    .await;
+    let result =
+        fetch_extrinsic_inner(node_url, block_num, ext_index, &my_pubkey, &seed, &tx).await;
     if let Err(e) = result {
         let _ = tx.send(Event::Error(format!(
             "Load block {block_num}:{ext_index}: {e}"
@@ -61,7 +51,6 @@ async fn fetch_extrinsic_inner(
     ext_index: u16,
     my_pubkey: &Pubkey,
     seed: &[u8; 32],
-    chain_info: &ChainInfo,
     tx: &Sender<Event>,
 ) -> Result<(), ChainError> {
     let (ws, _) = connect_async(node_url)
@@ -112,7 +101,6 @@ async fn fetch_extrinsic_inner(
                 my_pubkey,
                 seed,
                 tx,
-                chain_info,
             };
             reader::read_extrinsic(ext_hex, &ctx, block_num, ext_index, block_ts);
         }
@@ -124,13 +112,12 @@ pub async fn subscribe_blocks(
     node_url: &str,
     my_pubkey: Pubkey,
     seed: Zeroizing<[u8; 32]>,
-    chain_info: ChainInfo,
     tx: Sender<Event>,
 ) {
     let mut delay: u32 = 1;
     loop {
         let _ = tx.send(Event::ConnectionStatus(ConnState::Connected));
-        match run_subscription(node_url, &my_pubkey, &seed, &chain_info, &tx).await {
+        match run_subscription(node_url, &my_pubkey, &seed, &tx).await {
             Ok(()) => return,
             Err(e) => {
                 let _ = tx.send(Event::Status(format!("Chain disconnected: {e}")));
@@ -150,7 +137,6 @@ async fn run_subscription(
     node_url: &str,
     my_pubkey: &Pubkey,
     seed: &[u8; 32],
-    chain_info: &ChainInfo,
     tx: &Sender<Event>,
 ) -> Result<(), ChainError> {
     let (mut ws, _) = connect_async(node_url)
@@ -213,7 +199,6 @@ async fn run_subscription(
                     my_pubkey,
                     seed,
                     tx,
-                    chain_info,
                 };
                 reader::read_block(block, &ctx);
             }

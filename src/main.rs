@@ -531,10 +531,9 @@ fn run_session(
         let url = node_url.to_string();
         let tx = event_tx.clone();
         let sc = zeroize::Zeroizing::new(*seed);
-        let ci = chain_info.clone();
         rt.spawn(async move {
             let _ = tx.send(event::Event::Status("Connected".into()));
-            chain::subscribe_blocks(&url, my_pubkey, sc, ci, tx).await;
+            chain::subscribe_blocks(&url, my_pubkey, sc, tx).await;
         });
     }
 
@@ -792,7 +791,6 @@ fn run_session(
                 let url = node_url.to_string();
                 let tx = event_tx.clone();
                 let sc = zeroize::Zeroizing::new(*seed);
-                let ci = app.session.chain_info.clone();
                 rt.spawn(async move {
                     chain::fetch_and_process_extrinsic(
                         &url,
@@ -800,7 +798,6 @@ fn run_session(
                         block_ref.index,
                         my_pubkey,
                         sc,
-                        ci,
                         tx.clone(),
                     )
                     .await;

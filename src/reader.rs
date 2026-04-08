@@ -8,14 +8,13 @@ use serde_json::Value;
 use std::sync::mpsc::Sender;
 
 use crate::event::Event;
-use crate::extrinsic::ChainInfo;
+use crate::extrinsic::{SYSTEM_REMARK, SYSTEM_REMARK_WITH_EVENT};
 use crate::types::{BlockRef, Pubkey};
 
 pub struct ReadContext<'a> {
     pub my_pubkey: &'a Pubkey,
     pub seed: &'a [u8; 32],
     pub tx: &'a Sender<Event>,
-    pub chain_info: &'a ChainInfo,
 }
 
 pub struct RemarkSource {
@@ -45,13 +44,9 @@ pub fn read_block(block: &Value, ctx: &ReadContext) {
             continue;
         };
         let ext_index_u16 = u16::try_from(ext_index).unwrap_or(u16::MAX);
-        if let Some(source) = source_from_extrinsic(
-            ext_hex,
-            ctx.chain_info,
-            block_number,
-            ext_index_u16,
-            block_ts_ms,
-        ) {
+        if let Some(source) =
+            source_from_extrinsic(ext_hex, block_number, ext_index_u16, block_ts_ms)
+        {
             process_remark(&source, ctx.my_pubkey, ctx.seed, ctx.tx);
         }
     }
@@ -64,27 +59,20 @@ pub fn read_extrinsic(
     ext_index: u16,
     block_ts_ms: u64,
 ) {
-    if let Some(source) = source_from_extrinsic(
-        ext_hex,
-        ctx.chain_info,
-        block_number,
-        ext_index,
-        block_ts_ms,
-    ) {
+    if let Some(source) = source_from_extrinsic(ext_hex, block_number, ext_index, block_ts_ms) {
         process_remark(&source, ctx.my_pubkey, ctx.seed, ctx.tx);
     }
 }
 
 fn source_from_extrinsic(
     ext_hex: &str,
-    chain_info: &ChainInfo,
     block_number: u32,
     ext_index: u16,
     block_ts_ms: u64,
 ) -> Option<RemarkSource> {
     let ext_bytes = hex::decode(ext_hex.trim_start_matches("0x")).ok()?;
     let sender = samp_extract_signer(&ext_bytes).map(Pubkey)?;
-    let remark_bytes = extract_remark_from_call(&ext_bytes, chain_info)?;
+    let remark_bytes = extract_remark_from_call(&ext_bytes)?;
     let remark = decode_remark(&remark_bytes).ok()?;
     Some(RemarkSource {
         sender,
@@ -97,10 +85,10 @@ fn source_from_extrinsic(
     })
 }
 
-fn extract_remark_from_call(ext_bytes: &[u8], chain_info: &ChainInfo) -> Option<Vec<u8>> {
+fn extract_remark_from_call(ext_bytes: &[u8]) -> Option<Vec<u8>> {
     let call = extract_call(ext_bytes)?;
     let pair = (call.pallet, call.call);
-    if pair != chain_info.system_remark && pair != chain_info.system_remark_with_event {
+    if pair != SYSTEM_REMARK && pair != SYSTEM_REMARK_WITH_EVENT {
         return None;
     }
     let (payload, _) = decode_bytes(call.args)?;

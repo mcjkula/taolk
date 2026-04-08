@@ -47,8 +47,6 @@ pub fn test_chain_info() -> ChainInfo {
             width: 8,
         },
         errors: Default::default(),
-        system_remark: (0, 9),
-        system_remark_with_event: (0, 7),
     }
 }
 
@@ -94,8 +92,8 @@ pub fn build_remark_ext(remark: &[u8], sk: &SigningKey, nonce: u32) -> Vec<u8> {
     let ci = test_chain_info();
     let pk = *sk.public_key();
     samp::extrinsic::build_signed_extrinsic(
-        ci.system_remark_with_event.0,
-        ci.system_remark_with_event.1,
+        0,
+        7,
         &args,
         &pk,
         |msg| sk.sign(msg),

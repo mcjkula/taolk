@@ -150,9 +150,8 @@ impl Session {
             let url = node_url.to_string();
             let etx = tx.clone();
             let sc = zeroize::Zeroizing::new(*seed);
-            let ci = session.chain_info.clone();
             tokio::spawn(async move {
-                crate::chain::subscribe_blocks(&url, my_pubkey, sc, ci, etx).await;
+                crate::chain::subscribe_blocks(&url, my_pubkey, sc, etx).await;
             });
         }
 
