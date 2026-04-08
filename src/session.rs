@@ -6,6 +6,7 @@ use crate::error::{Result, SdkError};
 use crate::secret::{Seed, SigningKey};
 use crate::types::{BlockRef, Pubkey};
 use chrono::{DateTime, Utc};
+use curve25519_dalek::scalar::Scalar;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -40,6 +41,7 @@ pub struct Session {
     pubkey: Pubkey,
     pub my_ss58: String,
     seed: Zeroizing<[u8; 32]>,
+    view_scalar: Zeroizing<[u8; 32]>,
     pub node_url: String,
     pub chain_info: crate::extrinsic::ChainInfo,
     pub block_number: u64,
@@ -71,11 +73,13 @@ impl Session {
     ) -> Self {
         let pubkey = signing.public_key();
         let my_ss58 = crate::util::ss58_from_pubkey(&pubkey);
+        let view_scalar = Zeroizing::new(samp::sr25519_signing_scalar(&seed).to_bytes());
         Self {
             signing: Arc::new(signing),
             pubkey,
             my_ss58,
             seed,
+            view_scalar,
             node_url,
             chain_info,
             block_number: 0,
@@ -195,6 +199,10 @@ impl Session {
 
     pub fn signing(&self) -> Arc<SigningKey> {
         Arc::clone(&self.signing)
+    }
+
+    pub fn view_scalar(&self) -> Scalar {
+        Scalar::from_bytes_mod_order(*self.view_scalar)
     }
 
     pub fn ss58(&self) -> &str {
