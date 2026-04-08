@@ -795,7 +795,7 @@ fn render_pending(lines: &mut Vec<Line<'static>>, app: &App, view: View) {
         && let Some(text) = &app.pending_text
     {
         let first_line = text.lines().next().unwrap_or("");
-        let indent = 7 + 3 + 2; // " ⠿⠒⠒⠒⠒ " + "You" + "  "
+        let indent = 7 + 3 + 2;
         lines.push(Line::raw(""));
         lines.push(Line::from(vec![
             Span::styled(
@@ -829,7 +829,7 @@ fn render_messages(
     let my_ss58 = app.session.ss58();
     let mut last_date: Option<chrono::NaiveDate> = None;
     let mut last_sender: Option<&str> = None;
-    let mut last_indent: usize = 7; // fallback
+    let mut last_indent: usize = 7;
 
     for (i, msg) in messages.iter().enumerate() {
         let msg_date = msg.timestamp.with_timezone(&chrono::Local).date_naive();
@@ -1113,7 +1113,6 @@ mod tests {
     fn sender_color_is_deterministic_for_same_input() {
         let a = sender_color("5FHneW46xGXgs5AUiveU4sbTyGBzmstUspZC92UhjJM694ty");
         let b = sender_color("5FHneW46xGXgs5AUiveU4sbTyGBzmstUspZC92UhjJM694ty");
-        // Color is Copy + PartialEq via ratatui.
         assert_eq!(format!("{a:?}"), format!("{b:?}"));
     }
 

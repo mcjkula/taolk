@@ -8,7 +8,7 @@ pub use crate::error::WalletError;
 use crate::secret::{Password, Seed};
 
 const WALLET_VERSION: u8 = 0x01;
-const WALLET_FILE_LEN: usize = 93; // 1 + 32 + 12 + 48
+const WALLET_FILE_LEN: usize = 93;
 const SALT_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
 

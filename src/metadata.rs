@@ -1,15 +1,9 @@
-//! Decode V14 SCALE runtime metadata into the artifacts taolk needs at
-//! startup: the byte layout of `frame_system::AccountInfo.data.free` (so
-//! balances decode at the width the chain actually uses), and the table of
-//! pallet error variants (so `DispatchError` codes can be translated to
-//! `Pallet::Variant` strings without hardcoding). Single-pass stream walk.
-
 use parity_scale_codec::{Compact, Decode, Error as CodecError, Input};
 use std::collections::HashMap;
 
 pub use crate::error::MetadataError;
 
-const METADATA_MAGIC: u32 = 0x6174_656d; // "meta"
+const METADATA_MAGIC: u32 = 0x6174_656d;
 
 #[derive(Clone, Debug)]
 pub struct AccountInfoLayout {
@@ -291,7 +285,6 @@ fn read_registry<I: Input>(input: &mut I) -> Result<Vec<TypeShape>, MetadataErro
         if id != expected {
             return Err(MetadataError::NonSequential { got: id, expected });
         }
-        // Type { path, type_params, type_def, docs }
         skip_strings(input)?;
         skip_type_params(input)?;
         registry.push(read_type_def(input)?);
@@ -304,9 +297,6 @@ fn read_type_def<I: Input>(input: &mut I) -> Result<TypeShape, MetadataError> {
     Ok(match u8::decode(input).map_err(scale)? {
         0 => TypeShape::Composite(read_fields(input)?),
         1 => {
-            // Variant { variants: Vec<{ name, fields, index, docs }> }
-            // We capture (index, name, first_doc_line) for the pallet error path;
-            // field shapes are decoded-and-dropped to keep stream sync.
             let n = compact(input)?;
             let mut variants = Vec::with_capacity(usize::try_from(n).unwrap_or(0));
             for _ in 0..n {
@@ -324,7 +314,6 @@ fn read_type_def<I: Input>(input: &mut I) -> Result<TypeShape, MetadataError> {
             TypeShape::Variant(variants)
         }
         2 => {
-            // Sequence { type_param }
             compact(input)?;
             TypeShape::Variable
         }
@@ -333,7 +322,6 @@ fn read_type_def<I: Input>(input: &mut I) -> Result<TypeShape, MetadataError> {
             inner: compact(input)?,
         },
         4 => {
-            // Tuple { fields: Vec<type_id> }
             let n = compact(input)?;
             let mut ids = Vec::with_capacity(usize::try_from(n).unwrap_or(0));
             for _ in 0..n {
@@ -343,12 +331,10 @@ fn read_type_def<I: Input>(input: &mut I) -> Result<TypeShape, MetadataError> {
         }
         5 => primitive_shape(u8::decode(input).map_err(scale)?)?,
         6 => {
-            // Compact { type_param }
             compact(input)?;
             TypeShape::Variable
         }
         7 => {
-            // BitSequence { bit_store_type, bit_order_type }
             compact(input)?;
             compact(input)?;
             TypeShape::Variable
@@ -361,7 +347,6 @@ fn read_fields<I: Input>(input: &mut I) -> Result<Vec<(String, u32)>, MetadataEr
     let n = compact(input)?;
     let mut fields = Vec::with_capacity(usize::try_from(n).unwrap_or(0));
     for _ in 0..n {
-        // Field { name: Option<String>, ty: Compact<u32>, type_name: Option<String>, docs }
         let name = <Option<String>>::decode(input)
             .map_err(scale)?
             .unwrap_or_default();
@@ -389,21 +374,21 @@ fn skip_type_params<I: Input>(input: &mut I) -> Result<(), MetadataError> {
 
 fn primitive_shape(tag: u8) -> Result<TypeShape, MetadataError> {
     let (width, unsigned_int) = match tag {
-        0 => (1, false),                     // Bool
-        1 => (4, false),                     // Char (u32 codepoint)
-        2 => return Ok(TypeShape::Variable), // Str
-        3 => (1, true),                      // U8
-        4 => (2, true),                      // U16
-        5 => (4, true),                      // U32
-        6 => (8, true),                      // U64
-        7 => (16, true),                     // U128
-        8 => (32, true),                     // U256
-        9 => (1, false),                     // I8
-        10 => (2, false),                    // I16
-        11 => (4, false),                    // I32
-        12 => (8, false),                    // I64
-        13 => (16, false),                   // I128
-        14 => (32, false),                   // I256
+        0 => (1, false),
+        1 => (4, false),
+        2 => return Ok(TypeShape::Variable),
+        3 => (1, true),
+        4 => (2, true),
+        5 => (4, true),
+        6 => (8, true),
+        7 => (16, true),
+        8 => (32, true),
+        9 => (1, false),
+        10 => (2, false),
+        11 => (4, false),
+        12 => (8, false),
+        13 => (16, false),
+        14 => (32, false),
         _ => return Err(MetadataError::UnknownPrimitive(tag)),
     };
     Ok(TypeShape::Primitive {
@@ -418,30 +403,27 @@ fn walk_pallets<I: Input>(input: &mut I) -> Result<PalletWalkResult, MetadataErr
 
     for _ in 0..compact(input)? {
         let pallet_name = String::decode(input).map_err(scale)?;
-        // storage: Option<{ prefix, entries }>
         if option_tag(input)? {
             let _ = String::decode(input).map_err(scale)?;
             for _ in 0..compact(input)? {
                 let entry_name = String::decode(input).map_err(scale)?;
-                let _ = u8::decode(input).map_err(scale)?; // modifier
+                let _ = u8::decode(input).map_err(scale)?;
                 let value_ty = read_storage_entry_value_type(input)?;
                 if pallet_name == "System" && entry_name == "Account" {
                     account_info_ty = Some(value_ty);
                 }
-                let _ = <Vec<u8>>::decode(input).map_err(scale)?; // default
-                skip_strings(input)?; // docs
+                let _ = <Vec<u8>>::decode(input).map_err(scale)?;
+                skip_strings(input)?;
             }
         }
-        skip_optional_compact(input)?; // calls:    Option<{ ty }>
-        skip_optional_compact(input)?; // event:    Option<{ ty }>
+        skip_optional_compact(input)?;
+        skip_optional_compact(input)?;
         for _ in 0..compact(input)? {
-            // constants: Vec<{ name, ty, value, docs }>
             let _ = String::decode(input).map_err(scale)?;
             compact(input)?;
             let _ = <Vec<u8>>::decode(input).map_err(scale)?;
             skip_strings(input)?;
         }
-        // error: Option<{ ty }>
         let error_ty = if option_tag(input)? {
             Some(compact(input)?)
         } else {
@@ -465,14 +447,13 @@ fn walk_pallets<I: Input>(input: &mut I) -> Result<PalletWalkResult, MetadataErr
 
 fn read_storage_entry_value_type<I: Input>(input: &mut I) -> Result<u32, MetadataError> {
     match u8::decode(input).map_err(scale)? {
-        0 => compact(input), // Plain(value)
+        0 => compact(input),
         1 => {
-            // Map { hashers: Vec<StorageHasher>, key, value }
             for _ in 0..compact(input)? {
                 let _ = u8::decode(input).map_err(scale)?;
             }
-            compact(input)?; // key
-            compact(input) // value
+            compact(input)?;
+            compact(input)
         }
         tag => Err(MetadataError::UnknownStorageEntryType(tag)),
     }

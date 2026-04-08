@@ -344,7 +344,7 @@ fn process_group_remark(r: &RemarkResp, scalar: &Scalar, tx: &Sender<Event>) {
 
     let plaintext = match samp::decrypt_from_group(&remark.content, scalar, &remark.nonce, None) {
         Ok(pt) => pt,
-        Err(_) => return, // Not for us
+        Err(_) => return,
     };
 
     let (group_ref, reply_to, continues, body_bytes) = match samp::decode_group_content(&plaintext)

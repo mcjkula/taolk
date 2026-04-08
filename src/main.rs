@@ -207,7 +207,7 @@ fn run_tui(
         drop(seed);
         match exit {
             SessionExit::Quit => break,
-            SessionExit::Lock => {} // re-show single-wallet unlock
+            SessionExit::Lock => {}
             SessionExit::SwitchWallet => {
                 force_picker = true;
             }
@@ -1242,8 +1242,8 @@ fn handle_normal_key(
         KeyCode::PageDown => {
             app.scroll_offset = app.scroll_offset.saturating_sub(20);
         }
-        KeyCode::Home => app.scroll_offset = usize::MAX, // scroll to top
-        KeyCode::Char('G') | KeyCode::End => app.scroll_offset = 0, // scroll to bottom
+        KeyCode::Home => app.scroll_offset = usize::MAX,
+        KeyCode::Char('G') | KeyCode::End => app.scroll_offset = 0,
         KeyCode::Char(' ') => app.show_sidebar = !app.show_sidebar,
         KeyCode::Char('j') | KeyCode::Tab | KeyCode::Down => app.next_sidebar(),
         KeyCode::Char('k') | KeyCode::BackTab | KeyCode::Up => app.prev_sidebar(),

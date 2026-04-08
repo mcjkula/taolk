@@ -32,12 +32,10 @@ fn read_extrinsic_emits_event_for_samp_remark() {
     let bob_seed = [0xBB; 32];
     let bob_pubkey = signing(&bob_seed).public_key();
 
-    // Alice sends a public message to Bob
     let remark = samp::encode_public(&bob_pubkey.0, b"hello bob");
     let ext = extrinsic::build_remark_extrinsic(&remark, &alice_sk, 0, &ci()).unwrap();
     let hex = ext_to_hex(&ext);
 
-    // Bob reads the extrinsic
     let (tx, rx) = mpsc::channel();
     let ctx = make_ctx(&bob_seed, &bob_pubkey, &tx);
     reader::read_extrinsic(&hex, &ctx, 100, 1, 1_700_000_000_000);
@@ -71,7 +69,6 @@ fn read_extrinsic_ignores_non_samp_remark() {
     let alice_sk = signing(&alice_seed);
     let alice_pubkey = alice_sk.public_key();
 
-    // Build an extrinsic with a non-SAMP remark
     let remark = b"not a samp message";
     let ext = extrinsic::build_remark_extrinsic(remark, &alice_sk, 0, &ci()).unwrap();
     let hex = ext_to_hex(&ext);
@@ -88,30 +85,21 @@ fn read_extrinsic_ignores_non_samp_remark() {
 
 #[test]
 fn extract_block_timestamp_from_inherent() {
-    // Build a minimal unsigned Substrate timestamp inherent:
-    // SCALE compact length prefix || version(1, unsigned = 0x04) || pallet(0x03) || call(0x00) || compact_timestamp
-    //
-    // Timestamp pallet = 0x03, set call = 0x00
-    // We encode timestamp 1_700_000_000_000 ms using SCALE compact u64.
     let ts_ms: u64 = 1_700_000_000_000;
 
-    // SCALE compact encoding of u64 > 2^30 uses big-integer mode (mode 0b11):
-    // first byte = (bytes_following - 4) << 2 | 0b11
-    // For u64: bytes_following = 8, so first byte = (8-4)<<2 | 3 = 0x13
     let ts_le = ts_ms.to_le_bytes();
-    let mut compact_ts = vec![0x13u8]; // (4 << 2) | 0b11 = 0x13
+    let mut compact_ts = vec![0x13u8];
     compact_ts.extend_from_slice(&ts_le);
 
     let mut payload = Vec::new();
-    payload.push(0x04); // extrinsic version byte: unsigned (no SIGNED_BIT)
-    payload.push(0x03); // Timestamp pallet
-    payload.push(0x00); // set call
+    payload.push(0x04);
+    payload.push(0x03);
+    payload.push(0x00);
     payload.extend_from_slice(&compact_ts);
 
-    // Wrap with SCALE compact length prefix
     let mut full = Vec::new();
     let len = payload.len() as u8;
-    full.push(len << 2); // single-byte compact for small lengths (mode 0b00)
+    full.push(len << 2);
     full.extend_from_slice(&payload);
 
     let hex = ext_to_hex(&full);
@@ -135,20 +123,17 @@ fn read_extrinsic_decrypts_for_recipient() {
 
     let bob_seed = [0xBB; 32];
     let bob_ristretto_pub = samp::public_from_seed(&bob_seed);
-    // Bob's sr25519 public key (for Substrate account) comes from the keypair
     let bob_sk = signing(&bob_seed);
     let bob_pubkey = bob_sk.public_key();
 
     let plaintext = b"secret for bob";
     let nonce: [u8; 12] = [0x01; 12];
 
-    // Compute view tag and encrypt
     let recipient_ristretto = curve25519_dalek::ristretto::CompressedRistretto(bob_ristretto_pub);
     let view_tag = samp::compute_view_tag(&alice_seed, &recipient_ristretto, &nonce).unwrap();
     let encrypted_content =
         samp::encrypt(plaintext, &recipient_ristretto, &nonce, &alice_seed).unwrap();
 
-    // Build the SAMP remark wire format for encrypted
     let remark = samp::encode_encrypted(
         samp::CONTENT_TYPE_ENCRYPTED,
         view_tag,
@@ -159,7 +144,6 @@ fn read_extrinsic_decrypts_for_recipient() {
     let ext = extrinsic::build_remark_extrinsic(&remark, &alice_sk, 0, &ci()).unwrap();
     let hex = ext_to_hex(&ext);
 
-    // Bob reads
     let (tx, rx) = mpsc::channel();
     let ctx = make_ctx(&bob_seed, &bob_pubkey, &tx);
     reader::read_extrinsic(&hex, &ctx, 200, 3, 1_700_000_000_000);
@@ -200,7 +184,6 @@ fn read_extrinsic_skips_message_for_wrong_recipient() {
     let plaintext = b"for bob only";
     let nonce: [u8; 12] = [0x02; 12];
 
-    // Alice encrypts for Bob
     let recipient_ristretto = curve25519_dalek::ristretto::CompressedRistretto(bob_ristretto_pub);
     let view_tag = samp::compute_view_tag(&alice_seed, &recipient_ristretto, &nonce).unwrap();
     let encrypted_content =
@@ -215,7 +198,6 @@ fn read_extrinsic_skips_message_for_wrong_recipient() {
     let ext = extrinsic::build_remark_extrinsic(&remark, &alice_sk, 0, &ci()).unwrap();
     let hex = ext_to_hex(&ext);
 
-    // Charlie tries to read (should not match -- view tag mismatch filters it)
     let (tx, rx) = mpsc::channel();
     let ctx = make_ctx(&charlie_seed, &charlie_pubkey, &tx);
     reader::read_extrinsic(&hex, &ctx, 200, 3, 0);

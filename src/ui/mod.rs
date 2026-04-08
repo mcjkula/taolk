@@ -6,17 +6,17 @@ mod sidebar;
 mod status;
 
 mod icons {
-    pub const INBOX: &str = "\u{2709}"; // ✉ Envelope
-    pub const OUTBOX: &str = "\u{2197}"; // ↗ North East Arrow
-    pub const PUBLIC: &str = "\u{25CB}"; // ○ White Circle (open)
-    pub const ENCRYPTED: &str = "\u{25CF}"; // ● Black Circle (locked)
-    pub const THREADS: &str = "\u{21C4}"; // ⇄ Left Right Arrow (1:1 conversation)
-    pub const CHANNELS: &str = "\u{2261}"; // ≡ Three lines (list/directory)
-    pub const GROUPS: &str = "\u{2299}"; // ⊙ Circled dot (contained group)
-    pub const CREATOR: &str = "\u{2605}"; // ★ Star (creator/owner)
-    pub const DRAFT: &str = "\u{270E}"; // ✎ Pencil
-    pub const ERROR: &str = "\u{2717}"; // ✗ Ballot X
-    pub const SUCCESS: &str = "\u{2713}"; // ✓ Check Mark
+    pub const INBOX: &str = "\u{2709}";
+    pub const OUTBOX: &str = "\u{2197}";
+    pub const PUBLIC: &str = "\u{25CB}";
+    pub const ENCRYPTED: &str = "\u{25CF}";
+    pub const THREADS: &str = "\u{21C4}";
+    pub const CHANNELS: &str = "\u{2261}";
+    pub const GROUPS: &str = "\u{2299}";
+    pub const CREATOR: &str = "\u{2605}";
+    pub const DRAFT: &str = "\u{270E}";
+    pub const ERROR: &str = "\u{2717}";
+    pub const SUCCESS: &str = "\u{2713}";
 }
 
 use crate::app::App;
@@ -28,10 +28,7 @@ use ratatui::widgets::{Block, Borders};
 pub fn render(frame: &mut Frame, app: &App) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(5),    // main area
-            Constraint::Length(1), // status bar
-        ])
+        .constraints([Constraint::Min(5), Constraint::Length(1)])
         .split(frame.area());
 
     let main_area = outer[0];

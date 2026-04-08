@@ -2,14 +2,6 @@ use taolk::secret::{Password, Phrase, Seed};
 
 #[test]
 fn seed_from_phrase_zero_vector_is_wire_format_stable() {
-    // taolk derives the mini-secret via the substrate-bip39 scheme:
-    // PBKDF2-HMAC-SHA512(password=raw_entropy, salt="mnemonic", iters=2048),
-    // first 32 bytes. This is NOT the BIP39 seed-from-phrase derivation.
-    //
-    // This anchor catches any wire-format break: the byte vector below was
-    // captured from `Seed::from_phrase(&zero_phrase)` on the v2.0.0 baseline.
-    // If this test fails, taolk's key derivation has changed and existing
-    // wallets will produce different addresses.
     let phrase = Phrase::parse(
         "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
     )
@@ -63,15 +55,10 @@ fn ct_eq_returns_false_for_completely_different_seeds() {
 
 #[test]
 fn password_value_does_not_escape_outer_scope() {
-    // Behavioral check that Password is consumed by Drop at end of scope.
-    // We can't directly verify zeroization (UB to read after drop), but we
-    // can verify the API only allows borrowing — not moving out — the inner
-    // value via as_str().
     {
         let p = Password::new("secret-value-123".to_string());
         assert_eq!(p.as_str(), "secret-value-123");
     }
-    // After scope: p is dropped. Zeroizing<String> upstream guarantees zero.
 }
 
 #[test]

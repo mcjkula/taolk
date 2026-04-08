@@ -226,7 +226,7 @@ pub fn get_value(config: &Config, key: &str) -> String {
         "network.node" => config.network.node.clone(),
         "network.mirrors" => {
             if config.network.mirrors.is_empty() {
-                "\u{2014}".into() // em-dash
+                "\u{2014}".into()
             } else {
                 config.network.mirrors.join(", ")
             }

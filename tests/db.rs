@@ -302,14 +302,8 @@ fn different_seeds_different_encryption() {
     db_a.insert_thread_message(thread_ref, "Alice", &msg, 100, 0);
     db_b.insert_thread_message(thread_ref, "Alice", &msg, 100, 0);
 
-    // Both decrypt correctly with their own key
     let threads_a = db_a.load_threads();
     let threads_b = db_b.load_threads();
     assert_eq!(threads_a[0].2[0].body, "same plaintext");
     assert_eq!(threads_b[0].2[0].body, "same plaintext");
-
-    // Cross-load: open a new DB with seed B over the same schema, insert with A's data
-    // We cannot access raw ciphertext, but we can verify that each DB independently
-    // produces correct results — the encryption is seed-derived, so different seeds
-    // necessarily produce different ciphertexts (different HKDF-derived keys).
 }

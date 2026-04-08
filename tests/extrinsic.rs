@@ -50,9 +50,7 @@ fn build_remark_starts_with_length_prefix() {
 
     let ext = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci).unwrap();
 
-    // Decode compact length from first byte(s)
     let (prefix_len, encoded_len) = decode_compact(&ext);
-    // The encoded length should equal the remaining bytes after the prefix
     assert_eq!(
         encoded_len,
         ext.len() - prefix_len,
@@ -68,22 +66,14 @@ fn build_remark_system_pallet() {
 
     let ext = extrinsic::build_remark_extrinsic(remark, &sk, 0, &ci).unwrap();
 
-    // Layout after compact length prefix:
-    // 0x84 (signed flag) | 0x00 (addr type) | account_id(32) | 0x01 (sig type) | sig(64)
-    // | era(1) | compact_nonce | tip(1) | metadata_hash_disabled(1) | call_data...
-    // call_data starts with pallet_index(1) | call_index(1) | compact_remark_len | remark
     let (prefix_len, _) = decode_compact(&ext);
     let payload = &ext[prefix_len..];
 
-    // Find the call data after the fixed-size header:
-    // 0x84(1) + addr_type(1) + account_id(32) + sig_type(1) + sig(64) = 99 bytes
-    // then era(1) + compact_nonce + tip(1) + metadata_hash_disabled(1) + call_data...
     assert_eq!(payload[0], 0x84, "first byte should be EXT_VERSION_SIGNED");
-    let era_offset = 99; // 1 + 1 + 32 + 1 + 64
+    let era_offset = 99;
     assert_eq!(payload[era_offset], 0x00, "era should be immortal (0x00)");
 
-    // After era: compact nonce (for nonce=0, compact is 0x00 = 1 byte) + tip(1) + metadata_hash(1)
-    let call_offset = era_offset + 1 + 1 + 1 + 1; // era + nonce(compact 0) + tip + metadata_hash
+    let call_offset = era_offset + 1 + 1 + 1 + 1;
     assert_eq!(
         payload[call_offset], 0x00,
         "pallet index should be 0x00 (System)"
@@ -106,7 +96,6 @@ fn build_remark_immortal_era() {
     let (prefix_len, _) = decode_compact(&ext);
     let payload = &ext[prefix_len..];
 
-    // Era is at offset 99 (after 0x84(1) + addr_type(1) + account_id(32) + sig_type(1) + sig(64))
     let era_offset = 1 + 1 + 32 + 1 + 64;
     assert_eq!(
         payload[era_offset], 0x00,

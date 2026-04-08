@@ -247,8 +247,6 @@ fn sdk_error_database_via_rusqlite_from() {
 
 #[test]
 fn sdk_error_encryption_display_does_not_leak_seed_bytes() {
-    // The Encryption variant carries a string error from the underlying crypto layer.
-    // It must never carry raw seed/key bytes — only the opaque error string.
     let err = SdkError::Encryption("aead failed".into());
     let s = err.to_string();
     let known_seed_byte_pattern = "aaaaaaaa";

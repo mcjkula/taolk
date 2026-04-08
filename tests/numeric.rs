@@ -167,8 +167,3 @@ fn db_inbox_message_with_far_future_timestamp_roundtrips() {
     assert_eq!(inbox.len(), 1);
     assert_eq!(inbox[0].body, "future");
 }
-
-// COVERAGE: u32::MAX remark length boundary requires a 4 GB allocation to feed
-// build_remark_extrinsic. Verified statically by `try_from` returning
-// `ChainError::MessageTooLong` on usize > u32::MAX; no runtime test exercises
-// the path because allocating 4 GB on test infra is not feasible.

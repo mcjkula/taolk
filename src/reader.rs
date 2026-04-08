@@ -81,11 +81,11 @@ pub fn read_extrinsic(
     }
 }
 
-const SIGNED_BIT: u8 = 0x80; // bit 7 of version byte: 1 = signed
-const ADDR_TYPE_ACCOUNT: u8 = 0x00; // MultiAddress::Id (raw 32-byte AccountId)
-const SIGNED_HEADER_LEN: usize = 99; // version(1) + addr_type(1) + account(32) + sig_type(1) + sig(64)
-const MIN_SIGNED_EXTRINSIC: usize = 103; // SIGNED_HEADER_LEN + era(1) + nonce(1) + tip(1) + call(2)
-const MIN_SIGNER_PAYLOAD: usize = 34; // version(1) + addr_type(1) + account(32)
+const SIGNED_BIT: u8 = 0x80;
+const ADDR_TYPE_ACCOUNT: u8 = 0x00;
+const SIGNED_HEADER_LEN: usize = 99;
+const MIN_SIGNED_EXTRINSIC: usize = 103;
+const MIN_SIGNER_PAYLOAD: usize = 34;
 const SYSTEM_PALLET: u8 = 0x00;
 const REMARK_WITH_EVENT_CALL: u8 = 0x07;
 const REMARK_CALL: u8 = 0x09;
@@ -102,7 +102,6 @@ fn extract_remark(ext_bytes: &[u8]) -> Option<Vec<u8>> {
     if offset >= payload.len() {
         return None;
     }
-    // era: 0x00 = immortal (1 byte), else mortal (2 bytes)
     if payload[offset] != 0x00 {
         offset += 2;
     } else {
@@ -112,7 +111,7 @@ fn extract_remark(ext_bytes: &[u8]) -> Option<Vec<u8>> {
     offset += nonce_len;
     let (_, tip_len) = decode_compact_prefix(&payload[offset..])?;
     offset += tip_len;
-    offset += 1; // metadata hash mode byte
+    offset += 1;
 
     if offset + 2 >= payload.len() {
         return None;

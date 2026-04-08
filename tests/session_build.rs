@@ -107,7 +107,6 @@ fn build_group_create_decryptable() {
 
     assert_eq!(decoded.content_type, samp::ContentType::Group);
 
-    // Bob decrypts
     let plaintext =
         samp::decrypt_from_group(&decoded.content, &bob_scalar(), &decoded.nonce, Some(2)).unwrap();
 

@@ -16,7 +16,6 @@ const CHARLIE_PUB: Pubkey = Pubkey([3u8; 32]);
 #[test]
 fn two_messages_same_thread() {
     let mut s = bob_session();
-    // Root message: thread_ref=ZERO -> becomes thread (100,0)
     s.add_thread_message(
         ALICE_PUB,
         bob_pub(),
@@ -31,7 +30,6 @@ fn two_messages_same_thread() {
             ext_index: 0,
         },
     );
-    // Second message: thread_ref=(100,0) -> same thread
     s.add_thread_message(
         ALICE_PUB,
         bob_pub(),
@@ -53,7 +51,6 @@ fn two_messages_same_thread() {
 #[test]
 fn sent_and_received_in_same_thread() {
     let mut s = bob_session();
-    // Bob starts thread: root at (100,0)
     s.add_thread_message(
         bob_pub(),
         ALICE_PUB,
@@ -68,7 +65,6 @@ fn sent_and_received_in_same_thread() {
             ext_index: 0,
         },
     );
-    // Alice replies in same thread
     s.add_thread_message(
         ALICE_PUB,
         bob_pub(),
@@ -91,7 +87,6 @@ fn sent_and_received_in_same_thread() {
 #[test]
 fn different_peers_different_threads() {
     let mut s = bob_session();
-    // Thread with Alice
     s.add_thread_message(
         ALICE_PUB,
         bob_pub(),
@@ -106,7 +101,6 @@ fn different_peers_different_threads() {
             ext_index: 0,
         },
     );
-    // Thread with Charlie
     s.add_thread_message(
         CHARLIE_PUB,
         bob_pub(),
@@ -127,7 +121,6 @@ fn different_peers_different_threads() {
 #[test]
 fn two_threads_same_peer() {
     let mut s = bob_session();
-    // Thread 1 with Alice: root at (100,0)
     s.add_thread_message(
         ALICE_PUB,
         bob_pub(),
@@ -142,7 +135,6 @@ fn two_threads_same_peer() {
             ext_index: 0,
         },
     );
-    // Thread 2 with Alice: root at (200,0)
     s.add_thread_message(
         ALICE_PUB,
         bob_pub(),
@@ -194,7 +186,6 @@ fn db_roundtrip_then_new_message_same_thread() {
         db,
     );
 
-    // Root message stored in DB
     s.add_thread_message(
         ALICE_PUB,
         bob_pub(),
@@ -211,12 +202,10 @@ fn db_roundtrip_then_new_message_same_thread() {
     );
     assert_eq!(s.threads.len(), 1);
 
-    // Simulate restart
     s.threads.clear();
     s.load_from_db();
     assert_eq!(s.threads.len(), 1);
 
-    // New message in same thread
     s.add_thread_message(
         ALICE_PUB,
         bob_pub(),
@@ -252,7 +241,6 @@ fn db_roundtrip_own_sent_then_receive_same_thread() {
         db,
     );
 
-    // Bob's own sent message (root)
     s.add_thread_message(
         bob_pub(),
         ALICE_PUB,
@@ -268,12 +256,10 @@ fn db_roundtrip_own_sent_then_receive_same_thread() {
         },
     );
 
-    // Restart
     s.threads.clear();
     s.load_from_db();
     assert_eq!(s.threads.len(), 1);
 
-    // Alice replies in same thread
     s.add_thread_message(
         ALICE_PUB,
         bob_pub(),
@@ -300,7 +286,6 @@ fn db_roundtrip_own_sent_then_receive_same_thread() {
 #[test]
 fn messages_sorted_by_block_position() {
     let mut s = bob_session();
-    // All in same thread (100,0)
     s.add_thread_message(
         ALICE_PUB,
         bob_pub(),
@@ -405,7 +390,6 @@ fn gap_detected_for_missing_reference() {
 #[test]
 fn gap_resolved_after_loading_reference() {
     let mut s = bob_session();
-    // Message referencing a missing block
     s.add_thread_message(
         ALICE_PUB,
         bob_pub(),
@@ -422,7 +406,6 @@ fn gap_resolved_after_loading_reference() {
     );
     assert!(s.threads[0].messages[0].has_gap);
 
-    // Load the referenced message (in same thread)
     s.add_thread_message(
         ALICE_PUB,
         bob_pub(),
@@ -502,7 +485,6 @@ fn last_ref_returns_latest_message() {
 #[test]
 fn my_last_ref_returns_own_latest() {
     let mut s = bob_session();
-    // Alice starts thread
     s.add_thread_message(
         ALICE_PUB,
         bob_pub(),
@@ -517,7 +499,6 @@ fn my_last_ref_returns_own_latest() {
             ext_index: 0,
         },
     );
-    // Bob replies in same thread
     s.add_thread_message(
         bob_pub(),
         ALICE_PUB,
@@ -532,7 +513,6 @@ fn my_last_ref_returns_own_latest() {
             ext_index: 0,
         },
     );
-    // Alice again
     s.add_thread_message(
         ALICE_PUB,
         bob_pub(),
@@ -556,7 +536,6 @@ fn my_last_ref_returns_own_latest() {
 fn alice_sends_two_messages_bob_offline_between() {
     let mut s = bob_session();
 
-    // Alice sends root message
     s.add_thread_message(
         ALICE_PUB,
         bob_pub(),
@@ -572,12 +551,10 @@ fn alice_sends_two_messages_bob_offline_between() {
         },
     );
 
-    // Bob goes offline (simulate restart)
     s.threads.clear();
     s.load_from_db();
     assert_eq!(s.threads.len(), 1, "After restart, should have 1 thread");
 
-    // Alice sent second message in same thread while Bob was offline
     s.add_thread_message(
         ALICE_PUB,
         bob_pub(),
@@ -599,7 +576,6 @@ fn alice_sends_two_messages_bob_offline_between() {
 
 #[test]
 fn zero_thread_ref_creates_new_thread() {
-    // Two messages with thread_ref=ZERO = two separate threads
     let mut s = bob_session();
 
     s.add_thread_message(
@@ -662,7 +638,6 @@ fn ss58_decode_roundtrip_preserves_pubkey() {
 fn own_message_with_real_recipient_correct_thread() {
     let mut s = bob_session();
 
-    // Alice starts thread
     s.add_thread_message(
         ALICE_PUB,
         bob_pub(),
@@ -678,7 +653,6 @@ fn own_message_with_real_recipient_correct_thread() {
         },
     );
 
-    // Bob replies in same thread (unsealed recipient)
     s.add_thread_message(
         bob_pub(),
         ALICE_PUB,

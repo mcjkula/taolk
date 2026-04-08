@@ -132,7 +132,7 @@ pub fn build_remark_extrinsic(
     signing_payload.extend_from_slice(&chain_info.tx_version.to_le_bytes());
     signing_payload.extend_from_slice(&chain_info.genesis_hash);
     signing_payload.extend_from_slice(&chain_info.genesis_hash);
-    signing_payload.push(0x00); // CheckMetadataHash additional_signed: None
+    signing_payload.push(0x00);
 
     let to_sign = if signing_payload.len() > 256 {
         let mut hasher = blake2::Blake2b::<blake2::digest::typenum::U32>::new();
@@ -462,7 +462,6 @@ fn scale_compact_len(data: &[u8], offset: usize) -> Result<usize, ChainError> {
             let extra = usize::from(data[offset] >> 2) + 4;
             Ok(1 + extra)
         }
-        // COVERAGE: byte & 0b11 ⊆ {0,1,2,3}; the four arms above are exhaustive.
         _ => unreachable!(),
     }
 }

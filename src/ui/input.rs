@@ -141,7 +141,7 @@ fn render_single_input(
     area: Rect,
 ) {
     let prompt_span = Span::styled(prompt, Style::default().fg(Color::DarkGray));
-    let prompt_width = prompt.len() + 1; // +1 for leading space
+    let prompt_width = prompt.len() + 1;
 
     if app.input.is_empty() {
         let input_line = Line::from(vec![
@@ -209,7 +209,7 @@ fn cursor_line_col(text: &str, byte_pos: usize) -> (usize, usize) {
 
 fn render_compose_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) {
     let prompt = "> ";
-    let prompt_width: usize = 3; // " > "
+    let prompt_width: usize = 3;
     let w = usize::from(area.width);
     let hints = compose_hints(w, app.input.contains('\n'));
 
@@ -343,7 +343,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 let Some((_, ss58)) = app.msg_recipient.as_ref() else {
                     return;
                 };
-                let prefix_len = 31; // " [p] public  [e] encrypted  to "
+                let prefix_len = 31;
                 let ss58_max = (usize::from(area.width)).saturating_sub(prefix_len);
                 let selector = Line::from(vec![
                     Span::raw(" "),
@@ -392,7 +392,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 (s, false)
             } else if let Some(text) = &app.pending_text {
                 let first = text.lines().next().unwrap_or("");
-                let max = (usize::from(area.width)).saturating_sub(16); // room for byte count
+                let max = (usize::from(area.width)).saturating_sub(16);
                 let display = if first.len() > max {
                     format!("\"{}\u{2026}\"", &first[..max.saturating_sub(3)])
                 } else {
@@ -432,7 +432,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         Mode::Normal => {
             let input_line = if let Some(draft) = app.current_draft() {
                 let suffix = "  [i to continue]";
-                let avail = (usize::from(area.width)).saturating_sub(4 + suffix.len()); // " > " + suffix
+                let avail = (usize::from(area.width)).saturating_sub(4 + suffix.len());
                 let draft_str = draft.to_string();
                 let visible = fit(&draft_str, avail);
                 Line::from(vec![
@@ -547,7 +547,7 @@ fn render_picker_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
         }
     } else {
         let hints = render_hints(&[("Enter", "select"), ("Esc", "clear")], w);
-        let avail = w.saturating_sub(6); // " To: " + margin
+        let avail = w.saturating_sub(6);
         let (text_spans, cursor_off) = visible_input(&app.input, app.cursor_pos, avail, None);
         let mut spans = vec![Span::styled(" To: ", Style::default().fg(Color::DarkGray))];
         spans.extend(text_spans);

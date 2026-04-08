@@ -61,8 +61,6 @@ fn tampered_wallet_byte_returns_corrupt_file_or_wrong_password() {
     bytes[mid] ^= 0xFF;
     std::fs::write(&path, &bytes).unwrap();
 
-    // A flipped ciphertext byte fails AEAD verification → WrongPassword (decrypt fails).
-    // A flipped header byte → CorruptFile.
     match wallet::open_at(&path, &pw("pw")) {
         Err(wallet::WalletError::WrongPassword) | Err(wallet::WalletError::CorruptFile) => {}
         Err(e) => panic!("expected WrongPassword or CorruptFile, got {e:?}"),
