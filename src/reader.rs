@@ -135,7 +135,7 @@ pub fn process_remark(
     let sender = source.sender;
     let block_number = source.at.block().get();
     let ext_index = source.at.index().get();
-    let timestamp = source.timestamp_secs;
+    let timestamp = samp::Timestamp::from_unix_secs(source.timestamp_secs);
 
     match &source.remark {
         Remark::Public { recipient, body } => {
@@ -279,7 +279,7 @@ fn process_one_to_one(
 ) {
     let block_number = source.at.block().get();
     let ext_index = source.at.index().get();
-    let timestamp = source.timestamp_secs;
+    let timestamp = samp::Timestamp::from_unix_secs(source.timestamp_secs);
     let is_mine = sender == *my_pubkey;
     let scalar = keys.scalar();
 

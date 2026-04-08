@@ -522,7 +522,7 @@ fn dispatch_unlock_all(
             remark,
             remark_bytes: entry.remark_bytes,
             at: types::BlockRef::from_parts(entry.block_number, entry.ext_index),
-            timestamp_secs: entry.timestamp,
+            timestamp_secs: entry.timestamp.as_unix_secs(),
         };
         reader::process_remark(&source, &my_pubkey, &keys, send_tx);
         unlocked += 1;
@@ -899,8 +899,11 @@ fn run_session(
                     Some(text) => text,
                     None => continue,
                 };
-                let ts = DateTime::<Utc>::from_timestamp(i64::try_from(timestamp).unwrap_or(0), 0)
-                    .unwrap_or_default();
+                let ts = DateTime::<Utc>::from_timestamp(
+                    i64::try_from(timestamp.as_unix_secs()).unwrap_or(0),
+                    0,
+                )
+                .unwrap_or_default();
                 let sender_ss58 = util::ss58_short(&sender);
                 let is_mine = sender == app.session.pubkey();
                 let kind = ct & 0x0F;
@@ -950,8 +953,11 @@ fn run_session(
                 ext_index,
                 timestamp,
             }) => {
-                let ts = DateTime::<Utc>::from_timestamp(i64::try_from(timestamp).unwrap_or(0), 0)
-                    .unwrap_or_default();
+                let ts = DateTime::<Utc>::from_timestamp(
+                    i64::try_from(timestamp.as_unix_secs()).unwrap_or(0),
+                    0,
+                )
+                .unwrap_or_default();
                 let is_mine = sender_ss58 == util::ss58_short(&app.session.pubkey());
                 let mentioned = util::body_mentions(&body, app.session.ss58());
                 app.session.peer_pubkeys.insert(sender_ss58.clone(), sender);
@@ -1008,8 +1014,11 @@ fn run_session(
                 ext_index,
                 timestamp,
             }) => {
-                let ts = DateTime::<Utc>::from_timestamp(i64::try_from(timestamp).unwrap_or(0), 0)
-                    .unwrap_or_default();
+                let ts = DateTime::<Utc>::from_timestamp(
+                    i64::try_from(timestamp.as_unix_secs()).unwrap_or(0),
+                    0,
+                )
+                .unwrap_or_default();
                 let is_mine = sender_ss58 == util::ss58_short(&app.session.pubkey());
                 let mentioned = util::body_mentions(&body, app.session.ss58());
                 app.session.peer_pubkeys.insert(sender_ss58.clone(), sender);

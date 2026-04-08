@@ -24,7 +24,7 @@ pub struct LockedOutbound {
     pub sender: Pubkey,
     pub block_number: u32,
     pub ext_index: u16,
-    pub timestamp: u64,
+    pub timestamp: samp::Timestamp,
     pub remark_bytes: samp::RemarkBytes,
 }
 

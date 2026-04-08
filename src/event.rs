@@ -11,7 +11,7 @@ pub enum Event {
         continues: BlockRef,
         block_number: u32,
         ext_index: u16,
-        timestamp: u64,
+        timestamp: samp::Timestamp,
     },
     NewChannelMessage {
         sender: Pubkey,
@@ -22,7 +22,7 @@ pub enum Event {
         continues: BlockRef,
         block_number: u32,
         ext_index: u16,
-        timestamp: u64,
+        timestamp: samp::Timestamp,
     },
     ChannelDiscovered {
         name: String,
@@ -44,13 +44,13 @@ pub enum Event {
         continues: BlockRef,
         block_number: u32,
         ext_index: u16,
-        timestamp: u64,
+        timestamp: samp::Timestamp,
     },
     LockedOutbound {
         sender: Pubkey,
         block_number: u32,
         ext_index: u16,
-        timestamp: u64,
+        timestamp: samp::Timestamp,
         remark_bytes: samp::RemarkBytes,
     },
     MessageSent,
