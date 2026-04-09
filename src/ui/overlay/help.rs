@@ -1,11 +1,12 @@
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
+use crate::ui::theme::{apply_mode, theme_for};
 
 struct Card {
     title: &'static str,
@@ -110,6 +111,18 @@ const COLUMN_GAP: usize = 2;
 const SIDE_MARGIN: usize = 2;
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
+    let theme = theme_for(app.theme);
+    let mode = app.color_mode;
+    let root_style = Style::default()
+        .bg(apply_mode(mode, theme.bg))
+        .fg(apply_mode(mode, theme.text));
+    let accent = Style::default()
+        .fg(apply_mode(mode, theme.accent))
+        .add_modifier(Modifier::BOLD);
+    let dim = Style::default().fg(apply_mode(mode, theme.text_dim));
+
+    frame.render_widget(Block::default().style(root_style), area);
+
     let body = Rect {
         x: area.x,
         y: area.y.saturating_add(1),
@@ -118,16 +131,8 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let header = Paragraph::new(Line::from(vec![
-        Span::styled(
-            " taolk \u{2014} help ",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            " (j/k scroll, Esc/q to close) ",
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(" taolk \u{2014} help ", accent),
+        Span::styled(" (j/k scroll, Esc/q to close) ", dim),
     ]))
     .alignment(Alignment::Center);
     let header_area = Rect {
@@ -147,7 +152,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let mut heights: Vec<usize> = vec![0; columns_qty];
 
     for card in CARDS {
-        let card_lines = render_card(card, card_width);
+        let card_lines = render_card(card, card_width, theme, mode);
         let (idx, _) = heights.iter().enumerate().min_by_key(|(_, h)| **h).unwrap();
         if !columns[idx].is_empty() {
             columns[idx].push(blank_line(card_width));
@@ -196,7 +201,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     if total_rows > visible {
         let footer = Paragraph::new(Line::from(Span::styled(
             format!(" {}/{} ", scroll + 1, max_scroll + 1),
-            Style::default().fg(Color::DarkGray),
+            dim,
         )))
         .alignment(Alignment::Right);
         let footer_area = Rect {
@@ -222,19 +227,25 @@ fn compute_card_width() -> usize {
     (max_entry + CARD_H_PAD * 2).max(max_title + CARD_H_PAD * 2 + 2)
 }
 
-fn render_card(card: &Card, width: usize) -> Vec<Line<'static>> {
+fn render_card(
+    card: &Card,
+    width: usize,
+    theme: &crate::ui::theme::Theme,
+    mode: crate::config::ColorMode,
+) -> Vec<Line<'static>> {
+    let title_style = Style::default()
+        .fg(apply_mode(mode, theme.accent_alt))
+        .add_modifier(Modifier::BOLD);
+    let desc_style = Style::default().fg(apply_mode(mode, theme.text));
+    let key_style = Style::default().fg(apply_mode(mode, theme.accent));
+
     let mut lines = Vec::with_capacity(card.entries.len() + 3);
     let title_w = UnicodeWidthStr::width(card.title);
     let left = (width.saturating_sub(title_w)) / 2;
     let right = width.saturating_sub(title_w).saturating_sub(left);
     lines.push(Line::from(vec![
         Span::raw(" ".repeat(left)),
-        Span::styled(
-            card.title.to_string(),
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(card.title.to_string(), title_style),
         Span::raw(" ".repeat(right)),
     ]));
     lines.push(blank_line(width));
@@ -246,9 +257,9 @@ fn render_card(card: &Card, width: usize) -> Vec<Line<'static>> {
         let gap = width.saturating_sub(used).max(1);
         lines.push(Line::from(vec![
             Span::raw(" ".repeat(CARD_H_PAD)),
-            Span::styled((*desc).to_string(), Style::default().fg(Color::White)),
+            Span::styled((*desc).to_string(), desc_style),
             Span::raw(" ".repeat(gap)),
-            Span::styled((*key).to_string(), Style::default().fg(Color::Cyan)),
+            Span::styled((*key).to_string(), key_style),
             Span::raw(" ".repeat(CARD_H_PAD)),
         ]));
     }

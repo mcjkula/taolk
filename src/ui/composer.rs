@@ -2,7 +2,7 @@ use crate::app::App;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use std::ops::Deref;
@@ -269,11 +269,12 @@ fn next_char_boundary(s: &str, mut pos: usize) -> usize {
 }
 
 pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) {
-    use super::input::{compose_hints, visible_input};
+    use super::input::{compose_hints, styles, visible_input};
+    let st = styles(app);
     let prompt = "> ";
     let prompt_width: usize = 3;
     let w = usize::from(area.width);
-    let hints = compose_hints(w, app.input.contains('\n'));
+    let hints = compose_hints(w, app.input.contains('\n'), st);
 
     if app.input.is_empty() {
         let placeholder = match (&app.msg_recipient, app.msg_type) {
@@ -293,8 +294,8 @@ pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
         };
         let input_line = Line::from(vec![
             Span::raw(" "),
-            Span::styled(prompt, Style::default().fg(Color::DarkGray)),
-            Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
+            Span::styled(prompt, Style::default().fg(st.dim)),
+            Span::styled(placeholder, Style::default().fg(st.dim)),
         ]);
         frame.render_widget(Paragraph::new(vec![sep, hints, input_line]), area);
         let cursor_x = area.x + u16::try_from(prompt_width).unwrap_or(u16::MAX);
@@ -327,6 +328,7 @@ pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
             if is_cursor_line { cursor_col } else { 0 },
             avail,
             None,
+            st,
         );
         let line_prompt = if i == scroll_start && scroll_start == 0 {
             prompt
@@ -335,7 +337,7 @@ pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
         };
         let mut spans = vec![
             Span::raw(" "),
-            Span::styled(line_prompt, Style::default().fg(Color::DarkGray)),
+            Span::styled(line_prompt, Style::default().fg(st.dim)),
         ];
         spans.extend(text_spans);
         paragraph_lines.push(Line::from(spans));
@@ -348,6 +350,7 @@ pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
         cursor_col,
         avail,
         None,
+        st,
     );
     let cursor_x = area.x + u16::try_from(prompt_width).unwrap_or(u16::MAX) + cursor_off;
     let cursor_y = area.y + 2 + u16::try_from(visible_cursor_row).unwrap_or(u16::MAX);
