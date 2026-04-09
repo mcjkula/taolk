@@ -83,5 +83,5 @@ fn suggest_key_no_match() {
 
 #[test]
 fn key_count() {
-    assert_eq!(config::KEYS.len(), 14);
+    assert_eq!(config::KEYS.len(), 17);
 }

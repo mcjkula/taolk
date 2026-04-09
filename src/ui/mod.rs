@@ -1,9 +1,12 @@
+pub mod chrome;
 mod help;
 mod input;
 mod messages;
 pub mod modal;
 mod sidebar;
 mod status;
+pub mod symbols;
+pub mod theme;
 
 mod icons {
     pub const INBOX: &str = "\u{2709}";
@@ -22,8 +25,6 @@ mod icons {
 use crate::app::App;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Style};
-use ratatui::widgets::{Block, Borders};
 
 pub fn render(frame: &mut Frame, app: &App) {
     if app.mode == crate::app::Mode::Help {
@@ -57,11 +58,8 @@ pub fn render(frame: &mut Frame, app: &App) {
 fn render_main_panel(frame: &mut Frame, app: &App, area: Rect) {
     use crate::app::Mode;
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
-        .border_type(ratatui::widgets::BorderType::Rounded);
-
+    let theme = theme::theme_for(app.theme);
+    let block = chrome::panel(theme, app.color_mode, false);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 

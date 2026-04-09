@@ -1,6 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::time::Instant;
 use taolk::audio::Audio;
+use taolk::config::{ColorMode, IconChoice, ThemeChoice};
 use taolk::event::ConnState;
 use taolk::session::Session;
 use taolk::types::{BlockRef, Pubkey};
@@ -75,6 +76,9 @@ pub struct App {
     pub sidebar_width: u16,
     pub timestamp_format: String,
     pub date_format: String,
+    pub theme: ThemeChoice,
+    pub icons: IconChoice,
+    pub color_mode: ColorMode,
     pub audio: Audio,
     pub sound_armed: bool,
     pub picker_senders: Vec<(String, Option<Pubkey>)>,
@@ -121,6 +125,9 @@ impl App {
             sidebar_width: 28,
             timestamp_format: "%H:%M".into(),
             date_format: "%Y-%m-%d %H:%M".into(),
+            theme: ThemeChoice::default(),
+            icons: IconChoice::default(),
+            color_mode: ColorMode::default(),
             audio,
             sound_armed: false,
             picker_senders: Vec::new(),

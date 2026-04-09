@@ -793,6 +793,9 @@ fn run_session(
     app.sidebar_width = cfg.ui.sidebar_width;
     app.timestamp_format = cfg.ui.timestamp_format.clone();
     app.date_format = cfg.ui.date_format.clone();
+    app.theme = cfg.ui.theme;
+    app.icons = cfg.ui.icons;
+    app.color_mode = cfg.ui.colors;
     app.session.load_from_db();
 
     let event_tx = events.core_sender();
