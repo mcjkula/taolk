@@ -11,15 +11,10 @@ use crate::error::SdkError;
 use crate::extrinsic::ChainInfo;
 use crate::types::ChainName;
 
-// Persistent cache of stable per-chain parameters keyed by node URL.
-//
-// Trust model: this cache is local-only and trusted to the same extent as the
-// SQLite wallet file in the same config dir. The cached signing fields
-// (`spec_version`, `tx_version`) are NEVER used for actually signing — every
-// `submit_remark` / `estimate_fee` call refreshes them from the live chain
-// via `refresh_signing_params`. Tampering can at worst force the local DB
-// open to fail (since the DB key is derived from the cached `genesis_hash`),
-// which fails closed.
+// Cached `spec_version`/`tx_version` are never used at sign time:
+// `submit_remark`/`estimate_fee` always call `refresh_signing_params` first.
+// Cache tamper at worst makes `Db::open` fail closed (DB key is derived from
+// `genesis_hash`).
 
 #[derive(Serialize, Deserialize)]
 pub struct ChainSnapshot {

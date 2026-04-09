@@ -472,10 +472,6 @@ fn run_lock_screen(
     }
 }
 
-/// Returns a usable seed for one signing/encryption operation. In normal mode this hands
-/// back the cached session seed. In ephemeral mode (`security.require_password_per_send`),
-/// this opens a password prompt modal and returns the freshly-derived seed; the caller is
-/// responsible for dropping it as soon as the operation completes.
 fn acquire_seed(
     app: &App,
     wallet_name: &str,
@@ -765,9 +761,6 @@ fn run_session(
 
     let rt = tokio::runtime::Runtime::new()?;
 
-    // Hot path: load chain info from disk cache. Cold start (first launch
-    // for this node URL) falls back to a synchronous fetch with a
-    // "Connecting…" frame so the user knows we're working.
     let (chain_info, token_symbol, token_decimals, used_cache) =
         match chain_cache::load(node_url).and_then(|s| s.into_chain_info().ok()) {
             Some((info, sym, dec)) => (info, sym, dec, true),
@@ -806,7 +799,6 @@ fn run_session(
     let lock_timeout = std::time::Duration::from_secs(cfg.security.lock_timeout);
     let mut last_activity = std::time::Instant::now();
 
-    // Background: fetch balance off the critical path.
     {
         let url = node_url.to_string();
         let tx = event_tx.clone();
@@ -818,12 +810,6 @@ fn run_session(
         });
     }
 
-    // Background: refresh chain snapshot if we used a cached one.
-    // Verifies genesis_hash matches; on mismatch, refuses to overwrite the
-    // cache (the local DB is still keyed on the original genesis_hash) and
-    // emits a warning. The actual signing path always uses live params via
-    // refresh_signing_params, so a stale cache cannot cause a wrong-chain
-    // signature.
     if used_cache {
         let url = node_url.to_string();
         let tx = event_tx.clone();
@@ -1489,16 +1475,6 @@ fn handle_normal_key(
     handle_global_normal_key(app, key, send_tx);
 }
 
-/// View-local handler for the channel directory. Returns true if the key was
-/// fully consumed (no fall-through to global). The contract:
-///
-/// - Input editing keys (digit/colon, Backspace, Enter, Esc) are always consumed.
-/// - While the user is typing a channel ref input, every other non-modifier key
-///   is dropped (consumed) so global keybinds can't fire under their fingers.
-///   Modifier-keys (Ctrl-c, Ctrl-u, Ctrl-d, etc.) still fall through.
-/// - When browsing (input empty), Up/Down move the channel cursor (consumed)
-///   and `c` enters CreateChannel mode (consumed). Everything else (j/k for
-///   sidebar nav, ?/q/m/n/g/r//, etc.) falls through to the global handler.
 fn handle_channel_dir_key(
     app: &mut App,
     key: crossterm::event::KeyEvent,
@@ -1507,7 +1483,6 @@ fn handle_channel_dir_key(
     let typing = !app.channel_dir_input.is_empty();
     let has_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
-    // Always-consumed input editing keys.
     match key.code {
         KeyCode::Backspace => {
             app.channel_dir_input.pop();
@@ -1571,14 +1546,10 @@ fn handle_channel_dir_key(
         _ => {}
     }
 
-    // While typing channel ref input, drop every other non-modifier key so the
-    // user's keystrokes can't accidentally fire global keybinds.
     if typing && !has_ctrl {
         return true;
     }
 
-    // Browsing mode (or modifier-key passthrough): only a few view-internal
-    // keys; everything else falls through to the global handler.
     match key.code {
         KeyCode::Up if !typing => {
             app.channel_dir_cursor = app.channel_dir_cursor.saturating_sub(1);
