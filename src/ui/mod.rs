@@ -1,13 +1,13 @@
+pub mod chat_list;
 pub mod chrome;
 pub mod composer;
 mod help;
 mod input;
-mod messages;
 pub mod modal;
-mod sidebar;
 mod status;
 pub mod symbols;
 pub mod theme;
+pub mod timeline;
 
 mod icons {
     pub const INBOX: &str = "\u{2709}";
@@ -48,7 +48,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             .constraints([Constraint::Length(app.sidebar_width), Constraint::Min(30)])
             .split(main_area);
 
-        sidebar::render(frame, app, cols[0]);
+        chat_list::render(frame, app, cols[0]);
         render_main_panel(frame, app, cols[1]);
     } else {
         render_main_panel(frame, app, main_area);
@@ -76,6 +76,6 @@ fn render_main_panel(frame: &mut Frame, app: &App, area: Rect) {
         .constraints([Constraint::Min(3), Constraint::Length(input_height)])
         .split(inner);
 
-    messages::render(frame, app, rows[0]);
+    timeline::render(frame, app, rows[0]);
     input::render(frame, app, rows[1]);
 }

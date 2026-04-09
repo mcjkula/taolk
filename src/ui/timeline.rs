@@ -1,4 +1,5 @@
 use crate::app::{App, Overlay, View};
+use crate::ui::theme::{apply_mode, theme_for};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -6,20 +7,25 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use taolk::conversation::InboxMessage;
 
-const SENDER_COLORS: &[Color] = &[
-    Color::Yellow,
-    Color::Green,
-    Color::Magenta,
-    Color::Blue,
-    Color::LightYellow,
-    Color::LightGreen,
-    Color::LightMagenta,
-    Color::LightBlue,
-];
-
-fn sender_color(ss58: &str) -> Color {
+fn sender_color_idx(ss58: &str) -> usize {
     let hash: u8 = ss58.bytes().fold(0u8, |acc, b| acc.wrapping_add(b));
-    SENDER_COLORS[usize::from(hash) % SENDER_COLORS.len()]
+    usize::from(hash) % 8
+}
+
+fn sender_color(app: &App, ss58: &str) -> Color {
+    let theme = theme_for(app.theme);
+    apply_mode(
+        app.color_mode,
+        theme.sender_rotation[sender_color_idx(ss58)],
+    )
+}
+
+fn theme_text_strong(app: &App) -> Color {
+    apply_mode(app.color_mode, theme_for(app.theme).text_strong)
+}
+
+fn theme_timestamp(app: &App) -> Color {
+    apply_mode(app.color_mode, theme_for(app.theme).timestamp)
 }
 
 const BASE58_CHARS: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -297,7 +303,10 @@ fn render_standalone(
             };
 
             lines.push(Line::from(vec![
-                Span::styled(format!(" {time} "), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!(" {time} "),
+                    Style::default().fg(theme_timestamp(app)),
+                ),
                 Span::styled(
                     format!(" {type_icon} {type_label} "),
                     Style::default()
@@ -308,12 +317,12 @@ fn render_standalone(
                 Span::raw(" "),
                 Span::styled(
                     format!("{direction}: "),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme_timestamp(app)),
                 ),
                 Span::styled(
                     truncate(&msg.peer_ss58, 20),
                     Style::default()
-                        .fg(Color::White)
+                        .fg(theme_text_strong(app))
                         .add_modifier(Modifier::BOLD),
                 ),
             ]));
@@ -921,7 +930,7 @@ fn render_messages(
             } else {
                 (
                     truncate(&msg.sender_ss58, 16),
-                    sender_color(&msg.sender_ss58),
+                    sender_color(app, &msg.sender_ss58),
                 )
             };
             let indent = 7 + name.len() + 2;
@@ -1012,7 +1021,7 @@ fn render_messages(
             } else {
                 (
                     truncate(&msg.sender_ss58, 16),
-                    sender_color(&msg.sender_ss58),
+                    sender_color(app, &msg.sender_ss58),
                 )
             };
 
@@ -1132,20 +1141,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sender_color_is_deterministic_for_same_input() {
-        let a = sender_color("5FHneW46xGXgs5AUiveU4sbTyGBzmstUspZC92UhjJM694ty");
-        let b = sender_color("5FHneW46xGXgs5AUiveU4sbTyGBzmstUspZC92UhjJM694ty");
-        assert_eq!(format!("{a:?}"), format!("{b:?}"));
+    fn sender_color_idx_is_deterministic() {
+        let a = sender_color_idx("5FHneW46xGXgs5AUiveU4sbTyGBzmstUspZC92UhjJM694ty");
+        let b = sender_color_idx("5FHneW46xGXgs5AUiveU4sbTyGBzmstUspZC92UhjJM694ty");
+        assert_eq!(a, b);
     }
 
     #[test]
-    fn sender_color_returns_one_of_palette() {
-        let c = sender_color("anything");
-        assert!(
-            SENDER_COLORS
-                .iter()
-                .any(|p| format!("{p:?}") == format!("{c:?}"))
-        );
+    fn sender_color_idx_in_range() {
+        assert!(sender_color_idx("anything") < 8);
     }
 
     #[test]
