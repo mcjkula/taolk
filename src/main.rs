@@ -1379,30 +1379,43 @@ fn handle_mouse(
         0
     };
     let input_area_y = term_size.height.saturating_sub(4);
+    let x = mouse.column;
+    let y = mouse.row;
 
-    if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-        let x = mouse.column;
-        let y = mouse.row;
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            let hit = app
+                .sender_click_regions
+                .borrow()
+                .iter()
+                .find(|(row, c0, c1, _)| *row == y && x >= *c0 && x < *c1)
+                .map(|(_, _, _, ss58)| ss58.clone());
+            if let Some(short) = hit {
+                let pk = app.session.peer_pubkeys.get(&short).copied();
+                copy_sender(app, &short, pk.as_ref());
+                return;
+            }
 
-        let hit = app
-            .sender_click_regions
-            .borrow()
-            .iter()
-            .find(|(row, c0, c1, _)| *row == y && x >= *c0 && x < *c1)
-            .map(|(_, _, _, ss58)| ss58.clone());
-        if let Some(short) = hit {
-            let pk = app.session.peer_pubkeys.get(&short).copied();
-            copy_sender(app, &short, pk.as_ref());
-            return;
+            if app.show_sidebar && x < sidebar_width {
+                let row = usize::from(y.saturating_sub(1));
+                app.select_sidebar_row(row);
+            } else if y >= input_area_y && !app.sending && app.overlay.is_none() {
+                app.load_draft();
+                app.focus_composer();
+            } else if app.overlay.is_none() && y < input_area_y {
+                if app.is_composing() {
+                    app.save_draft();
+                }
+                app.focus_timeline();
+            }
         }
-
-        if app.show_sidebar && x < sidebar_width {
-            let row = usize::from(y.saturating_sub(1));
-            app.select_sidebar_row(row);
-        } else if y >= input_area_y && !app.sending && app.overlay.is_none() {
-            app.load_draft();
-            app.focus_composer();
+        MouseEventKind::ScrollDown if app.overlay.is_none() => {
+            app.scroll_offset = app.scroll_offset.saturating_sub(3);
         }
+        MouseEventKind::ScrollUp if app.overlay.is_none() => {
+            app.scroll_offset = app.scroll_offset.saturating_add(3);
+        }
+        _ => {}
     }
 }
 
