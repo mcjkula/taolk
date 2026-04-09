@@ -26,27 +26,6 @@ pub(super) fn styles(app: &App) -> Styles {
     }
 }
 
-pub(super) fn render_hints(pairs: &[(&str, &str)], width: usize, s: Styles) -> Line<'static> {
-    let mut spans = Vec::new();
-    let mut used: usize = 1;
-    for (key, label) in pairs {
-        let needed = key.len() + 1 + label.len() + 2;
-        if used + needed > width {
-            break;
-        }
-        spans.push(Span::styled(
-            format!(" {key}"),
-            Style::default().fg(s.accent),
-        ));
-        spans.push(Span::styled(
-            format!(" {label} "),
-            Style::default().fg(s.dim),
-        ));
-        used += needed;
-    }
-    Line::from(spans)
-}
-
 pub(super) fn fit(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
@@ -139,8 +118,11 @@ pub(super) fn visible_input(
     (spans, cursor_x)
 }
 
-fn key_hints(width: usize, s: Styles) -> Line<'static> {
-    render_hints(&[("Enter", "next"), ("Esc", "cancel")], width, s)
+fn sep_line(width: u16, st: Styles) -> Line<'static> {
+    Line::styled(
+        "\u{2500}".repeat(usize::from(width)),
+        Style::default().fg(st.dim),
+    )
 }
 
 fn render_single_input(
@@ -152,10 +134,7 @@ fn render_single_input(
     area: Rect,
     st: Styles,
 ) {
-    let sep = Line::styled(
-        "\u{2500}".repeat(usize::from(area.width)),
-        Style::default().fg(st.dim),
-    );
+    let sep = sep_line(area.width, st);
     let prompt_span = Span::styled(prompt, Style::default().fg(st.dim));
     let prompt_width = prompt.len() + 1;
 
@@ -165,14 +144,7 @@ fn render_single_input(
             prompt_span,
             Span::styled(placeholder, Style::default().fg(st.dim)),
         ]);
-        frame.render_widget(
-            Paragraph::new(vec![
-                sep,
-                key_hints(usize::from(area.width), st),
-                input_line,
-            ]),
-            area,
-        );
+        frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), input_line]), area);
         let cursor_x = area.x + u16::try_from(prompt_width).unwrap_or(u16::MAX);
         let cursor_y = area.y + 2;
         if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
@@ -195,14 +167,7 @@ fn render_single_input(
     let mut spans = vec![Span::raw(" "), prompt_span];
     spans.extend(text_spans);
     let input_line = Line::from(spans);
-    frame.render_widget(
-        Paragraph::new(vec![
-            sep,
-            key_hints(usize::from(area.width), st),
-            input_line,
-        ]),
-        area,
-    );
+    frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), input_line]), area);
 
     let cursor_x = area.x + u16::try_from(prompt_width).unwrap_or(u16::MAX) + cursor_off;
     let cursor_y = area.y + 2;
@@ -211,35 +176,11 @@ fn render_single_input(
     }
 }
 
-pub(super) fn compose_hints(width: usize, multiline: bool, s: Styles) -> Line<'static> {
-    if multiline {
-        render_hints(
-            &[
-                ("Enter", "send"),
-                ("Ctrl+N", "newline"),
-                ("\u{2191}\u{2193}", "lines"),
-                ("Esc", "cancel"),
-            ],
-            width,
-            s,
-        )
-    } else {
-        render_hints(
-            &[("Enter", "send"), ("Ctrl+N", "newline"), ("Esc", "cancel")],
-            width,
-            s,
-        )
-    }
-}
-
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let st = styles(app);
     let fill = chrome::fill_style(theme_for(app.theme), app.color_mode);
     frame.buffer_mut().set_style(area, fill);
-    let sep = Line::styled(
-        "\u{2500}".repeat(usize::from(area.width)),
-        Style::default().fg(st.dim),
-    );
+    let sep = sep_line(area.width, st);
 
     match app.overlay {
         Some(Overlay::Search) => {
@@ -290,12 +231,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                         Style::default().fg(st.dim),
                     ),
                 ]);
-                let type_hints = render_hints(
-                    &[("p", "public"), ("e", "encrypted"), ("Esc", "cancel")],
-                    usize::from(area.width),
-                    st,
-                );
-                frame.render_widget(Paragraph::new(vec![sep, type_hints, selector]), area);
+                frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), selector]), area);
             }
         }
         Some(Overlay::Compose) => {
@@ -309,7 +245,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
             let is_channel = app.is_pending_channel();
             let action = if is_channel { "Create?" } else { "Send?" };
-            let esc_label = if is_channel { " back" } else { " edit" };
 
             let (preview, is_empty_preview) = if let Some(name) = &app.pending_channel_name {
                 let desc = app.pending_channel_desc.as_deref().unwrap_or("");
@@ -350,30 +285,22 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
             let confirm_line = Line::from(vec![
                 Span::raw(" "),
-                Span::styled(format!("{action} "), Style::default().fg(st.text)),
-                Span::styled(format!("{fee_text}  "), Style::default().fg(st.accent)),
-                Span::styled("Enter", Style::default().fg(st.accent)),
-                Span::styled(" confirm  ", Style::default().fg(st.dim)),
-                Span::styled("Esc", Style::default().fg(st.accent)),
-                Span::styled(esc_label, Style::default().fg(st.dim)),
+                Span::styled(
+                    format!("{action} "),
+                    Style::default().fg(st.text).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(fee_text, Style::default().fg(st.accent)),
             ]);
             frame.render_widget(Paragraph::new(vec![sep, preview_line, confirm_line]), area);
         }
-        Some(Overlay::SenderPicker) => {
-            let hints = render_hints(
-                &[
-                    ("\u{2191}\u{2193}", "navigate"),
-                    ("Enter", "copy"),
-                    ("Esc", "cancel"),
-                ],
-                usize::from(area.width),
-                st,
+        Some(Overlay::SenderPicker)
+        | Some(Overlay::Help)
+        | Some(Overlay::CommandPalette)
+        | Some(Overlay::FuzzyJump) => {
+            frame.render_widget(
+                Paragraph::new(vec![sep, Line::raw(""), Line::raw("")]),
+                area,
             );
-            frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), hints]), area);
-        }
-        Some(Overlay::Help) => {
-            let hints = render_hints(&[("any key", "close")], usize::from(area.width), st);
-            frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), hints]), area);
         }
         None if app.focus == Focus::Composer => {
             super::composer::render_composer(frame, app, sep, area);
@@ -390,85 +317,35 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                     Span::styled(visible, Style::default().fg(st.dim)),
                     Span::styled(suffix, Style::default().fg(st.accent)),
                 ])
-            } else {
-                let w = usize::from(area.width);
-                match app.view {
-                    crate::app::View::Thread(_) | crate::app::View::Channel(_) => render_hints(
-                        &[
-                            ("i", "compose"),
-                            ("/", "search"),
-                            ("r", "refresh"),
-                            ("u", "leave"),
-                        ],
-                        w,
-                        st,
-                    ),
-                    crate::app::View::ChannelDir => {
-                        if !app.channel_dir_input.is_empty() {
-                            let prompt = " ID: ";
-                            let avail = w.saturating_sub(prompt.len() + 1);
-                            let (text_spans, cursor_off) = visible_input(
-                                &app.channel_dir_input,
-                                app.channel_dir_input.len(),
-                                avail,
-                                None,
-                                st,
-                            );
-                            let mut spans = vec![Span::styled(prompt, Style::default().fg(st.dim))];
-                            spans.extend(text_spans);
-                            let input_line = Line::from(spans);
-                            let id_hints =
-                                render_hints(&[("Enter", "subscribe"), ("Esc", "clear")], w, st);
-                            frame.render_widget(
-                                Paragraph::new(vec![sep, id_hints, input_line]),
-                                area,
-                            );
-                            let cursor_x = area.x
-                                + u16::try_from(prompt.len()).unwrap_or(u16::MAX)
-                                + cursor_off;
-                            let cursor_y = area.y + 2;
-                            if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
-                                frame.set_cursor_position((cursor_x, cursor_y));
-                            }
-                            return;
-                        }
-                        render_hints(
-                            &[
-                                ("\u{2191}\u{2193}", "navigate"),
-                                ("Enter", "join/leave"),
-                                ("c", "create"),
-                                ("0-9", "enter ID"),
-                                ("Esc", "back"),
-                            ],
-                            w,
-                            st,
-                        )
-                    }
-                    _ => render_hints(
-                        &[
-                            ("m", "message"),
-                            ("n", "thread"),
-                            ("g", "group"),
-                            ("c", "channels"),
-                        ],
-                        w,
-                        st,
-                    ),
+            } else if app.view == crate::app::View::ChannelDir && !app.channel_dir_input.is_empty()
+            {
+                let prompt = " ID: ";
+                let avail = usize::from(area.width).saturating_sub(prompt.len() + 1);
+                let (text_spans, cursor_off) = visible_input(
+                    &app.channel_dir_input,
+                    app.channel_dir_input.len(),
+                    avail,
+                    None,
+                    st,
+                );
+                let mut spans = vec![Span::styled(prompt, Style::default().fg(st.dim))];
+                spans.extend(text_spans);
+                let input_line = Line::from(spans);
+                frame.render_widget(
+                    Paragraph::new(vec![sep.clone(), Line::raw(""), input_line]),
+                    area,
+                );
+                let cursor_x =
+                    area.x + u16::try_from(prompt.len()).unwrap_or(u16::MAX) + cursor_off;
+                let cursor_y = area.y + 2;
+                if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
+                    frame.set_cursor_position((cursor_x, cursor_y));
                 }
+                return;
+            } else {
+                Line::raw("")
             };
             frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), input_line]), area);
-        }
-        Some(Overlay::CommandPalette) | Some(Overlay::FuzzyJump) => {
-            let hints = render_hints(
-                &[
-                    ("\u{2191}\u{2193}", "navigate"),
-                    ("Enter", "select"),
-                    ("Esc", "cancel"),
-                ],
-                usize::from(area.width),
-                st,
-            );
-            frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), hints]), area);
         }
     }
 }
@@ -477,11 +354,6 @@ fn render_picker_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect, 
     let w = usize::from(area.width);
 
     if app.input.is_empty() {
-        let hints = render_hints(
-            &[("j/k", "navigate"), ("Enter", "select"), ("Esc", "cancel")],
-            w,
-            st,
-        );
         let prompt = Line::from(vec![
             Span::styled(" To: ", Style::default().fg(st.dim)),
             Span::styled(
@@ -489,21 +361,20 @@ fn render_picker_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect, 
                 Style::default().fg(st.dim),
             ),
         ]);
-        frame.render_widget(Paragraph::new(vec![sep, hints, prompt]), area);
+        frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), prompt]), area);
         let cursor_x = area.x + 5;
         let cursor_y = area.y + 2;
         if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
     } else {
-        let hints = render_hints(&[("Enter", "select"), ("Esc", "clear")], w, st);
         let avail = w.saturating_sub(6);
         let (text_spans, cursor_off) =
             visible_input(app.input.as_str(), app.input.cursor(), avail, None, st);
         let mut spans = vec![Span::styled(" To: ", Style::default().fg(st.dim))];
         spans.extend(text_spans);
         let input_line = Line::from(spans);
-        frame.render_widget(Paragraph::new(vec![sep, hints, input_line]), area);
+        frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), input_line]), area);
         let cursor_x = area.x + 5 + cursor_off;
         let cursor_y = area.y + 2;
         if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
@@ -517,21 +388,6 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area:
     let selected_count = app.pending_group_members.len();
 
     if app.input.is_empty() {
-        let base_hints: Vec<(&str, &str)> = if selected_count >= 2 {
-            vec![
-                ("\u{2191}\u{2193}", "navigate"),
-                ("Enter", "toggle"),
-                ("Tab", "done"),
-                ("Esc", "cancel"),
-            ]
-        } else {
-            vec![
-                ("\u{2191}\u{2193}", "navigate"),
-                ("Enter", "toggle"),
-                ("Esc", "cancel"),
-            ]
-        };
-        let hints = render_hints(&base_hints, w, st);
         let prompt = Line::from(vec![
             Span::styled(
                 format!(" Members ({selected_count}): "),
@@ -542,7 +398,7 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area:
                 Style::default().fg(st.dim),
             ),
         ]);
-        frame.render_widget(Paragraph::new(vec![sep, hints, prompt]), area);
+        frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), prompt]), area);
         let cursor_x = area.x
             + u16::try_from(format!(" Members ({selected_count}): ").len()).unwrap_or(u16::MAX);
         let cursor_y = area.y + 2;
@@ -550,7 +406,6 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area:
             frame.set_cursor_position((cursor_x, cursor_y));
         }
     } else {
-        let hints = render_hints(&[("Enter", "add"), ("Esc", "clear")], w, st);
         let avail = w.saturating_sub(10);
         let prompt_str = format!(" ({selected_count}): ");
         let (text_spans, cursor_off) =
@@ -558,7 +413,7 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area:
         let mut spans = vec![Span::styled(&prompt_str, Style::default().fg(st.dim))];
         spans.extend(text_spans);
         let input_line = Line::from(spans);
-        frame.render_widget(Paragraph::new(vec![sep, hints, input_line]), area);
+        frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), input_line]), area);
         let cursor_x = area.x + u16::try_from(prompt_str.len()).unwrap_or(u16::MAX) + cursor_off;
         let cursor_y = area.y + 2;
         if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
@@ -570,6 +425,15 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_styles() -> Styles {
+        Styles {
+            dim: Color::DarkGray,
+            text: Color::White,
+            accent: Color::Cyan,
+            error: Color::Red,
+        }
+    }
 
     #[test]
     fn fit_short_string_unchanged() {
@@ -589,15 +453,6 @@ mod tests {
     #[test]
     fn fit_max_one_returns_ellipsis() {
         assert_eq!(fit("hello", 1), "\u{2026}");
-    }
-
-    fn test_styles() -> Styles {
-        Styles {
-            dim: Color::DarkGray,
-            text: Color::White,
-            accent: Color::Cyan,
-            error: Color::Red,
-        }
     }
 
     #[test]

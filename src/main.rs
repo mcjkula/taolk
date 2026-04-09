@@ -1461,12 +1461,13 @@ fn handle_key(
     }
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         match key.code {
-            KeyCode::Char('p') => {
-                app.open_palette();
-                return;
-            }
             KeyCode::Char('j') => {
                 app.open_jump();
+                return;
+            }
+            KeyCode::Char('f') => {
+                app.search_query.clear();
+                app.enter_overlay(Overlay::Search);
                 return;
             }
             _ => {}
@@ -1685,15 +1686,13 @@ fn handle_global_timeline_key(
             }
         }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => app.running = false,
-        KeyCode::Char('i')
+        KeyCode::Char('i') | KeyCode::Enter
             if matches!(
                 app.view,
                 app::View::Thread(_) | app::View::Channel(_) | app::View::Group(_)
             ) =>
         {
-            app.load_draft();
-            app.scroll_offset = 0;
-            app.focus_composer();
+            app.enter_composer_for_current_view();
         }
         KeyCode::Char('m') => {
             if !app.check_not_sending() {
@@ -1744,8 +1743,7 @@ fn handle_global_timeline_key(
             }
         }
         KeyCode::Char('/') => {
-            app.search_query.clear();
-            app.enter_overlay(Overlay::Search);
+            app.open_palette();
         }
         KeyCode::Char('y') if app.view != app::View::ChannelDir => {
             let senders = app.build_picker_senders();
@@ -1787,7 +1785,7 @@ fn handle_global_timeline_key(
 
 fn handle_composer_key(app: &mut App, key: crossterm::event::KeyEvent) {
     match key.code {
-        KeyCode::Esc => {
+        KeyCode::Esc | KeyCode::Tab => {
             if app.msg_recipient.is_some() {
                 app.clear_standalone();
                 app.reset_input();
@@ -1797,6 +1795,9 @@ fn handle_composer_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 app.set_status("Draft saved");
             }
             app.focus_timeline();
+        }
+        KeyCode::Char('/') if app.input.is_empty() => {
+            app.open_palette();
         }
         KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if !app.input.is_empty() {

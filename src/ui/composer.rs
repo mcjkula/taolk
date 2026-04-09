@@ -269,7 +269,7 @@ fn next_char_boundary(s: &str, mut pos: usize) -> usize {
 }
 
 pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) {
-    use super::input::{compose_hints, styles, visible_input};
+    use super::input::{styles, visible_input};
     let st = styles(app);
     let fill =
         crate::ui::chrome::fill_style(crate::ui::theme::theme_for(app.theme), app.color_mode);
@@ -277,7 +277,6 @@ pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
     let prompt = "> ";
     let prompt_width: usize = 3;
     let w = usize::from(area.width);
-    let hints = compose_hints(w, app.input.contains('\n'), st);
 
     if app.input.is_empty() {
         let placeholder = match (&app.msg_recipient, app.msg_type) {
@@ -300,7 +299,7 @@ pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
             Span::styled(prompt, Style::default().fg(st.dim)),
             Span::styled(placeholder, Style::default().fg(st.dim)),
         ]);
-        frame.render_widget(Paragraph::new(vec![sep, hints, input_line]), area);
+        frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), input_line]), area);
         let cursor_x = area.x + u16::try_from(prompt_width).unwrap_or(u16::MAX);
         let cursor_y = area.y + 2;
         if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
@@ -322,7 +321,7 @@ pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
     };
     let scroll_end = (scroll_start + max_visible).min(total_lines);
 
-    let mut paragraph_lines: Vec<Line> = vec![sep, hints];
+    let mut paragraph_lines: Vec<Line> = vec![sep, Line::raw("")];
     for i in scroll_start..scroll_end {
         let line_text = lines_vec.get(i).copied().unwrap_or("");
         let is_cursor_line = i == cursor_line;

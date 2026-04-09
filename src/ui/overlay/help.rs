@@ -128,10 +128,10 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         height: area.height.saturating_sub(2),
     };
 
-    let header = Paragraph::new(Line::from(vec![
-        Span::styled(" taolk \u{2014} help ", accent),
-        Span::styled(" (j/k scroll, Esc/q to close) ", dim),
-    ]))
+    let header = Paragraph::new(Line::from(vec![Span::styled(
+        " taolk \u{2014} help ",
+        accent,
+    )]))
     .alignment(Alignment::Center);
     let header_area = Rect {
         x: area.x,

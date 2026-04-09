@@ -682,11 +682,8 @@ impl App {
             self.view = view;
         }
         self.mark_read();
-        self.focus = self.default_focus_for_view();
-        self.focus_before_overlay = self.focus;
-        if self.focus == Focus::Composer {
-            self.load_draft();
-        }
+        self.focus = Focus::Timeline;
+        self.focus_before_overlay = Focus::Timeline;
     }
 
     pub fn select_sidebar_row(&mut self, row: usize) {
@@ -699,11 +696,20 @@ impl App {
             self.scroll_offset = 0;
             self.view = *view;
             self.mark_read();
-            self.focus = self.default_focus_for_view();
-            self.focus_before_overlay = self.focus;
-            if self.focus == Focus::Composer {
-                self.load_draft();
-            }
+            self.focus = Focus::Timeline;
+            self.focus_before_overlay = Focus::Timeline;
+        }
+    }
+
+    pub fn enter_composer_for_current_view(&mut self) {
+        if matches!(
+            self.view,
+            View::Thread(_) | View::Channel(_) | View::Group(_)
+        ) {
+            self.load_draft();
+            self.scroll_offset = 0;
+            self.focus = Focus::Composer;
+            self.focus_before_overlay = Focus::Composer;
         }
     }
 

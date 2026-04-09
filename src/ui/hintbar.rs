@@ -1,4 +1,4 @@
-use crate::app::{App, Focus, Overlay};
+use crate::app::{App, Focus, Overlay, View};
 use crate::ui::theme::{apply_mode, theme_for};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -21,7 +21,7 @@ pub fn hints(app: &App) -> Line<'static> {
 
 fn pairs_for(app: &App) -> &'static [(&'static str, &'static str)] {
     match app.overlay {
-        Some(Overlay::Help) => &[("any key", "close")],
+        Some(Overlay::Help) => &[("j/k", "scroll"), ("any", "close")],
         Some(Overlay::Confirm) => &[("Enter", "confirm"), ("Esc", "back")],
         Some(Overlay::Compose) => &[
             ("\u{2191}\u{2193}", "nav"),
@@ -60,17 +60,23 @@ fn pairs_for(app: &App) -> &'static [(&'static str, &'static str)] {
             ("Esc", "cancel"),
         ],
         None => match app.focus {
-            Focus::Composer => &[("Enter", "send"), ("C-n", "newline"), ("Esc", "leave")],
-            Focus::Timeline => &[
-                ("i", "compose"),
-                ("n", "thread"),
-                ("m", "message"),
-                ("c", "channels"),
-                ("g", "group"),
-                ("/", "search"),
-                ("?", "help"),
-                ("q", "quit"),
+            Focus::Composer => &[
+                ("Enter", "send"),
+                ("S-Enter", "newline"),
+                ("/", "cmd"),
+                ("Esc", "leave"),
             ],
+            Focus::Timeline => match app.view {
+                View::Thread(_) | View::Channel(_) | View::Group(_) => &[
+                    ("i", "compose"),
+                    ("/", "cmd"),
+                    ("C-f", "find"),
+                    ("C-j", "jump"),
+                    ("?", "help"),
+                    ("q", "quit"),
+                ],
+                _ => &[("/", "cmd"), ("C-j", "jump"), ("?", "help"), ("q", "quit")],
+            },
         },
     }
 }
