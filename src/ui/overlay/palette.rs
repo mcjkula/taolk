@@ -112,7 +112,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     frame.render_widget(Clear, rect);
 
-    let block = chrome::panel(theme, mode, true).title(" commands ");
+    let block = chrome::surface_panel(theme, mode).title(" commands ");
     let inner = block.inner(rect);
     frame.render_widget(block, rect);
 

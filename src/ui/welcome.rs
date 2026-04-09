@@ -23,7 +23,9 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         .fg(apply_mode(mode, theme.accent))
         .add_modifier(Modifier::BOLD);
     let text = Style::default().fg(apply_mode(mode, theme.text));
-    let dim = Style::default().fg(apply_mode(mode, theme.text_dim));
+    let dim = Style::default()
+        .fg(apply_mode(mode, theme.accent_alt))
+        .add_modifier(Modifier::ITALIC);
     let key = Style::default().fg(apply_mode(mode, theme.accent));
 
     let ss58 = app.session.my_ss58.clone();

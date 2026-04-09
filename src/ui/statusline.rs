@@ -1,22 +1,23 @@
 use crate::app::App;
+use crate::config::ColorMode;
 use crate::ui::hintbar;
-use crate::ui::theme::{apply_mode, theme_for};
+use crate::ui::theme::{Theme, apply_mode, theme_for};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use taolk::event::ConnState;
 use taolk::util::format_number;
 
-fn reconnect_pill(state: ConnState) -> Option<Span<'static>> {
+fn reconnect_pill(state: ConnState, theme: &Theme, mode: ColorMode) -> Option<Span<'static>> {
     match state {
         ConnState::Connected => None,
         ConnState::Reconnecting { in_secs } => Some(Span::styled(
             format!(" reconnecting in {in_secs}s "),
             Style::default()
-                .fg(Color::White)
-                .bg(Color::Red)
+                .fg(apply_mode(mode, theme.bg))
+                .bg(apply_mode(mode, theme.error))
                 .add_modifier(Modifier::BOLD),
         )),
     }
@@ -36,7 +37,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         } else if is_error {
             Line::from(Span::styled(
                 format!(" \u{2717} {status} "),
-                Style::default().fg(Color::Red),
+                Style::default().fg(apply_mode(mode, theme.error)),
             ))
         } else {
             Line::from(Span::styled(
@@ -69,9 +70,9 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let balance_fresh = app.frame.wrapping_sub(app.balance_changed_at) < highlight_frames;
     let balance_color = if balance_fresh {
         if app.balance_decreased {
-            Color::Red
+            apply_mode(mode, theme.error)
         } else {
-            Color::Green
+            apply_mode(mode, theme.success)
         }
     } else {
         apply_mode(mode, theme.text)
@@ -87,7 +88,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     };
     let block_span = Span::styled(block_str.clone(), Style::default().fg(block_color));
 
-    let reconnect = reconnect_pill(app.connection);
+    let reconnect = reconnect_pill(app.connection, theme, mode);
     let reconnect_width = reconnect
         .as_ref()
         .map_or(0, |s| u16::try_from(s.width()).unwrap_or(u16::MAX));
@@ -100,8 +101,8 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let locked_span = Span::styled(
         locked_str.clone(),
         Style::default()
-            .fg(Color::Black)
-            .bg(Color::Yellow)
+            .fg(apply_mode(mode, theme.bg))
+            .bg(apply_mode(mode, theme.warning))
             .add_modifier(Modifier::BOLD),
     );
 

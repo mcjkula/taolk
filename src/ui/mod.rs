@@ -28,7 +28,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::Line;
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Paragraph};
 
 pub const MIN_WIDTH: u16 = 100;
 pub const MIN_HEIGHT: u16 = 28;
@@ -37,8 +37,15 @@ pub fn render(frame: &mut Frame, app: &App) {
     use crate::app::Overlay;
 
     let area = frame.area();
+    let theme = theme::theme_for(app.theme);
+    let mode = app.color_mode;
+    let root_style = Style::default()
+        .bg(theme::apply_mode(mode, theme.bg))
+        .fg(theme::apply_mode(mode, theme.text));
+    frame.render_widget(Block::default().style(root_style), area);
+
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
-        render_too_small(frame, area);
+        render_too_small(frame, app, area);
         return;
     }
 
@@ -104,11 +111,15 @@ fn render_main_panel(frame: &mut Frame, app: &App, area: Rect) {
     input::render(frame, app, rows[1]);
 }
 
-fn render_too_small(frame: &mut Frame, area: Rect) {
+fn render_too_small(frame: &mut Frame, app: &App, area: Rect) {
+    let theme = theme::theme_for(app.theme);
+    let style = Style::default()
+        .bg(theme::apply_mode(app.color_mode, theme.bg))
+        .fg(theme::apply_mode(app.color_mode, theme.error));
     let msg = format!(
         "taolk requires at least {MIN_WIDTH}x{MIN_HEIGHT} — current {}x{}",
         area.width, area.height,
     );
     let lines = vec![Line::raw(""), Line::raw(msg)];
-    frame.render_widget(Paragraph::new(lines).style(Style::default()), area);
+    frame.render_widget(Paragraph::new(lines).style(style), area);
 }
