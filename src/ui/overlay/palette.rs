@@ -97,9 +97,11 @@ impl PaletteState {
 }
 
 fn parse_args(query: &str) -> String {
-    let mut it = query.split_whitespace();
-    let _ = it.next();
-    it.collect::<Vec<_>>().join(" ")
+    query
+        .split_whitespace()
+        .skip(1)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub fn render(frame: &mut Frame, app: &App) {
