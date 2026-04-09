@@ -1,51 +1,11 @@
 use crate::app::{App, Overlay, View};
-use crate::ui::theme::{apply_mode, theme_for};
+use crate::ui::palette;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use taolk::conversation::InboxMessage;
-
-fn sender_color_idx(ss58: &str) -> usize {
-    let hash: u8 = ss58.bytes().fold(0u8, |acc, b| acc.wrapping_add(b));
-    usize::from(hash) % 8
-}
-
-fn sender_color(app: &App, ss58: &str) -> Color {
-    let theme = theme_for(app.theme);
-    apply_mode(
-        app.color_mode,
-        theme.sender_rotation[sender_color_idx(ss58)],
-    )
-}
-
-#[derive(Clone, Copy)]
-struct Styles {
-    text: Color,
-    dim: Color,
-    strong: Color,
-    accent: Color,
-    accent_alt: Color,
-    timestamp: Color,
-    success: Color,
-    warning: Color,
-}
-
-fn styles(app: &App) -> Styles {
-    let t = theme_for(app.theme);
-    let m = app.color_mode;
-    Styles {
-        text: apply_mode(m, t.text),
-        dim: apply_mode(m, t.text_dim),
-        strong: apply_mode(m, t.text_strong),
-        accent: apply_mode(m, t.accent),
-        accent_alt: apply_mode(m, t.accent_alt),
-        timestamp: apply_mode(m, t.timestamp),
-        success: apply_mode(m, t.success),
-        warning: apply_mode(m, t.warning),
-    }
-}
 
 const BASE58_CHARS: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
@@ -60,7 +20,7 @@ fn is_ss58_at(bytes: &[u8], pos: usize) -> bool {
         && (pos + 48 == bytes.len() || !is_base58(bytes[pos + 48]))
 }
 
-fn render_body_line(text: &str, base_color: Color, my_ss58: &str, s: Styles) -> Line<'static> {
+fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let bytes = text.as_bytes();
     let mut pos = 0;
@@ -80,7 +40,7 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str, s: Styles) -> 
                 spans.push(Span::styled(
                     osc,
                     Style::default()
-                        .fg(s.accent_alt)
+                        .fg(palette::ACCENT_ALT)
                         .add_modifier(Modifier::UNDERLINED),
                 ));
                 pos += end;
@@ -89,7 +49,11 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str, s: Styles) -> 
 
             if bytes[pos] == b'@' && is_ss58_at(bytes, pos + 1) {
                 let is_self = &text[pos + 1..pos + 49] == my_ss58;
-                let color = if is_self { s.accent } else { s.accent_alt };
+                let color = if is_self {
+                    palette::ACCENT
+                } else {
+                    palette::ACCENT_ALT
+                };
                 spans.push(Span::styled(
                     text[pos..pos + 49].to_string(),
                     Style::default()
@@ -104,7 +68,7 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str, s: Styles) -> 
                 spans.push(Span::styled(
                     text[pos..pos + 48].to_string(),
                     Style::default()
-                        .fg(s.dim)
+                        .fg(palette::MUTED)
                         .add_modifier(Modifier::UNDERLINED),
                 ));
                 pos += 48;
@@ -121,7 +85,7 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str, s: Styles) -> 
                     spans.push(Span::styled(
                         remaining[..end].to_string(),
                         Style::default()
-                            .fg(s.accent)
+                            .fg(palette::ACCENT)
                             .add_modifier(Modifier::UNDERLINED),
                     ));
                     pos += end;
@@ -141,7 +105,7 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str, s: Styles) -> 
                         spans.push(Span::styled(
                             remaining[..end].to_string(),
                             Style::default()
-                                .fg(s.accent)
+                                .fg(palette::ACCENT)
                                 .add_modifier(Modifier::UNDERLINED),
                         ));
                         pos += end;
@@ -230,7 +194,7 @@ fn wrap_text(text: &str, max_width: usize, indent: usize) -> Vec<String> {
     }
 }
 
-fn date_separator(date_str: &str, s: Styles) -> Line<'static> {
+fn date_separator(date_str: &str) -> Line<'static> {
     let label = format!(" {date_str} ");
     let dashes = 3;
     let sep = format!(
@@ -242,14 +206,14 @@ fn date_separator(date_str: &str, s: Styles) -> Line<'static> {
     );
     Line::styled(
         sep,
-        Style::default().fg(s.dim).add_modifier(Modifier::ITALIC),
+        Style::default()
+            .fg(palette::MUTED)
+            .add_modifier(Modifier::ITALIC),
     )
 }
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     app.sender_click_regions.borrow_mut().clear();
-    let fill = crate::ui::chrome::fill_style(theme_for(app.theme), app.color_mode);
-    frame.buffer_mut().set_style(area, fill);
     if app.overlay == Some(Overlay::Compose)
         || (app.overlay == Some(Overlay::Message) && app.msg_recipient.is_none())
     {
@@ -302,10 +266,9 @@ fn render_standalone(
     pending: Option<&str>,
     area: Rect,
 ) {
-    let s = styles(app);
     let mut lines: Vec<Line> = vec![
-        header_line(title, "", usize::from(area.width), s),
-        separator(area.width, s),
+        header_line(title, "", usize::from(area.width)),
+        separator(area.width),
     ];
 
     {
@@ -323,7 +286,7 @@ fn render_standalone(
             };
 
             lines.push(Line::from(vec![
-                Span::styled(format!(" {time} "), Style::default().fg(s.timestamp)),
+                Span::styled(format!(" {time} "), Style::default().fg(palette::MUTED)),
                 Span::styled(
                     format!(" {type_icon} {type_label} "),
                     Style::default()
@@ -332,26 +295,32 @@ fn render_standalone(
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" "),
-                Span::styled(format!("{direction}: "), Style::default().fg(s.dim)),
+                Span::styled(
+                    format!("{direction}: "),
+                    Style::default().fg(palette::MUTED),
+                ),
                 Span::styled(
                     truncate(&msg.peer_ss58, 20),
-                    Style::default().fg(s.strong).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Reset)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]));
 
             if msg.body.is_empty() {
                 lines.push(Line::from(vec![Span::styled(
                     "   empty",
-                    Style::default().fg(s.dim).add_modifier(Modifier::ITALIC),
+                    Style::default()
+                        .fg(palette::MUTED)
+                        .add_modifier(Modifier::ITALIC),
                 )]));
             } else {
                 let my_ss58 = app.session.ss58();
                 for text_line in msg.body.lines() {
                     lines.push(render_body_line(
                         &format!("   {text_line}"),
-                        s.text,
+                        Color::Reset,
                         my_ss58,
-                        s,
                     ));
                 }
             }
@@ -373,28 +342,32 @@ fn render_standalone(
 
         lines.push(Line::raw(""));
         lines.push(Line::from(vec![
-            Span::styled(format!(" {spinner}  "), Style::default().fg(s.dim)),
+            Span::styled(format!(" {spinner}  "), Style::default().fg(palette::MUTED)),
             Span::styled(
                 format!(" {type_icon} {type_label} "),
-                Style::default().fg(s.dim).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette::MUTED)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
-            Span::styled("To: ", Style::default().fg(s.dim)),
+            Span::styled("To: ", Style::default().fg(palette::MUTED)),
             Span::styled(
                 truncate(&recipient_label, 20),
-                Style::default().fg(s.dim).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette::MUTED)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]));
 
         for text_line in text.lines() {
             lines.push(Line::styled(
                 format!("   {text_line}"),
-                Style::default().fg(s.dim),
+                Style::default().fg(palette::MUTED),
             ));
         }
     }
 
-    render_scrolled(frame, app, lines, 0, area);
+    render_scrolled(frame, lines, 0, area);
 }
 
 fn title_header_line(
@@ -402,7 +375,6 @@ fn title_header_line(
     title_color: Color,
     id_str: String,
     width: usize,
-    s: Styles,
 ) -> Line<'static> {
     let id_reserve = if id_str.is_empty() {
         0
@@ -420,7 +392,7 @@ fn title_header_line(
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" ".repeat(pad)),
-        Span::styled(id_str, Style::default().fg(s.dim)),
+        Span::styled(id_str, Style::default().fg(palette::MUTED)),
     ])
 }
 
@@ -442,7 +414,7 @@ fn render_threaded(
     );
     render_pending(&mut lines, app, view);
     record_sender_clicks(app, &pending_clicks, lines.len(), app.scroll_offset, area);
-    render_scrolled(frame, app, lines, app.scroll_offset, area);
+    render_scrolled(frame, lines, app.scroll_offset, area);
 }
 
 fn render_thread(frame: &mut Frame, app: &App, thread_idx: usize, area: Rect) {
@@ -468,10 +440,9 @@ fn render_thread(frame: &mut Frame, app: &App, thread_idx: usize, area: Rect) {
     };
     let peer = truncate(&thread.peer_ss58, w.saturating_sub(2 + id_reserve)).to_string();
 
-    let s = styles(app);
     let lines = vec![
-        title_header_line(peer, s.strong, id_str, w, s),
-        separator(area.width, s),
+        title_header_line(peer, Color::Reset, id_str, w),
+        separator(area.width),
     ];
 
     render_threaded(
@@ -502,18 +473,17 @@ fn render_channel(frame: &mut Frame, app: &App, chan_idx: usize, area: Rect) {
         truncate(&channel.name, w.saturating_sub(2 + id_reserve))
     );
 
-    let s = styles(app);
-    let mut lines = vec![title_header_line(title, s.strong, id_str, w, s)];
+    let mut lines = vec![title_header_line(title, Color::Reset, id_str, w)];
 
     if !channel.description.is_empty() {
         let desc_max = (usize::from(area.width)).saturating_sub(3);
         lines.push(Line::from(vec![Span::styled(
             format!(" {} ", truncate(&channel.description, desc_max)),
-            Style::default().fg(s.dim),
+            Style::default().fg(palette::MUTED),
         )]));
     }
 
-    lines.push(separator(area.width, s));
+    lines.push(separator(area.width));
 
     render_threaded(
         frame,
@@ -548,10 +518,9 @@ fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
     };
     let title = group_member_title(group, app, w.saturating_sub(2 + id_reserve));
 
-    let s = styles(app);
     let lines = vec![
-        title_header_line(title, s.accent, id_str, w, s),
-        separator(area.width, s),
+        title_header_line(title, palette::ACCENT, id_str, w),
+        separator(area.width),
     ];
 
     render_threaded(
@@ -608,25 +577,20 @@ fn group_member_title(group: &crate::conversation::Group, app: &App, title_max: 
 }
 
 fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
-    let s = styles(app);
     let count = app.session.known_channels.len();
     let mut lines: Vec<Line> = vec![
         header_line(
             "Channels",
             &format!("{count} available"),
             usize::from(area.width),
-            s,
         ),
-        separator(area.width, s),
+        separator(area.width),
     ];
 
     if app.session.known_channels.is_empty() && app.channel_dir_input.is_empty() {
         lines.push(Line::raw(""));
-        lines.push(dim("  No channels discovered yet", s));
-        lines.push(dim(
-            "  Channels appear here as they are created on-chain",
-            s,
-        ));
+        lines.push(dim("  No channels discovered yet"));
+        lines.push(dim("  Channels appear here as they are created on-chain"));
     }
 
     for (i, info) in app.session.known_channels.iter().enumerate() {
@@ -643,11 +607,11 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
         let name_str = format!("#{}", info.name);
 
         let name_color = if subscribed {
-            s.dim
+            palette::MUTED
         } else if selected {
-            s.strong
+            Color::Reset
         } else {
-            s.accent
+            palette::ACCENT
         };
         let name_mod = if selected {
             Modifier::BOLD
@@ -656,14 +620,14 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(indicator, Style::default().fg(s.accent)),
-            Span::styled("  ", Style::default().fg(s.dim)),
+            Span::styled(indicator, Style::default().fg(palette::ACCENT)),
+            Span::styled("  ", Style::default().fg(palette::MUTED)),
             Span::styled(
                 name_str,
                 Style::default().fg(name_color).add_modifier(name_mod),
             ),
-            Span::styled(id_str, Style::default().fg(s.dim)),
-            Span::styled(check, Style::default().fg(s.success)),
+            Span::styled(id_str, Style::default().fg(palette::MUTED)),
+            Span::styled(check, Style::default().fg(palette::SUCCESS)),
         ]));
 
         if !info.description.is_empty() {
@@ -672,33 +636,32 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
                 Span::raw("    "),
                 Span::styled(
                     truncate(&info.description, desc_max),
-                    Style::default().fg(s.dim),
+                    Style::default().fg(palette::MUTED),
                 ),
             ]));
         }
     }
 
-    render_scrolled(frame, app, lines, app.scroll_offset, area);
+    render_scrolled(frame, lines, app.scroll_offset, area);
 }
 
 fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
-    let s = styles(app);
     let contacts = app.filtered_contacts();
     let total = app.session.known_contacts().len();
     let w = usize::from(area.width);
 
     let mut lines: Vec<Line> = vec![
-        header_line("Contacts", &format!("{total} known"), w, s),
-        separator(area.width, s),
+        header_line("Contacts", &format!("{total} known"), w),
+        separator(area.width),
     ];
 
     if total == 0 {
         lines.push(Line::raw(""));
-        lines.push(dim("  No known contacts yet", s));
-        lines.push(dim("  Paste an SS58 address below to message someone", s));
+        lines.push(dim("  No known contacts yet"));
+        lines.push(dim("  Paste an SS58 address below to message someone"));
     } else if contacts.is_empty() && !app.input.is_empty() {
         lines.push(Line::raw(""));
-        lines.push(dim("  No matches", s));
+        lines.push(dim("  No matches"));
     }
 
     for (i, (_, pubkey)) in contacts.iter().enumerate() {
@@ -707,7 +670,11 @@ fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
         let addr_max = w.saturating_sub(4);
 
         let indicator = if selected { "> " } else { "  " };
-        let addr_color = if selected { s.strong } else { s.accent };
+        let addr_color = if selected {
+            Color::Reset
+        } else {
+            palette::ACCENT
+        };
         let addr_mod = if selected {
             Modifier::BOLD
         } else {
@@ -715,7 +682,7 @@ fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(indicator, Style::default().fg(s.accent)),
+            Span::styled(indicator, Style::default().fg(palette::ACCENT)),
             Span::styled(
                 truncate(&full_addr, addr_max),
                 Style::default().fg(addr_color).add_modifier(addr_mod),
@@ -723,23 +690,22 @@ fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
         ]));
     }
 
-    render_scrolled(frame, app, lines, app.scroll_offset, area);
+    render_scrolled(frame, lines, app.scroll_offset, area);
 }
 
 fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
-    let s = styles(app);
     let senders = &app.picker_senders;
     let total = senders.len();
     let w = usize::from(area.width);
 
     let mut lines: Vec<Line> = vec![
-        header_line("Copy SS58", &format!("{total} senders"), w, s),
-        separator(area.width, s),
+        header_line("Copy SS58", &format!("{total} senders"), w),
+        separator(area.width),
     ];
 
     if total == 0 {
         lines.push(Line::raw(""));
-        lines.push(dim("  No senders in this view", s));
+        lines.push(dim("  No senders in this view"));
     }
 
     for (i, (short, pk)) in senders.iter().enumerate() {
@@ -751,11 +717,11 @@ fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
         let addr_max = w.saturating_sub(4);
         let indicator = if selected { "> " } else { "  " };
         let addr_color = if selected {
-            s.strong
+            Color::Reset
         } else if pk.is_some() {
-            s.accent
+            palette::ACCENT
         } else {
-            s.dim
+            palette::MUTED
         };
         let addr_mod = if selected {
             Modifier::BOLD
@@ -764,7 +730,7 @@ fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(indicator, Style::default().fg(s.accent)),
+            Span::styled(indicator, Style::default().fg(palette::ACCENT)),
             Span::styled(
                 truncate(&display, addr_max),
                 Style::default().fg(addr_color).add_modifier(addr_mod),
@@ -772,11 +738,10 @@ fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
         ]));
     }
 
-    render_scrolled(frame, app, lines, 0, area);
+    render_scrolled(frame, lines, 0, area);
 }
 
 fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
-    let s = styles(app);
     let contacts = app.filtered_contacts();
     let total = app.session.known_contacts().len();
     let selected_count = app.pending_group_members.len();
@@ -787,17 +752,16 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
             "Select Members",
             &format!("{selected_count} selected, {total} known"),
             w,
-            s,
         ),
-        separator(area.width, s),
+        separator(area.width),
     ];
 
     if total == 0 {
         lines.push(Line::raw(""));
-        lines.push(dim("  No known contacts yet", s));
+        lines.push(dim("  No known contacts yet"));
     } else if contacts.is_empty() && !app.input.is_empty() {
         lines.push(Line::raw(""));
-        lines.push(dim("  No matches", s));
+        lines.push(dim("  No matches"));
     }
 
     for (i, (_, pubkey)) in contacts.iter().enumerate() {
@@ -810,13 +774,13 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
         let indicator = if cursor { "> " } else { "  " };
         let check = if is_member { "\u{2713} " } else { "  " };
         let addr_color = if is_self {
-            s.dim
+            palette::MUTED
         } else if cursor {
-            s.strong
+            Color::Reset
         } else if is_member {
-            s.success
+            palette::SUCCESS
         } else {
-            s.text
+            Color::Reset
         };
         let addr_mod = if cursor {
             Modifier::BOLD
@@ -825,8 +789,8 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(indicator, Style::default().fg(s.accent)),
-            Span::styled(check, Style::default().fg(s.success)),
+            Span::styled(indicator, Style::default().fg(palette::ACCENT)),
+            Span::styled(check, Style::default().fg(palette::SUCCESS)),
             Span::styled(
                 truncate(&full_addr, addr_max),
                 Style::default().fg(addr_color).add_modifier(addr_mod),
@@ -834,7 +798,7 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
         ]));
     }
 
-    render_scrolled(frame, app, lines, app.scroll_offset, area);
+    render_scrolled(frame, lines, app.scroll_offset, area);
 }
 
 fn render_pending(lines: &mut Vec<Line<'static>>, app: &App, view: View) {
@@ -842,22 +806,26 @@ fn render_pending(lines: &mut Vec<Line<'static>>, app: &App, view: View) {
         && app.pending_view == Some(view)
         && let Some(text) = &app.pending_text
     {
-        let s = styles(app);
         let first_line = text.lines().next().unwrap_or("");
         let indent = 7 + 3 + 2;
         lines.push(Line::raw(""));
         lines.push(Line::from(vec![
-            Span::styled(format!(" {} ", app.spinner_5()), Style::default().fg(s.dim)),
+            Span::styled(
+                format!(" {} ", app.spinner_5()),
+                Style::default().fg(palette::MUTED),
+            ),
             Span::styled(
                 "You  ",
-                Style::default().fg(s.dim).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette::MUTED)
+                    .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(first_line.to_string(), Style::default().fg(s.dim)),
+            Span::styled(first_line.to_string(), Style::default().fg(palette::MUTED)),
         ]));
         for body_line in text.lines().skip(1) {
             lines.push(Line::styled(
                 format!("{:indent$}{body_line}", ""),
-                Style::default().fg(s.dim),
+                Style::default().fg(palette::MUTED),
             ));
         }
     }
@@ -870,7 +838,6 @@ fn render_messages(
     width: usize,
     pending_clicks: &mut Vec<(usize, u16, u16, String)>,
 ) {
-    let s = styles(app);
     let my_ss58 = app.session.ss58();
     let mut last_date: Option<chrono::NaiveDate> = None;
     let mut last_sender: Option<&str> = None;
@@ -880,13 +847,17 @@ fn render_messages(
         let msg_date = msg.timestamp.with_timezone(&chrono::Local).date_naive();
         if last_date.is_some() && last_date != Some(msg_date) {
             let date_str = msg_date.format("%B %-d, %Y").to_string();
-            lines.push(date_separator(&date_str, s));
+            lines.push(date_separator(&date_str));
             last_sender = None;
         }
         last_date = Some(msg_date);
 
         if msg.has_gap {
-            let pulse = if app.frame % 8 < 4 { s.dim } else { s.warning };
+            let pulse = if app.frame % 8 < 4 {
+                palette::MUTED
+            } else {
+                palette::WARNING
+            };
             let gap_text = truncate(
                 " \u{25B2} Earlier messages may be missing \u{00B7} press r to load",
                 width,
@@ -902,7 +873,11 @@ fn render_messages(
         let is_empty_body = msg.body.is_empty();
         let has_match =
             !search.is_empty() && msg.body.to_lowercase().contains(&search.to_lowercase());
-        let body_color = if has_match { s.accent } else { s.text };
+        let body_color = if has_match {
+            palette::ACCENT
+        } else {
+            Color::Reset
+        };
         let display_body = if is_empty_body { "empty" } else { &msg.body };
         let first_body_line = display_body.lines().next().unwrap_or("");
 
@@ -916,12 +891,18 @@ fn render_messages(
             false
         };
 
-        let body_color = if is_empty_body { s.dim } else { body_color };
+        let body_color = if is_empty_body {
+            palette::MUTED
+        } else {
+            body_color
+        };
 
         if is_empty_body && same_sender && !time_gap {
             lines.push(Line::from(vec![Span::styled(
                 format!("{:last_indent$}empty", ""),
-                Style::default().fg(s.dim).add_modifier(Modifier::ITALIC),
+                Style::default()
+                    .fg(palette::MUTED)
+                    .add_modifier(Modifier::ITALIC),
             )]));
         } else if is_empty_body {
             let time = msg
@@ -930,11 +911,11 @@ fn render_messages(
                 .format(&app.timestamp_format)
                 .to_string();
             let (name, name_color) = if msg.is_mine {
-                ("You".to_string(), s.accent)
+                ("You".to_string(), palette::ACCENT)
             } else {
                 (
                     truncate(&msg.sender_ss58, 16),
-                    sender_color(app, &msg.sender_ss58),
+                    palette::sender_color(&msg.sender_ss58),
                 )
             };
             let indent = 7 + name.len() + 2;
@@ -948,21 +929,23 @@ fn render_messages(
                 ));
             }
             lines.push(Line::from(vec![
-                Span::styled(format!(" {time} "), Style::default().fg(s.timestamp)),
+                Span::styled(format!(" {time} "), Style::default().fg(palette::MUTED)),
                 Span::styled(
                     format!("{name}  "),
                     Style::default().fg(name_color).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     "empty",
-                    Style::default().fg(s.dim).add_modifier(Modifier::ITALIC),
+                    Style::default()
+                        .fg(palette::MUTED)
+                        .add_modifier(Modifier::ITALIC),
                 ),
             ]));
         } else if same_sender && !time_gap {
             for body_line in display_body.lines() {
                 let prefixed = format!("{:last_indent$}{body_line}", "");
                 for wrapped in wrap_text(&prefixed, width, last_indent) {
-                    lines.push(render_body_line(&wrapped, body_color, my_ss58, s));
+                    lines.push(render_body_line(&wrapped, body_color, my_ss58));
                 }
             }
         } else if same_sender && time_gap {
@@ -984,10 +967,10 @@ fn render_messages(
 
             let pad = last_indent.saturating_sub(7);
             let mut spans = vec![
-                Span::styled(format!(" {time} "), Style::default().fg(s.timestamp)),
+                Span::styled(format!(" {time} "), Style::default().fg(palette::MUTED)),
                 Span::styled(format!("{:pad$}", ""), Style::default()),
             ];
-            let rendered = render_body_line(&first_wrapped.0, body_color, my_ss58, s);
+            let rendered = render_body_line(&first_wrapped.0, body_color, my_ss58);
             for span in rendered.spans {
                 spans.push(span);
             }
@@ -999,13 +982,13 @@ fn render_messages(
                     width,
                     last_indent,
                 ) {
-                    lines.push(render_body_line(&wrapped, body_color, my_ss58, s));
+                    lines.push(render_body_line(&wrapped, body_color, my_ss58));
                 }
             }
             for body_line in msg.body.lines().skip(1) {
                 let prefixed = format!("{:last_indent$}{body_line}", "");
                 for wrapped in wrap_text(&prefixed, width, last_indent) {
-                    lines.push(render_body_line(&wrapped, body_color, my_ss58, s));
+                    lines.push(render_body_line(&wrapped, body_color, my_ss58));
                 }
             }
         } else {
@@ -1019,11 +1002,11 @@ fn render_messages(
                 .format(&app.timestamp_format)
                 .to_string();
             let (name, name_color) = if msg.is_mine {
-                ("You".to_string(), s.accent)
+                ("You".to_string(), palette::ACCENT)
             } else {
                 (
                     truncate(&msg.sender_ss58, 16),
-                    sender_color(app, &msg.sender_ss58),
+                    palette::sender_color(&msg.sender_ss58),
                 )
             };
 
@@ -1051,13 +1034,13 @@ fn render_messages(
                 ));
             }
             let mut first_spans = vec![
-                Span::styled(format!(" {time} "), Style::default().fg(s.timestamp)),
+                Span::styled(format!(" {time} "), Style::default().fg(palette::MUTED)),
                 Span::styled(
                     format!("{name}  "),
                     Style::default().fg(name_color).add_modifier(Modifier::BOLD),
                 ),
             ];
-            let body_rendered = render_body_line(&first_wrapped.0, body_color, my_ss58, s);
+            let body_rendered = render_body_line(&first_wrapped.0, body_color, my_ss58);
             for span in body_rendered.spans {
                 first_spans.push(span);
             }
@@ -1065,14 +1048,14 @@ fn render_messages(
 
             if let Some(overflow) = first_wrapped.1 {
                 for wrapped in wrap_text(&format!("{:indent$}{overflow}", ""), width, indent) {
-                    lines.push(render_body_line(&wrapped, body_color, my_ss58, s));
+                    lines.push(render_body_line(&wrapped, body_color, my_ss58));
                 }
             }
 
             for body_line in msg.body.lines().skip(1) {
                 let prefixed = format!("{:indent$}{body_line}", "");
                 for wrapped in wrap_text(&prefixed, width, indent) {
-                    lines.push(render_body_line(&wrapped, body_color, my_ss58, s));
+                    lines.push(render_body_line(&wrapped, body_color, my_ss58));
                 }
             }
         }
@@ -1081,44 +1064,39 @@ fn render_messages(
     }
 }
 
-fn header_line(title: &str, right: &str, width: usize, s: Styles) -> Line<'static> {
+fn header_line(title: &str, right: &str, width: usize) -> Line<'static> {
     let title_max = width.saturating_sub(right.len() + 3);
     let truncated = truncate(title, title_max);
     let pad = width.saturating_sub(truncated.len() + 2 + right.len());
     Line::from(vec![
         Span::styled(
             format!(" {truncated}"),
-            Style::default().fg(s.strong).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Reset)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" ".repeat(pad)),
-        Span::styled(right.to_string(), Style::default().fg(s.dim)),
+        Span::styled(right.to_string(), Style::default().fg(palette::MUTED)),
     ])
 }
 
-fn separator(width: u16, s: Styles) -> Line<'static> {
+fn separator(width: u16) -> Line<'static> {
     Line::styled(
         "\u{2500}".repeat(usize::from(width)),
-        Style::default().fg(s.dim),
+        Style::default().fg(palette::MUTED),
     )
 }
 
-fn dim(text: &str, s: Styles) -> Line<'static> {
-    Line::styled(text.to_string(), Style::default().fg(s.dim))
+fn dim(text: &str) -> Line<'static> {
+    Line::styled(text.to_string(), Style::default().fg(palette::MUTED))
 }
 
-fn render_scrolled(
-    frame: &mut ratatui::Frame,
-    app: &App,
-    lines: Vec<Line<'_>>,
-    scroll: usize,
-    area: Rect,
-) {
+fn render_scrolled(frame: &mut ratatui::Frame, lines: Vec<Line<'_>>, scroll: usize, area: Rect) {
     let visible = usize::from(area.height);
     let bottom = lines.len().saturating_sub(visible);
     let start = bottom.saturating_sub(scroll);
     let end = (start + visible).min(lines.len());
-    let fill = crate::ui::chrome::fill_style(theme_for(app.theme), app.color_mode);
-    frame.render_widget(Paragraph::new(lines[start..end].to_vec()).style(fill), area);
+    frame.render_widget(Paragraph::new(lines[start..end].to_vec()), area);
 }
 
 fn record_sender_clicks(
@@ -1146,18 +1124,6 @@ use taolk::util::truncate;
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn sender_color_idx_is_deterministic() {
-        let a = sender_color_idx("5FHneW46xGXgs5AUiveU4sbTyGBzmstUspZC92UhjJM694ty");
-        let b = sender_color_idx("5FHneW46xGXgs5AUiveU4sbTyGBzmstUspZC92UhjJM694ty");
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn sender_color_idx_in_range() {
-        assert!(sender_color_idx("anything") < 8);
-    }
 
     #[test]
     fn is_base58_accepts_alphabet() {

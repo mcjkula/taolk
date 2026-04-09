@@ -182,9 +182,9 @@ fn run_tui(
 
     loop {
         let result = if first_login || force_picker {
-            run_lock_screen(&mut terminal, &events, wallets, preselected, cfg)?
+            run_lock_screen(&mut terminal, &events, wallets, preselected)?
         } else {
-            run_lock_screen(&mut terminal, &events, &[], Some(&current_wallet), cfg)?
+            run_lock_screen(&mut terminal, &events, &[], Some(&current_wallet))?
         };
 
         let (wallet_name, seed) = match result {
@@ -236,29 +236,21 @@ fn run_lock_screen(
     events: &TuiEventHandler,
     wallets: &[String],
     preselected: Option<&str>,
-    cfg: &config::Config,
 ) -> Result<UnlockResult, Box<dyn std::error::Error>> {
     use ratatui::style::{Modifier, Style};
     use ratatui::text::{Line, Span};
-    use ratatui::widgets::{Block, Paragraph};
-    use ui::theme::{apply_mode, theme_for};
+    use ratatui::widgets::Paragraph;
+    use ui::palette;
 
-    let theme = theme_for(cfg.ui.theme);
-    let color_mode = cfg.ui.colors;
-    let root_style = Style::default()
-        .bg(apply_mode(color_mode, theme.bg))
-        .fg(apply_mode(color_mode, theme.text));
     let logo_style = Style::default()
-        .fg(apply_mode(color_mode, theme.accent))
+        .fg(palette::ACCENT)
         .add_modifier(Modifier::BOLD);
-    let subtitle_style = Style::default().fg(apply_mode(color_mode, theme.text_dim));
-    let dim_style = Style::default().fg(apply_mode(color_mode, theme.text_dim));
-    let active_style = Style::default()
-        .fg(apply_mode(color_mode, theme.text_strong))
-        .add_modifier(Modifier::BOLD);
-    let prompt_active_style = Style::default().fg(apply_mode(color_mode, theme.text_strong));
-    let prompt_idle_style = Style::default().fg(apply_mode(color_mode, theme.text_dim));
-    let error_style = Style::default().fg(apply_mode(color_mode, theme.error));
+    let subtitle_style = Style::default().fg(palette::MUTED);
+    let dim_style = Style::default().fg(palette::MUTED);
+    let active_style = Style::default().add_modifier(Modifier::BOLD);
+    let prompt_active_style = Style::default();
+    let prompt_idle_style = Style::default().fg(palette::MUTED);
+    let error_style = Style::default().fg(palette::ERROR);
 
     const LOGO: &[&str] = &[
         "   \u{2591}\u{2588}\u{2588}                                     \u{2591}\u{2588}\u{2588} \u{2591}\u{2588}\u{2588}",
@@ -295,8 +287,6 @@ fn run_lock_screen(
 
             let area = frame.area();
             let w = area.width;
-            frame.render_widget(Block::default().style(root_style), area);
-
             let content_height = 18;
             let top_pad = vertical_pad(content_height, area.height);
 
@@ -380,7 +370,7 @@ fn run_lock_screen(
             };
             lines.push(centered_line(hints, w, dim_style));
 
-            frame.render_widget(Paragraph::new(lines).style(root_style), area);
+            frame.render_widget(Paragraph::new(lines), area);
 
             if inserting {
                 let cursor_y =
@@ -473,10 +463,8 @@ fn acquire_seed(
             .cached_seed()
             .map(|s| zeroize::Zeroizing::new(*s)));
     }
-    Ok(
-        prompt_password_modal(terminal, events, wallet_name, app.theme, app.color_mode)?
-            .map(|seed| zeroize::Zeroizing::new(*seed.as_bytes())),
-    )
+    Ok(prompt_password_modal(terminal, events, wallet_name)?
+        .map(|seed| zeroize::Zeroizing::new(*seed.as_bytes())))
 }
 
 fn dispatch_unlock_all(
@@ -589,28 +577,22 @@ fn prompt_password_modal(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     events: &TuiEventHandler,
     wallet_name: &str,
-    theme_choice: taolk::config::ThemeChoice,
-    color_mode: taolk::config::ColorMode,
 ) -> Result<Option<taolk::secret::Seed>, Box<dyn std::error::Error>> {
     use ratatui::layout::Rect;
     use ratatui::style::{Modifier, Style};
     use ratatui::text::{Line, Span};
     use ratatui::widgets::{Block, Clear, Paragraph};
-    use ui::theme::{apply_mode, theme_for};
+    use ui::palette;
 
-    let theme = theme_for(theme_choice);
-    let surface_style = Style::default()
-        .bg(apply_mode(color_mode, theme.surface))
-        .fg(apply_mode(color_mode, theme.text));
     let title_style = Style::default()
-        .fg(apply_mode(color_mode, theme.accent))
+        .fg(palette::ACCENT)
         .add_modifier(Modifier::BOLD);
     let border_style = Style::default()
-        .fg(apply_mode(color_mode, theme.border_focus))
+        .fg(palette::ACCENT)
         .add_modifier(Modifier::BOLD);
-    let prompt_style = Style::default().fg(apply_mode(color_mode, theme.text_strong));
-    let error_style = Style::default().fg(apply_mode(color_mode, theme.error));
-    let hint_style = Style::default().fg(apply_mode(color_mode, theme.text_dim));
+    let prompt_style = Style::default();
+    let error_style = Style::default().fg(palette::ERROR);
+    let hint_style = Style::default().fg(palette::MUTED);
 
     let mut password = zeroize::Zeroizing::new(String::new());
     let mut error_msg: Option<String> = None;
@@ -629,8 +611,7 @@ fn prompt_password_modal(
                     title_style,
                 ))
                 .border_type(crate::ui::symbols::PANEL_BORDER)
-                .border_style(border_style)
-                .style(surface_style);
+                .border_style(border_style);
             let inner = block.inner(rect);
             frame.render_widget(block, rect);
 
@@ -653,7 +634,7 @@ fn prompt_password_modal(
                     Span::styled("Enter sign \u{00B7} Esc cancel", hint_style),
                 ]));
             }
-            frame.render_widget(Paragraph::new(lines).style(surface_style), inner);
+            frame.render_widget(Paragraph::new(lines), inner);
 
             let cursor_x = inner.x + 2 + "Password: ".len() as u16;
             let cursor_y = inner.y + 1;
@@ -712,25 +693,18 @@ fn prompt_password_modal(
 fn draw_connecting(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     node_url: &str,
-    cfg: &config::Config,
 ) -> Result<(), std::io::Error> {
     use ratatui::layout::Alignment;
     use ratatui::style::Style;
     use ratatui::text::{Line, Span};
-    use ratatui::widgets::{Block, Paragraph};
-    use ui::theme::{apply_mode, theme_for};
+    use ratatui::widgets::Paragraph;
+    use ui::palette;
 
-    let theme = theme_for(cfg.ui.theme);
-    let mode = cfg.ui.colors;
-    let root_style = Style::default()
-        .bg(apply_mode(mode, theme.bg))
-        .fg(apply_mode(mode, theme.text));
-    let dim = Style::default().fg(apply_mode(mode, theme.text_dim));
-    let accent = Style::default().fg(apply_mode(mode, theme.accent));
+    let dim = Style::default().fg(palette::MUTED);
+    let accent = Style::default().fg(palette::ACCENT);
 
     terminal.draw(|frame| {
         let area = frame.area();
-        frame.render_widget(Block::default().style(root_style), area);
         let mut lines: Vec<Line> = Vec::new();
         for _ in 0..(area.height / 2).saturating_sub(1) {
             lines.push(Line::raw(""));
@@ -740,10 +714,7 @@ fn draw_connecting(
             Span::styled(node_url.to_string(), accent),
             Span::styled("\u{2026}", dim),
         ]));
-        let p = Paragraph::new(lines)
-            .alignment(Alignment::Center)
-            .style(root_style);
-        frame.render_widget(p, area);
+        frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
     })?;
     Ok(())
 }
@@ -752,9 +723,9 @@ fn fetch_fresh_blocking(
     rt: &tokio::runtime::Runtime,
     node_url: &str,
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
-    cfg: &config::Config,
+    _cfg: &config::Config,
 ) -> Result<(extrinsic::ChainInfo, String, u32), Box<dyn std::error::Error>> {
-    draw_connecting(terminal, node_url, cfg)?;
+    draw_connecting(terminal, node_url)?;
     let info = rt
         .block_on(extrinsic::fetch_chain_info(node_url))
         .map_err(|e| format!("Failed to fetch chain info: {e}"))?;
@@ -812,9 +783,6 @@ fn run_session(
     app.sidebar_width = cfg.ui.sidebar_width;
     app.timestamp_format = cfg.ui.timestamp_format.clone();
     app.date_format = cfg.ui.date_format.clone();
-    app.theme = cfg.ui.theme;
-    app.icons = cfg.ui.icons;
-    app.color_mode = cfg.ui.colors;
     app.session.load_from_db();
 
     let event_tx = events.core_sender();

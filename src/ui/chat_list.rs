@@ -1,7 +1,7 @@
 use crate::app::{App, View};
 use crate::conversation::Conversation;
 use crate::ui::chrome;
-use crate::ui::theme::{apply_mode, theme_for};
+use crate::ui::palette;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -9,23 +9,14 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem};
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    let theme = theme_for(app.theme);
-    let mode = app.color_mode;
-    frame
-        .buffer_mut()
-        .set_style(area, chrome::fill_style(theme, mode));
-    let text_style = Style::default().fg(apply_mode(mode, theme.text));
+    let text_style = Style::default();
     let selected_style = Style::default()
-        .fg(apply_mode(mode, theme.accent))
+        .fg(palette::ACCENT)
         .add_modifier(Modifier::BOLD);
-    let dim_style = Style::default().fg(apply_mode(mode, theme.text_dim));
-    let accent_style = Style::default().fg(apply_mode(mode, theme.accent));
-    let unread_style = Style::default()
-        .fg(apply_mode(mode, theme.accent))
-        .add_modifier(Modifier::BOLD);
-    let title_style = Style::default()
-        .fg(apply_mode(mode, theme.accent))
-        .add_modifier(Modifier::BOLD);
+    let dim_style = palette::dim();
+    let accent_style = Style::default().fg(palette::ACCENT);
+    let unread_style = selected_style;
+    let title_style = selected_style;
     let item_style = |selected: bool| if selected { selected_style } else { text_style };
     let indicator = |selected: bool| if selected { "\u{25B8} " } else { "  " };
     let max_name = usize::from(area.width.saturating_sub(8));
@@ -317,16 +308,11 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let block = chrome::panel(theme, mode, false)
+    let block = chrome::panel(false)
         .title(" \u{03C4}alk ")
         .title_style(title_style);
 
-    frame.render_widget(
-        List::new(items)
-            .block(block)
-            .style(chrome::fill_style(theme, mode)),
-        area,
-    );
+    frame.render_widget(List::new(items).block(block), area);
 }
 
 use taolk::util::truncate;

@@ -1,13 +1,11 @@
 use crate::app::{App, Focus, Overlay, View};
-use crate::ui::theme::{apply_mode, theme_for};
+use crate::ui::palette;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 pub fn hints(app: &App) -> Line<'static> {
-    let theme = theme_for(app.theme);
-    let mode = app.color_mode;
-    let key = Style::default().fg(apply_mode(mode, theme.accent));
-    let desc = Style::default().fg(apply_mode(mode, theme.text_dim));
+    let key = Style::default().fg(palette::ACCENT);
+    let desc = palette::dim();
 
     let pairs = pairs_for(app);
     let mut spans: Vec<Span<'static>> = Vec::with_capacity(pairs.len() * 2 + 1);

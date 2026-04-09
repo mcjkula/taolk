@@ -6,7 +6,7 @@ use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
-use crate::ui::theme::{apply_mode, theme_for};
+use crate::ui::palette;
 
 struct Card {
     title: &'static str,
@@ -111,15 +111,10 @@ const COLUMN_GAP: usize = 2;
 const SIDE_MARGIN: usize = 2;
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    let theme = theme_for(app.theme);
-    let mode = app.color_mode;
-    let root_style = crate::ui::chrome::fill_style(theme, mode);
     let accent = Style::default()
-        .fg(apply_mode(mode, theme.accent))
+        .fg(palette::ACCENT)
         .add_modifier(Modifier::BOLD);
-    let dim = Style::default().fg(apply_mode(mode, theme.text_dim));
-
-    frame.buffer_mut().set_style(area, root_style);
+    let dim = Style::default().fg(palette::MUTED);
 
     let body = Rect {
         x: area.x,
@@ -150,7 +145,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let mut heights: Vec<usize> = vec![0; columns_qty];
 
     for card in CARDS {
-        let card_lines = render_card(card, card_width, theme, mode);
+        let card_lines = render_card(card, card_width);
         let (idx, _) = heights.iter().enumerate().min_by_key(|(_, h)| **h).unwrap();
         if !columns[idx].is_empty() {
             columns[idx].push(blank_line(card_width));
@@ -225,17 +220,12 @@ fn compute_card_width() -> usize {
     (max_entry + CARD_H_PAD * 2).max(max_title + CARD_H_PAD * 2 + 2)
 }
 
-fn render_card(
-    card: &Card,
-    width: usize,
-    theme: &crate::ui::theme::Theme,
-    mode: crate::config::ColorMode,
-) -> Vec<Line<'static>> {
+fn render_card(card: &Card, width: usize) -> Vec<Line<'static>> {
     let title_style = Style::default()
-        .fg(apply_mode(mode, theme.accent_alt))
+        .fg(palette::ACCENT_ALT)
         .add_modifier(Modifier::BOLD);
-    let desc_style = Style::default().fg(apply_mode(mode, theme.text));
-    let key_style = Style::default().fg(apply_mode(mode, theme.accent));
+    let desc_style = Style::default().fg(ratatui::style::Color::Reset);
+    let key_style = Style::default().fg(palette::ACCENT);
 
     let mut lines = Vec::with_capacity(card.entries.len() + 3);
     let title_w = UnicodeWidthStr::width(card.title);

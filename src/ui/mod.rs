@@ -5,9 +5,9 @@ pub mod hintbar;
 mod input;
 pub mod modal;
 pub mod overlay;
+pub mod palette;
 pub mod statusline;
 pub mod symbols;
-pub mod theme;
 pub mod timeline;
 pub mod welcome;
 
@@ -26,7 +26,6 @@ mod icons {
 use crate::app::App;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
 
@@ -37,13 +36,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     use crate::app::Overlay;
 
     let area = frame.area();
-    let theme = theme::theme_for(app.theme);
-    let mode = app.color_mode;
-    let root_style = chrome::fill_style(theme, mode);
-    frame.buffer_mut().set_style(area, root_style);
 
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
-        render_too_small(frame, app, area);
+        render_too_small(frame, area);
         return;
     }
 
@@ -82,9 +77,8 @@ pub fn render(frame: &mut Frame, app: &App) {
 }
 
 fn render_main_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let theme = theme::theme_for(app.theme);
     let focused = app.is_composing();
-    let block = chrome::panel(theme, app.color_mode, focused);
+    let block = chrome::panel(focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -109,15 +103,11 @@ fn render_main_panel(frame: &mut Frame, app: &App, area: Rect) {
     input::render(frame, app, rows[1]);
 }
 
-fn render_too_small(frame: &mut Frame, app: &App, area: Rect) {
-    let theme = theme::theme_for(app.theme);
-    let style = Style::default()
-        .bg(theme::apply_mode(app.color_mode, theme.bg))
-        .fg(theme::apply_mode(app.color_mode, theme.error));
+fn render_too_small(frame: &mut Frame, area: Rect) {
     let msg = format!(
         "taolk requires at least {MIN_WIDTH}x{MIN_HEIGHT} — current {}x{}",
         area.width, area.height,
     );
     let lines = vec![Line::raw(""), Line::raw(msg)];
-    frame.render_widget(Paragraph::new(lines).style(style), area);
+    frame.render_widget(Paragraph::new(lines).style(palette::dim()), area);
 }

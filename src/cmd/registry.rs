@@ -20,11 +20,6 @@ pub const COMMANDS: &[Command] = &[
         run: run_quit,
     },
     Command {
-        name: "theme",
-        summary: "Switch theme (terminal|mocha|latte|tokyo-night|gruvbox-dark|rose-pine)",
-        run: run_theme,
-    },
-    Command {
         name: "sidebar",
         summary: "Toggle the sidebar",
         run: run_sidebar,
@@ -68,15 +63,6 @@ fn run_help(app: &mut App, _: &[&str]) -> CmdResult {
 
 fn run_quit(app: &mut App, _: &[&str]) -> CmdResult {
     app.running = false;
-    Ok(())
-}
-
-fn run_theme(app: &mut App, args: &[&str]) -> CmdResult {
-    let name = args.first().copied().unwrap_or("");
-    let choice =
-        taolk::config::ThemeChoice::parse(name).ok_or_else(|| format!("unknown theme: {name}"))?;
-    app.theme = choice;
-    app.set_status(format!("theme \u{2192} {}", choice.as_str()));
     Ok(())
 }
 

@@ -1,30 +1,10 @@
 use crate::app::{App, Focus, Overlay};
-use crate::ui::chrome;
-use crate::ui::theme::{apply_mode, theme_for};
+use crate::ui::palette;
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-
-#[derive(Clone, Copy)]
-pub(super) struct Styles {
-    pub dim: Color,
-    pub text: Color,
-    pub accent: Color,
-    pub error: Color,
-}
-
-pub(super) fn styles(app: &App) -> Styles {
-    let t = theme_for(app.theme);
-    let m = app.color_mode;
-    Styles {
-        dim: apply_mode(m, t.text_dim),
-        text: apply_mode(m, t.text),
-        accent: apply_mode(m, t.accent),
-        error: apply_mode(m, t.error),
-    }
-}
 
 pub(super) fn fit(s: &str, max: usize) -> String {
     if s.len() <= max {
@@ -41,7 +21,6 @@ pub(super) fn visible_input(
     cursor: usize,
     width: usize,
     limit: Option<usize>,
-    st: Styles,
 ) -> (Vec<Span<'static>>, u16) {
     if text.is_empty() {
         return (vec![], 0);
@@ -71,7 +50,10 @@ pub(super) fn visible_input(
     let mut spans: Vec<Span<'static>> = Vec::new();
 
     if start > 0 {
-        spans.push(Span::styled("\u{2026}", Style::default().fg(st.dim)));
+        spans.push(Span::styled(
+            "\u{2026}",
+            Style::default().fg(palette::MUTED),
+        ));
     }
 
     if over_limit {
@@ -82,33 +64,40 @@ pub(super) fn visible_input(
             let ok_end = (lim - start).min(visible.len());
             spans.push(Span::styled(
                 visible[..ok_end].to_string(),
-                Style::default().fg(st.text),
+                Style::default().fg(ratatui::style::Color::Reset),
             ));
             if ok_end < visible.len() {
                 spans.push(Span::styled(
                     visible[ok_end..].to_string(),
-                    Style::default().fg(st.error),
+                    Style::default().fg(palette::ERROR),
                 ));
             }
         } else {
             spans.push(Span::styled(
                 visible.to_string(),
-                Style::default().fg(st.error),
+                Style::default().fg(palette::ERROR),
             ));
         }
     } else {
         spans.push(Span::styled(
             visible.to_string(),
-            Style::default().fg(st.text),
+            Style::default().fg(ratatui::style::Color::Reset),
         ));
     }
 
     if end < text_len {
-        spans.push(Span::styled("\u{2026}", Style::default().fg(st.dim)));
+        spans.push(Span::styled(
+            "\u{2026}",
+            Style::default().fg(palette::MUTED),
+        ));
     }
 
     if let Some(lim) = limit {
-        let counter_color = if text_len > lim { st.error } else { st.dim };
+        let counter_color = if text_len > lim {
+            palette::ERROR
+        } else {
+            palette::MUTED
+        };
         spans.push(Span::styled(
             format!(" {}/{}", text_len, lim),
             Style::default().fg(counter_color),
@@ -118,10 +107,10 @@ pub(super) fn visible_input(
     (spans, cursor_x)
 }
 
-fn sep_line(width: u16, st: Styles) -> Line<'static> {
+fn sep_line(width: u16) -> Line<'static> {
     Line::styled(
         "\u{2500}".repeat(usize::from(width)),
-        Style::default().fg(st.dim),
+        Style::default().fg(palette::MUTED),
     )
 }
 
@@ -132,17 +121,16 @@ fn render_single_input(
     placeholder: &str,
     limit: Option<usize>,
     area: Rect,
-    st: Styles,
 ) {
-    let sep = sep_line(area.width, st);
-    let prompt_span = Span::styled(prompt, Style::default().fg(st.dim));
+    let sep = sep_line(area.width);
+    let prompt_span = Span::styled(prompt, Style::default().fg(palette::MUTED));
     let prompt_width = prompt.len() + 1;
 
     if app.input.is_empty() {
         let input_line = Line::from(vec![
             Span::raw(" "),
             prompt_span,
-            Span::styled(placeholder, Style::default().fg(st.dim)),
+            Span::styled(placeholder, Style::default().fg(palette::MUTED)),
         ]);
         frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), input_line]), area);
         let cursor_x = area.x + u16::try_from(prompt_width).unwrap_or(u16::MAX);
@@ -156,13 +144,8 @@ fn render_single_input(
     let avail = (usize::from(area.width)).saturating_sub(prompt_width + 1);
     let counter_width = limit.map_or(0, |l| format!(" {}/{}", app.input.len(), l).len());
     let text_width = avail.saturating_sub(counter_width);
-    let (text_spans, cursor_off) = visible_input(
-        app.input.as_str(),
-        app.input.cursor(),
-        text_width,
-        limit,
-        st,
-    );
+    let (text_spans, cursor_off) =
+        visible_input(app.input.as_str(), app.input.cursor(), text_width, limit);
 
     let mut spans = vec![Span::raw(" "), prompt_span];
     spans.extend(text_spans);
@@ -177,14 +160,11 @@ fn render_single_input(
 }
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    let st = styles(app);
-    let fill = chrome::fill_style(theme_for(app.theme), app.color_mode);
-    frame.buffer_mut().set_style(area, fill);
-    let sep = sep_line(area.width, st);
+    let sep = sep_line(area.width);
 
     match app.overlay {
         Some(Overlay::Search) => {
-            render_single_input(frame, app, "/", "Search messages...", None, area, st);
+            render_single_input(frame, app, "/", "Search messages...", None, area);
         }
         Some(Overlay::CreateChannel) => {
             render_single_input(
@@ -194,7 +174,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 &format!("max {} characters", samp::CHANNEL_NAME_MAX),
                 Some(samp::CHANNEL_NAME_MAX),
                 area,
-                st,
             );
         }
         Some(Overlay::CreateChannelDesc) => {
@@ -205,15 +184,14 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 "optional",
                 Some(samp::CHANNEL_DESC_MAX),
                 area,
-                st,
             );
         }
         Some(Overlay::CreateGroupMembers) => {
-            render_group_member_picker(frame, app, sep, area, st);
+            render_group_member_picker(frame, app, sep, area);
         }
         Some(Overlay::Message) => {
             if app.msg_recipient.is_none() {
-                render_picker_input(frame, app, sep, area, st);
+                render_picker_input(frame, app, sep, area);
             } else {
                 let Some((_, ss58)) = app.msg_recipient.as_ref() else {
                     return;
@@ -222,20 +200,26 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 let ss58_max = (usize::from(area.width)).saturating_sub(prefix_len);
                 let selector = Line::from(vec![
                     Span::raw(" "),
-                    Span::styled("[p] ", Style::default().fg(st.accent)),
-                    Span::styled("public  ", Style::default().fg(st.text)),
-                    Span::styled("[e] ", Style::default().fg(st.accent)),
-                    Span::styled("encrypted  ", Style::default().fg(st.text)),
+                    Span::styled("[p] ", Style::default().fg(palette::ACCENT)),
+                    Span::styled(
+                        "public  ",
+                        Style::default().fg(ratatui::style::Color::Reset),
+                    ),
+                    Span::styled("[e] ", Style::default().fg(palette::ACCENT)),
+                    Span::styled(
+                        "encrypted  ",
+                        Style::default().fg(ratatui::style::Color::Reset),
+                    ),
                     Span::styled(
                         fit(&format!("to {ss58}"), ss58_max),
-                        Style::default().fg(st.dim),
+                        Style::default().fg(palette::MUTED),
                     ),
                 ]);
                 frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), selector]), area);
             }
         }
         Some(Overlay::Compose) => {
-            render_picker_input(frame, app, sep, area, st);
+            render_picker_input(frame, app, sep, area);
         }
         Some(Overlay::Confirm) => {
             let fee_text = match &app.pending_fee {
@@ -277,9 +261,11 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 (String::new(), false)
             };
             let preview_style = if is_empty_preview {
-                Style::default().fg(st.dim).add_modifier(Modifier::ITALIC)
+                Style::default()
+                    .fg(palette::MUTED)
+                    .add_modifier(Modifier::ITALIC)
             } else {
-                Style::default().fg(st.text)
+                Style::default().fg(ratatui::style::Color::Reset)
             };
             let preview_line = Line::from(vec![Span::styled(preview, preview_style)]);
 
@@ -287,9 +273,11 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 Span::raw(" "),
                 Span::styled(
                     format!("{action} "),
-                    Style::default().fg(st.text).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(ratatui::style::Color::Reset)
+                        .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(fee_text, Style::default().fg(st.accent)),
+                Span::styled(fee_text, Style::default().fg(palette::ACCENT)),
             ]);
             frame.render_widget(Paragraph::new(vec![sep, preview_line, confirm_line]), area);
         }
@@ -313,9 +301,9 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 let visible = fit(&draft_str, avail);
                 Line::from(vec![
                     Span::raw(" "),
-                    Span::styled("> ", Style::default().fg(st.dim)),
-                    Span::styled(visible, Style::default().fg(st.dim)),
-                    Span::styled(suffix, Style::default().fg(st.accent)),
+                    Span::styled("> ", Style::default().fg(palette::MUTED)),
+                    Span::styled(visible, Style::default().fg(palette::MUTED)),
+                    Span::styled(suffix, Style::default().fg(palette::ACCENT)),
                 ])
             } else if app.view == crate::app::View::ChannelDir && !app.channel_dir_input.is_empty()
             {
@@ -326,9 +314,8 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                     app.channel_dir_input.len(),
                     avail,
                     None,
-                    st,
                 );
-                let mut spans = vec![Span::styled(prompt, Style::default().fg(st.dim))];
+                let mut spans = vec![Span::styled(prompt, Style::default().fg(palette::MUTED))];
                 spans.extend(text_spans);
                 let input_line = Line::from(spans);
                 frame.render_widget(
@@ -350,15 +337,15 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-fn render_picker_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect, st: Styles) {
+fn render_picker_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) {
     let w = usize::from(area.width);
 
     if app.input.is_empty() {
         let prompt = Line::from(vec![
-            Span::styled(" To: ", Style::default().fg(st.dim)),
+            Span::styled(" To: ", Style::default().fg(palette::MUTED)),
             Span::styled(
                 "type to search or paste address",
-                Style::default().fg(st.dim),
+                Style::default().fg(palette::MUTED),
             ),
         ]);
         frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), prompt]), area);
@@ -370,8 +357,8 @@ fn render_picker_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect, 
     } else {
         let avail = w.saturating_sub(6);
         let (text_spans, cursor_off) =
-            visible_input(app.input.as_str(), app.input.cursor(), avail, None, st);
-        let mut spans = vec![Span::styled(" To: ", Style::default().fg(st.dim))];
+            visible_input(app.input.as_str(), app.input.cursor(), avail, None);
+        let mut spans = vec![Span::styled(" To: ", Style::default().fg(palette::MUTED))];
         spans.extend(text_spans);
         let input_line = Line::from(spans);
         frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), input_line]), area);
@@ -383,7 +370,7 @@ fn render_picker_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect, 
     }
 }
 
-fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect, st: Styles) {
+fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) {
     let w = usize::from(area.width);
     let selected_count = app.pending_group_members.len();
 
@@ -391,11 +378,11 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area:
         let prompt = Line::from(vec![
             Span::styled(
                 format!(" Members ({selected_count}): "),
-                Style::default().fg(st.dim),
+                Style::default().fg(palette::MUTED),
             ),
             Span::styled(
                 "type to search or paste address",
-                Style::default().fg(st.dim),
+                Style::default().fg(palette::MUTED),
             ),
         ]);
         frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), prompt]), area);
@@ -409,8 +396,11 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area:
         let avail = w.saturating_sub(10);
         let prompt_str = format!(" ({selected_count}): ");
         let (text_spans, cursor_off) =
-            visible_input(app.input.as_str(), app.input.cursor(), avail, None, st);
-        let mut spans = vec![Span::styled(&prompt_str, Style::default().fg(st.dim))];
+            visible_input(app.input.as_str(), app.input.cursor(), avail, None);
+        let mut spans = vec![Span::styled(
+            &prompt_str,
+            Style::default().fg(palette::MUTED),
+        )];
         spans.extend(text_spans);
         let input_line = Line::from(spans);
         frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), input_line]), area);
@@ -425,15 +415,6 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area:
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn test_styles() -> Styles {
-        Styles {
-            dim: Color::DarkGray,
-            text: Color::White,
-            accent: Color::Cyan,
-            error: Color::Red,
-        }
-    }
 
     #[test]
     fn fit_short_string_unchanged() {
@@ -457,33 +438,33 @@ mod tests {
 
     #[test]
     fn visible_input_empty_returns_empty_spans() {
-        let (spans, cursor_x) = visible_input("", 0, 10, None, test_styles());
+        let (spans, cursor_x) = visible_input("", 0, 10, None);
         assert!(spans.is_empty());
         assert_eq!(cursor_x, 0);
     }
 
     #[test]
     fn visible_input_short_text_no_scroll() {
-        let (spans, cursor_x) = visible_input("hello", 5, 20, None, test_styles());
+        let (spans, cursor_x) = visible_input("hello", 5, 20, None);
         assert!(!spans.is_empty());
         assert_eq!(cursor_x, 5);
     }
 
     #[test]
     fn visible_input_under_limit_no_red_span() {
-        let (spans, _) = visible_input("hi", 0, 20, Some(10), test_styles());
+        let (spans, _) = visible_input("hi", 0, 20, Some(10));
         assert_eq!(spans.len(), 2);
     }
 
     #[test]
     fn visible_input_over_limit_appends_counter() {
-        let (spans, _) = visible_input("toolongtoolong", 0, 20, Some(5), test_styles());
+        let (spans, _) = visible_input("toolongtoolong", 0, 20, Some(5));
         assert!(spans.len() >= 2);
     }
 
     #[test]
     fn visible_input_scrolls_when_text_exceeds_width() {
-        let (spans, _) = visible_input("0123456789ABCDEF", 15, 8, None, test_styles());
+        let (spans, _) = visible_input("0123456789ABCDEF", 15, 8, None);
         assert!(!spans.is_empty());
     }
 }

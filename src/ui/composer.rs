@@ -269,11 +269,8 @@ fn next_char_boundary(s: &str, mut pos: usize) -> usize {
 }
 
 pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) {
-    use super::input::{styles, visible_input};
-    let st = styles(app);
-    let fill =
-        crate::ui::chrome::fill_style(crate::ui::theme::theme_for(app.theme), app.color_mode);
-    frame.buffer_mut().set_style(area, fill);
+    use super::input::visible_input;
+    use crate::ui::palette;
     let prompt = "> ";
     let prompt_width: usize = 3;
     let w = usize::from(area.width);
@@ -296,8 +293,8 @@ pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
         };
         let input_line = Line::from(vec![
             Span::raw(" "),
-            Span::styled(prompt, Style::default().fg(st.dim)),
-            Span::styled(placeholder, Style::default().fg(st.dim)),
+            Span::styled(prompt, Style::default().fg(palette::MUTED)),
+            Span::styled(placeholder, Style::default().fg(palette::MUTED)),
         ]);
         frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), input_line]), area);
         let cursor_x = area.x + u16::try_from(prompt_width).unwrap_or(u16::MAX);
@@ -330,7 +327,6 @@ pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
             if is_cursor_line { cursor_col } else { 0 },
             avail,
             None,
-            st,
         );
         let line_prompt = if i == scroll_start && scroll_start == 0 {
             prompt
@@ -339,7 +335,7 @@ pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
         };
         let mut spans = vec![
             Span::raw(" "),
-            Span::styled(line_prompt, Style::default().fg(st.dim)),
+            Span::styled(line_prompt, Style::default().fg(palette::MUTED)),
         ];
         spans.extend(text_spans);
         paragraph_lines.push(Line::from(spans));
@@ -352,7 +348,6 @@ pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
         cursor_col,
         avail,
         None,
-        st,
     );
     let cursor_x = area.x + u16::try_from(prompt_width).unwrap_or(u16::MAX) + cursor_off;
     let cursor_y = area.y + 2 + u16::try_from(visible_cursor_row).unwrap_or(u16::MAX);

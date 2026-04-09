@@ -1,6 +1,6 @@
 use crate::app::App;
 use crate::ui::modal::centered_line;
-use crate::ui::theme::{apply_mode, theme_for};
+use crate::ui::palette;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -17,19 +17,14 @@ const BANNER: &[&str] = &[
 ];
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    let theme = theme_for(app.theme);
-    let mode = app.color_mode;
-    frame
-        .buffer_mut()
-        .set_style(area, crate::ui::chrome::fill_style(theme, mode));
     let accent = Style::default()
-        .fg(apply_mode(mode, theme.accent))
+        .fg(palette::ACCENT)
         .add_modifier(Modifier::BOLD);
-    let text = Style::default().fg(apply_mode(mode, theme.text));
+    let text = Style::default();
     let dim = Style::default()
-        .fg(apply_mode(mode, theme.accent_alt))
+        .fg(palette::ACCENT_ALT)
         .add_modifier(Modifier::ITALIC);
-    let key = Style::default().fg(apply_mode(mode, theme.accent));
+    let key = Style::default().fg(palette::ACCENT);
 
     let ss58 = app.session.my_ss58.clone();
     let content_h: u16 = u16::try_from(BANNER.len() + 12).unwrap_or(u16::MAX);

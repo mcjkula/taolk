@@ -1,96 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum ThemeChoice {
-    #[default]
-    Terminal,
-    Mocha,
-    Latte,
-    TokyoNight,
-    GruvboxDark,
-    RosePine,
-}
-
-impl ThemeChoice {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Terminal => "terminal",
-            Self::Mocha => "mocha",
-            Self::Latte => "latte",
-            Self::TokyoNight => "tokyo-night",
-            Self::GruvboxDark => "gruvbox-dark",
-            Self::RosePine => "rose-pine",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "terminal" => Some(Self::Terminal),
-            "mocha" => Some(Self::Mocha),
-            "latte" => Some(Self::Latte),
-            "tokyo-night" => Some(Self::TokyoNight),
-            "gruvbox-dark" => Some(Self::GruvboxDark),
-            "rose-pine" => Some(Self::RosePine),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum IconChoice {
-    #[default]
-    Nerd,
-    Ascii,
-}
-
-impl IconChoice {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Nerd => "nerd",
-            Self::Ascii => "ascii",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "nerd" => Some(Self::Nerd),
-            "ascii" => Some(Self::Ascii),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum ColorMode {
-    #[default]
-    TrueColor,
-    Ansi256,
-    Mono,
-}
-
-impl ColorMode {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::TrueColor => "true-color",
-            Self::Ansi256 => "ansi256",
-            Self::Mono => "mono",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "true-color" => Some(Self::TrueColor),
-            "ansi256" => Some(Self::Ansi256),
-            "mono" => Some(Self::Mono),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -128,9 +38,6 @@ pub struct Ui {
     pub mouse: bool,
     pub timestamp_format: String,
     pub date_format: String,
-    pub theme: ThemeChoice,
-    pub icons: IconChoice,
-    pub colors: ColorMode,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -168,9 +75,6 @@ impl Default for Ui {
             mouse: true,
             timestamp_format: "%H:%M".into(),
             date_format: "%Y-%m-%d %H:%M".into(),
-            theme: ThemeChoice::default(),
-            icons: IconChoice::default(),
-            colors: ColorMode::default(),
         }
     }
 }
@@ -275,27 +179,6 @@ pub const KEYS: &[KeyDef] = &[
         default_display: "%Y-%m-%d %H:%M",
     },
     KeyDef {
-        key: "ui.theme",
-        section: "ui",
-        field: "theme",
-        description: "Color theme (terminal, mocha, latte, tokyo-night, gruvbox-dark, rose-pine)",
-        default_display: "terminal",
-    },
-    KeyDef {
-        key: "ui.icons",
-        section: "ui",
-        field: "icons",
-        description: "Icon set (nerd, ascii)",
-        default_display: "nerd",
-    },
-    KeyDef {
-        key: "ui.colors",
-        section: "ui",
-        field: "colors",
-        description: "Color depth (true-color, ansi256, mono)",
-        default_display: "true-color",
-    },
-    KeyDef {
         key: "notifications.enabled",
         section: "notifications",
         field: "enabled",
@@ -367,9 +250,6 @@ pub fn get_value(config: &Config, key: &str) -> String {
         "ui.mouse" => config.ui.mouse.to_string(),
         "ui.timestamp_format" => config.ui.timestamp_format.clone(),
         "ui.date_format" => config.ui.date_format.clone(),
-        "ui.theme" => config.ui.theme.as_str().to_string(),
-        "ui.icons" => config.ui.icons.as_str().to_string(),
-        "ui.colors" => config.ui.colors.as_str().to_string(),
         "notifications.enabled" => config.notifications.enabled.to_string(),
         "notifications.volume" => config.notifications.volume.to_string(),
         "notifications.dm" => config.notifications.dm.to_string(),
@@ -427,30 +307,6 @@ pub fn set_key(key: &str, raw: &[String]) -> Result<String, ConfigError> {
             toml::Value::Integer(i64::from(v))
         }
         "ui.mouse" | "security.require_password_per_send" => toml::Value::Boolean(parse_bool(raw)?),
-        "ui.theme" => {
-            let s = raw.first().map(String::as_str).unwrap_or("");
-            ThemeChoice::parse(s).ok_or_else(|| ConfigError::InvalidValue {
-                expected: "terminal|mocha|latte|tokyo-night|gruvbox-dark|rose-pine".into(),
-                got: s.into(),
-            })?;
-            toml::Value::String(s.into())
-        }
-        "ui.icons" => {
-            let s = raw.first().map(String::as_str).unwrap_or("");
-            IconChoice::parse(s).ok_or_else(|| ConfigError::InvalidValue {
-                expected: "nerd|ascii".into(),
-                got: s.into(),
-            })?;
-            toml::Value::String(s.into())
-        }
-        "ui.colors" => {
-            let s = raw.first().map(String::as_str).unwrap_or("");
-            ColorMode::parse(s).ok_or_else(|| ConfigError::InvalidValue {
-                expected: "true-color|ansi256|mono".into(),
-                got: s.into(),
-            })?;
-            toml::Value::String(s.into())
-        }
         "notifications.enabled"
         | "notifications.dm"
         | "notifications.ambient"

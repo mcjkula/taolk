@@ -3,7 +3,7 @@ use crate::cmd::registry::{COMMANDS, Command};
 use crate::ui::chrome;
 use crate::ui::composer::TextBuffer;
 use crate::ui::modal::centered_rect;
-use crate::ui::theme::{apply_mode, theme_for};
+use crate::ui::palette;
 use crossterm::event::{KeyCode, KeyEvent};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use ratatui::Frame;
@@ -105,8 +105,6 @@ fn parse_args(query: &str) -> String {
 }
 
 pub fn render(frame: &mut Frame, app: &App) {
-    let theme = theme_for(app.theme);
-    let mode = app.color_mode;
     let area = frame.area();
     let width = area.width.saturating_sub(8).min(72);
     let height = area.height.saturating_sub(6).min(18);
@@ -114,7 +112,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     frame.render_widget(Clear, rect);
 
-    let block = chrome::surface_panel(theme, mode).title(" commands ");
+    let block = chrome::panel(false).title(" commands ");
     let inner = block.inner(rect);
     frame.render_widget(block, rect);
 
@@ -126,24 +124,23 @@ pub fn render(frame: &mut Frame, app: &App) {
         ])
         .split(inner);
 
-    let surface = chrome::surface_style(theme, mode);
     let prompt = Line::from(vec![
-        Span::styled(" > ", Style::default().fg(apply_mode(mode, theme.accent))),
+        Span::styled(" > ", Style::default().fg(palette::ACCENT)),
         Span::styled(
             app.palette
                 .as_ref()
                 .map_or("", |p| p.query.as_str())
                 .to_string(),
-            Style::default().fg(apply_mode(mode, theme.text)),
+            Style::default().fg(ratatui::style::Color::Reset),
         ),
     ]);
-    frame.render_widget(Paragraph::new(prompt).style(surface), rows[0]);
+    frame.render_widget(Paragraph::new(prompt), rows[0]);
 
     let selected_style = Style::default()
-        .fg(apply_mode(mode, theme.accent))
+        .fg(palette::ACCENT)
         .add_modifier(Modifier::BOLD);
-    let name_style = Style::default().fg(apply_mode(mode, theme.text));
-    let summary_style = Style::default().fg(apply_mode(mode, theme.text_dim));
+    let name_style = Style::default().fg(ratatui::style::Color::Reset);
+    let summary_style = Style::default().fg(palette::MUTED);
 
     let state = match &app.palette {
         Some(s) => s,
@@ -172,7 +169,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         })
         .collect();
 
-    frame.render_widget(List::new(items).style(surface), rows[1]);
+    frame.render_widget(List::new(items), rows[1]);
 
     let cursor_x = rows[0].x + 3 + u16::try_from(state.query.cursor()).unwrap_or(u16::MAX);
     let cursor_y = rows[0].y;
@@ -194,11 +191,11 @@ mod tests {
     #[test]
     fn typing_filters_by_prefix() {
         let mut s = PaletteState::new();
-        s.query.insert_char('t');
         s.query.insert_char('h');
         s.query.insert_char('e');
+        s.query.insert_char('l');
         s.recompute();
         let top = s.ranking.first().expect("nonempty");
-        assert_eq!(COMMANDS[top.idx].name, "theme");
+        assert_eq!(COMMANDS[top.idx].name, "help");
     }
 }

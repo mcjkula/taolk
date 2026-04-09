@@ -1,8 +1,6 @@
 use crate::app::App;
-use crate::config::ColorMode;
-use crate::ui::chrome;
 use crate::ui::hintbar;
-use crate::ui::theme::{Theme, apply_mode, theme_for};
+use crate::ui::palette;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -11,45 +9,41 @@ use ratatui::widgets::Paragraph;
 use taolk::event::ConnState;
 use taolk::util::format_number;
 
-fn reconnect_pill(state: ConnState, theme: &Theme, mode: ColorMode) -> Option<Span<'static>> {
+fn reconnect_pill(state: ConnState) -> Option<Span<'static>> {
     match state {
         ConnState::Connected => None,
         ConnState::Reconnecting { in_secs } => Some(Span::styled(
             format!(" reconnecting in {in_secs}s "),
             Style::default()
-                .fg(apply_mode(mode, theme.bg))
-                .bg(apply_mode(mode, theme.error))
-                .add_modifier(Modifier::BOLD),
+                .fg(palette::ERROR)
+                .add_modifier(Modifier::REVERSED | Modifier::BOLD),
         )),
     }
 }
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    let theme = theme_for(app.theme);
-    let mode = app.color_mode;
-
     let left = if let Some((status, is_error)) = app.current_status() {
         if app.is_busy() {
             let spinner = app.spinner_1();
             Line::from(Span::styled(
                 format!(" {spinner} {status} "),
-                Style::default().fg(apply_mode(mode, theme.accent)),
+                Style::default().fg(palette::ACCENT),
             ))
         } else if is_error {
             Line::from(Span::styled(
                 format!(" \u{2717} {status} "),
-                Style::default().fg(apply_mode(mode, theme.error)),
+                Style::default().fg(palette::ERROR),
             ))
         } else {
             Line::from(Span::styled(
                 format!(" \u{2713} {status} "),
-                Style::default().fg(apply_mode(mode, theme.text_strong)),
+                palette::strong(),
             ))
         }
     } else if !app.search_query.is_empty() {
         Line::from(Span::styled(
             format!(" /{} ", app.search_query),
-            Style::default().fg(apply_mode(mode, theme.accent)),
+            Style::default().fg(palette::ACCENT),
         ))
     } else {
         hintbar::hints(app)
@@ -69,27 +63,27 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         None => String::new(),
     };
     let balance_fresh = app.frame.wrapping_sub(app.balance_changed_at) < highlight_frames;
-    let balance_color = if balance_fresh {
+    let balance_style = if balance_fresh {
         if app.balance_decreased {
-            apply_mode(mode, theme.error)
+            Style::default().fg(palette::ERROR)
         } else {
-            apply_mode(mode, theme.success)
+            Style::default().fg(palette::SUCCESS)
         }
     } else {
-        apply_mode(mode, theme.text)
+        Style::default()
     };
-    let balance_span = Span::styled(balance_str.clone(), Style::default().fg(balance_color));
+    let balance_span = Span::styled(balance_str.clone(), balance_style);
 
     let block_str = format!(" #{} ", format_number(u128::from(app.session.block_number)));
     let block_fresh = app.frame.wrapping_sub(app.block_changed_at) < highlight_frames;
-    let block_color = if block_fresh {
-        apply_mode(mode, theme.text_strong)
+    let block_style = if block_fresh {
+        palette::strong()
     } else {
-        apply_mode(mode, theme.text_dim)
+        palette::dim()
     };
-    let block_span = Span::styled(block_str.clone(), Style::default().fg(block_color));
+    let block_span = Span::styled(block_str.clone(), block_style);
 
-    let reconnect = reconnect_pill(app.connection, theme, mode);
+    let reconnect = reconnect_pill(app.connection);
     let reconnect_width = reconnect
         .as_ref()
         .map_or(0, |s| u16::try_from(s.width()).unwrap_or(u16::MAX));
@@ -102,9 +96,8 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let locked_span = Span::styled(
         locked_str.clone(),
         Style::default()
-            .fg(apply_mode(mode, theme.bg))
-            .bg(apply_mode(mode, theme.warning))
-            .add_modifier(Modifier::BOLD),
+            .fg(palette::WARNING)
+            .add_modifier(Modifier::REVERSED | Modifier::BOLD),
     );
 
     let right_width = u16::try_from(locked_str.chars().count()).unwrap_or(u16::MAX)
@@ -127,8 +120,5 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     spans.push(balance_span);
     spans.push(block_span);
 
-    frame.render_widget(
-        Paragraph::new(Line::from(spans)).style(chrome::fill_style(theme, mode)),
-        area,
-    );
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
