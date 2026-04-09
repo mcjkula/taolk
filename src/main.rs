@@ -5,8 +5,8 @@ mod ui;
 
 use taolk::conversation::Conversation;
 use taolk::{
-    audio, chain, config, conversation, db, error, event, extrinsic, mirror, reader, session,
-    types, util, wallet,
+    audio, chain, chain_cache, config, conversation, db, error, event, extrinsic, mirror, reader,
+    session, types, util, wallet,
 };
 
 use app::{App, Mode};
@@ -709,6 +709,48 @@ fn prompt_password_modal(
     }
 }
 
+fn draw_connecting(
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    node_url: &str,
+) -> Result<(), std::io::Error> {
+    use ratatui::layout::Alignment;
+    use ratatui::style::{Color, Style};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::Paragraph;
+    terminal.draw(|frame| {
+        let area = frame.area();
+        let mut lines: Vec<Line> = Vec::new();
+        for _ in 0..(area.height / 2).saturating_sub(1) {
+            lines.push(Line::raw(""));
+        }
+        lines.push(Line::from(vec![
+            Span::styled("Connecting to ", Style::default().fg(Color::DarkGray)),
+            Span::styled(node_url.to_string(), Style::default().fg(Color::Cyan)),
+            Span::styled("\u{2026}", Style::default().fg(Color::DarkGray)),
+        ]));
+        let p = Paragraph::new(lines).alignment(Alignment::Center);
+        frame.render_widget(p, area);
+    })?;
+    Ok(())
+}
+
+fn fetch_fresh_blocking(
+    rt: &tokio::runtime::Runtime,
+    node_url: &str,
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+) -> Result<(extrinsic::ChainInfo, String, u32), Box<dyn std::error::Error>> {
+    draw_connecting(terminal, node_url)?;
+    let info = rt
+        .block_on(extrinsic::fetch_chain_info(node_url))
+        .map_err(|e| format!("Failed to fetch chain info: {e}"))?;
+    let (sym, dec) = rt
+        .block_on(extrinsic::fetch_token_info(node_url))
+        .unwrap_or_else(|_| ("UNIT".into(), 0));
+    let snap = chain_cache::ChainSnapshot::from_chain_info(&info, &sym, dec);
+    let _ = chain_cache::save(node_url, &snap);
+    Ok((info, sym, dec))
+}
+
 fn run_session(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     events: &TuiEventHandler,
@@ -723,17 +765,17 @@ fn run_session(
 
     let rt = tokio::runtime::Runtime::new()?;
 
-    let chain_info = rt
-        .block_on(extrinsic::fetch_chain_info(node_url))
-        .map_err(|e| format!("Failed to fetch chain info: {e}"))?;
-
-    let (token_symbol, token_decimals) = match rt.block_on(extrinsic::fetch_token_info(node_url)) {
-        Ok(info) => info,
-        Err(e) => {
-            eprintln!("Warning: Could not fetch token info: {e}. Defaulting to TAO/9.");
-            ("TAO".into(), 9)
-        }
-    };
+    // Hot path: load chain info from disk cache. Cold start (first launch
+    // for this node URL) falls back to a synchronous fetch with a
+    // "Connecting…" frame so the user knows we're working.
+    let (chain_info, token_symbol, token_decimals, used_cache) =
+        match chain_cache::load(node_url).and_then(|s| s.into_chain_info().ok()) {
+            Some((info, sym, dec)) => (info, sym, dec, true),
+            None => {
+                let (info, sym, dec) = fetch_fresh_blocking(&rt, node_url, terminal)?;
+                (info, sym, dec, false)
+            }
+        };
 
     let db = db::Db::open(
         wallet_name,
@@ -760,17 +802,53 @@ fn run_session(
     app.date_format = cfg.ui.date_format.clone();
     app.session.load_from_db();
 
-    if let Ok(bal) = rt.block_on(extrinsic::fetch_balance(
-        node_url,
-        &my_pubkey,
-        &chain_info.account_storage,
-    )) {
-        app.session.balance = Some(bal);
-    }
-
     let event_tx = events.core_sender();
     let lock_timeout = std::time::Duration::from_secs(cfg.security.lock_timeout);
     let mut last_activity = std::time::Instant::now();
+
+    // Background: fetch balance off the critical path.
+    {
+        let url = node_url.to_string();
+        let tx = event_tx.clone();
+        let layout = chain_info.account_storage.clone();
+        rt.spawn(async move {
+            if let Ok(bal) = extrinsic::fetch_balance(url.as_str(), &my_pubkey, &layout).await {
+                let _ = tx.send(event::Event::BalanceUpdated(bal));
+            }
+        });
+    }
+
+    // Background: refresh chain snapshot if we used a cached one.
+    // Verifies genesis_hash matches; on mismatch, refuses to overwrite the
+    // cache (the local DB is still keyed on the original genesis_hash) and
+    // emits a warning. The actual signing path always uses live params via
+    // refresh_signing_params, so a stale cache cannot cause a wrong-chain
+    // signature.
+    if used_cache {
+        let url = node_url.to_string();
+        let tx = event_tx.clone();
+        let expected = *chain_info.chain_params.genesis_hash.as_bytes();
+        rt.spawn(async move {
+            let fresh = match extrinsic::fetch_chain_info(url.as_str()).await {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+            if fresh.chain_params.genesis_hash.as_bytes() != &expected {
+                let _ = tx.send(event::Event::GenesisMismatch);
+                return;
+            }
+            let (sym, dec) = extrinsic::fetch_token_info(url.as_str())
+                .await
+                .unwrap_or_else(|_| ("UNIT".into(), 0));
+            let snap = chain_cache::ChainSnapshot::from_chain_info(&fresh, &sym, dec);
+            let _ = chain_cache::save(&url, &snap);
+            let _ = tx.send(event::Event::ChainSnapshotRefreshed {
+                info: fresh,
+                token_symbol: sym,
+                token_decimals: dec,
+            });
+        });
+    }
 
     {
         let url = node_url.to_string();
@@ -811,7 +889,7 @@ fn run_session(
         app.sound_armed = true;
     }
 
-    app.set_status("Connected");
+    app.set_status(if used_cache { "Ready" } else { "Connected" });
 
     while app.running {
         if let Some(text) = app.pending_send_text.take() {
@@ -1167,6 +1245,18 @@ fn run_session(
                     app.balance_changed_at = app.frame;
                 }
                 app.session.balance = Some(bal);
+            }
+            TuiEvent::Core(event::Event::ChainSnapshotRefreshed {
+                info,
+                token_symbol,
+                token_decimals,
+            }) => {
+                app.session.chain_info = info;
+                app.session.token_symbol = token_symbol;
+                app.session.token_decimals = token_decimals;
+            }
+            TuiEvent::Core(event::Event::GenesisMismatch) => {
+                app.set_status("\u{26A0} chain genesis changed; restart taolk to re-cache");
             }
             TuiEvent::Core(event::Event::ConnectionStatus(state)) => {
                 app.connection = state;

@@ -70,6 +70,12 @@ pub enum Event {
         fee_raw: Option<u128>,
     },
     BalanceUpdated(u128),
+    ChainSnapshotRefreshed {
+        info: crate::extrinsic::ChainInfo,
+        token_symbol: String,
+        token_decimals: u32,
+    },
+    GenesisMismatch,
     ConnectionStatus(ConnState),
     Status(String),
     Error(String),

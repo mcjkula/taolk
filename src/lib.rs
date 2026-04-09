@@ -1,6 +1,7 @@
 #[cfg(feature = "tui")]
 pub mod audio;
 pub mod chain;
+pub mod chain_cache;
 pub mod config;
 pub mod conversation;
 pub mod db;
