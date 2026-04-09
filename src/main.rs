@@ -313,7 +313,8 @@ fn run_lock_screen(
 
                 let mut spans: Vec<Span<'static>> = Vec::new();
                 if win_start > 0 {
-                    spans.push(Span::styled("\u{2039}  ", dim_style));
+                    spans.push(Span::styled(ui::icons::CHEVRON_LEFT, dim_style));
+                    spans.push(Span::raw("  "));
                 } else {
                     spans.push(Span::raw("   "));
                 }
@@ -328,7 +329,8 @@ fn run_lock_screen(
                     }
                 }
                 if win_end < wallets.len() {
-                    spans.push(Span::styled("  \u{203A}", dim_style));
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(ui::icons::CHEVRON_RIGHT, dim_style));
                 } else {
                     spans.push(Span::raw("  "));
                 }
@@ -364,7 +366,7 @@ fn run_lock_screen(
             let hints = if inserting {
                 "Enter unlock \u{00B7} Esc back"
             } else if show_carousel {
-                "\u{2190}/\u{2192} select \u{00B7} i unlock \u{00B7} q quit"
+                "\u{F004D}/\u{F0054} select \u{00B7} i unlock \u{00B7} q quit"
             } else {
                 "i unlock \u{00B7} q quit"
             };

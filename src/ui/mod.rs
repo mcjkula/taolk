@@ -11,16 +11,35 @@ pub mod symbols;
 pub mod timeline;
 pub mod welcome;
 
-mod icons {
-    pub const INBOX: &str = "\u{2709}";
-    pub const OUTBOX: &str = "\u{2197}";
-    pub const PUBLIC: &str = "\u{25CB}";
-    pub const ENCRYPTED: &str = "\u{25CF}";
-    pub const THREADS: &str = "\u{21C4}";
-    pub const CHANNELS: &str = "\u{2261}";
-    pub const GROUPS: &str = "\u{2299}";
-    pub const CREATOR: &str = "\u{2605}";
-    pub const DRAFT: &str = "\u{270E}";
+pub mod icons {
+    // Conversation types
+    pub const INBOX: &str = "\u{F02FB}";
+    pub const OUTBOX: &str = "\u{F048A}";
+    pub const THREADS: &str = "\u{F0369}";
+    pub const CHANNELS: &str = "\u{F0423}";
+    pub const GROUPS: &str = "\u{F0849}";
+
+    // Message attributes
+    pub const PUBLIC: &str = "\u{F0FC6}";
+    pub const ENCRYPTED: &str = "\u{F033E}";
+    pub const CREATOR: &str = "\u{F01A5}";
+    pub const DRAFT: &str = "\u{F03EB}";
+
+    // Status indicators
+    pub const CHECK: &str = "\u{F012C}";
+    pub const ERROR: &str = "\u{F0028}";
+    pub const LOCK_CLOCK: &str = "\u{F097F}";
+    pub const HISTORY: &str = "\u{F02DA}";
+
+    // Navigation
+    // ARROW_UP/DOWN/LEFT/RIGHT are inlined at call sites because Rust const rules
+    // forbid combo string composition from const refs. Codepoints:
+    //   nf-md-arrow_up    \u{F005D}
+    //   nf-md-arrow_down  \u{F0045}
+    //   nf-md-arrow_left  \u{F004D}
+    //   nf-md-arrow_right \u{F0054}
+    pub const CHEVRON_LEFT: &str = "\u{F0141}";
+    pub const CHEVRON_RIGHT: &str = "\u{F0142}";
 }
 
 use crate::app::App;

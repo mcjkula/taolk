@@ -17,7 +17,7 @@ const CARDS: &[Card] = &[
     Card {
         title: "Sidebar",
         entries: &[
-            ("\u{2191} / \u{2193}", "Previous / next conversation"),
+            ("\u{F005D} / \u{F0045}", "Previous / next conversation"),
             ("Tab / S-Tab", "Previous / next conversation"),
             ("Space", "Toggle sidebar"),
         ],
@@ -67,7 +67,7 @@ const CARDS: &[Card] = &[
             ("Enter", "Send (preview fee)"),
             ("C-n", "Insert newline"),
             ("Esc", "Save draft and exit"),
-            ("C-\u{2190} / C-\u{2192}", "Jump by word"),
+            ("C-\u{F004D} / C-\u{F0054}", "Jump by word"),
             ("Backspace", "Delete left"),
         ],
     },
@@ -79,7 +79,7 @@ const CARDS: &[Card] = &[
         title: "Compose / Message",
         entries: &[
             ("type", "Filter or paste SS58"),
-            ("\u{2191} / \u{2193}", "Pick contact"),
+            ("\u{F005D} / \u{F0045}", "Pick contact"),
             ("C-n", "Swap public/encrypted"),
             ("Enter", "Confirm and compose"),
             ("Esc", "Cancel"),
@@ -88,7 +88,7 @@ const CARDS: &[Card] = &[
     Card {
         title: "Sender picker",
         entries: &[
-            ("\u{2191} / \u{2193}", "Pick sender"),
+            ("\u{F005D} / \u{F0045}", "Pick sender"),
             ("Enter", "Copy SS58 to clipboard"),
             ("Esc", "Cancel"),
         ],
@@ -97,7 +97,7 @@ const CARDS: &[Card] = &[
         title: "Group members",
         entries: &[
             ("type", "Filter or paste SS58"),
-            ("\u{2191} / \u{2193}", "Pick contact"),
+            ("\u{F005D} / \u{F0045}", "Pick contact"),
             ("Enter", "Add or remove"),
             ("Tab", "Done, create group"),
             ("Esc", "Cancel"),

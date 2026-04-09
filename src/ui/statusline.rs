@@ -1,5 +1,6 @@
 use crate::app::App;
 use crate::ui::hintbar;
+use crate::ui::icons;
 use crate::ui::palette;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -31,12 +32,12 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             ))
         } else if is_error {
             Line::from(Span::styled(
-                format!(" \u{2717} {status} "),
+                format!(" {} {status} ", icons::ERROR),
                 Style::default().fg(palette::ERROR),
             ))
         } else {
             Line::from(Span::styled(
-                format!(" \u{2713} {status} "),
+                format!(" {} {status} ", icons::CHECK),
                 palette::strong(),
             ))
         }
@@ -91,7 +92,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let locked_str = if app.locked_outbound.is_empty() {
         String::new()
     } else {
-        format!(" \u{1F512} {} (U) ", app.locked_outbound.len())
+        format!(" {} {} (U) ", icons::LOCK_CLOCK, app.locked_outbound.len())
     };
     let locked_span = Span::styled(
         locked_str.clone(),

@@ -598,7 +598,7 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
         let subscribed = app.session.is_subscribed(&info.channel_ref);
 
         let indicator = if selected { "> " } else { "  " };
-        let check = if subscribed { " \u{2713}" } else { "" };
+        let check = if subscribed { " \u{F012C}" } else { "" };
         let id_str = format!(
             " {}:{}",
             info.channel_ref.block().get(),
@@ -772,7 +772,7 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
         let addr_max = w.saturating_sub(6);
 
         let indicator = if cursor { "> " } else { "  " };
-        let check = if is_member { "\u{2713} " } else { "  " };
+        let check = if is_member { "\u{F012C} " } else { "  " };
         let addr_color = if is_self {
             palette::MUTED
         } else if cursor {
@@ -858,10 +858,11 @@ fn render_messages(
             } else {
                 palette::WARNING
             };
-            let gap_text = truncate(
-                " \u{25B2} Earlier messages may be missing \u{00B7} press r to load",
-                width,
+            let gap_str = format!(
+                " {} Earlier messages may be missing \u{00B7} press r to load",
+                super::icons::HISTORY
             );
+            let gap_text = truncate(&gap_str, width);
             lines.push(Line::from(vec![Span::styled(
                 gap_text,
                 Style::default().fg(pulse),
