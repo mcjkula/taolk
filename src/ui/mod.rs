@@ -27,7 +27,8 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 pub fn render(frame: &mut Frame, app: &App) {
-    if app.mode == crate::app::Mode::Help {
+    use crate::app::Overlay;
+    if app.overlay == Some(Overlay::Help) {
         help::render(frame, app, frame.area());
         return;
     }
@@ -56,14 +57,13 @@ pub fn render(frame: &mut Frame, app: &App) {
 }
 
 fn render_main_panel(frame: &mut Frame, app: &App, area: Rect) {
-    use crate::app::Mode;
-
     let theme = theme::theme_for(app.theme);
-    let block = chrome::panel(theme, app.color_mode, false);
+    let focused = app.is_composing();
+    let block = chrome::panel(theme, app.color_mode, focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let text_lines = if app.mode == Mode::Insert && !app.input.is_empty() {
+    let text_lines = if app.is_composing() && !app.input.is_empty() {
         app.input.split('\n').count().clamp(1, 4)
     } else {
         1

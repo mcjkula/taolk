@@ -1,4 +1,4 @@
-use crate::app::{App, View};
+use crate::app::{App, Overlay, View};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -224,17 +224,18 @@ fn date_separator(date_str: &str) -> Line<'static> {
 }
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    use crate::app::Mode;
     app.sender_click_regions.borrow_mut().clear();
-    if app.mode == Mode::Compose || (app.mode == Mode::Message && app.msg_recipient.is_none()) {
+    if app.overlay == Some(Overlay::Compose)
+        || (app.overlay == Some(Overlay::Message) && app.msg_recipient.is_none())
+    {
         render_contact_picker(frame, app, area);
         return;
     }
-    if app.mode == Mode::CreateGroupMembers {
+    if app.overlay == Some(Overlay::CreateGroupMembers) {
         render_group_member_picker(frame, app, area);
         return;
     }
-    if app.mode == Mode::SenderPicker {
+    if app.overlay == Some(Overlay::SenderPicker) {
         render_sender_picker(frame, app, area);
         return;
     }

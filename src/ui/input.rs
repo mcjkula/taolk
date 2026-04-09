@@ -1,4 +1,4 @@
-use crate::app::{App, Mode};
+use crate::app::{App, Focus, Overlay};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -307,11 +307,11 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::DarkGray),
     );
 
-    match app.mode {
-        Mode::Search => {
+    match app.overlay {
+        Some(Overlay::Search) => {
             render_single_input(frame, app, "/", "Search messages...", None, sep, area);
         }
-        Mode::CreateChannel => {
+        Some(Overlay::CreateChannel) => {
             render_single_input(
                 frame,
                 app,
@@ -322,7 +322,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 area,
             );
         }
-        Mode::CreateChannelDesc => {
+        Some(Overlay::CreateChannelDesc) => {
             render_single_input(
                 frame,
                 app,
@@ -333,10 +333,10 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 area,
             );
         }
-        Mode::CreateGroupMembers => {
+        Some(Overlay::CreateGroupMembers) => {
             render_group_member_picker(frame, app, sep, area);
         }
-        Mode::Message => {
+        Some(Overlay::Message) => {
             if app.msg_recipient.is_none() {
                 render_picker_input(frame, app, sep, area);
             } else {
@@ -363,10 +363,10 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 frame.render_widget(Paragraph::new(vec![sep, type_hints, selector]), area);
             }
         }
-        Mode::Compose => {
+        Some(Overlay::Compose) => {
             render_picker_input(frame, app, sep, area);
         }
-        Mode::Confirm => {
+        Some(Overlay::Confirm) => {
             let fee_text = match &app.pending_fee {
                 Some(fee) => format!("Fee: {fee}"),
                 None => format!("{} Estimating fee", app.spinner_1()),
@@ -426,10 +426,25 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             ]);
             frame.render_widget(Paragraph::new(vec![sep, preview_line, confirm_line]), area);
         }
-        Mode::Insert => {
+        Some(Overlay::SenderPicker) => {
+            let hints = render_hints(
+                &[
+                    ("\u{2191}\u{2193}", "navigate"),
+                    ("Enter", "copy"),
+                    ("Esc", "cancel"),
+                ],
+                usize::from(area.width),
+            );
+            frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), hints]), area);
+        }
+        Some(Overlay::Help) => {
+            let hints = render_hints(&[("any key", "close")], usize::from(area.width));
+            frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), hints]), area);
+        }
+        None if app.focus == Focus::Composer => {
             render_compose_input(frame, app, sep, area);
         }
-        Mode::Normal => {
+        None => {
             let input_line = if let Some(draft) = app.current_draft() {
                 let suffix = "  [i to continue]";
                 let avail = (usize::from(area.width)).saturating_sub(4 + suffix.len());
@@ -505,21 +520,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 }
             };
             frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), input_line]), area);
-        }
-        Mode::SenderPicker => {
-            let hints = render_hints(
-                &[
-                    ("\u{2191}\u{2193}", "navigate"),
-                    ("Enter", "copy"),
-                    ("Esc", "cancel"),
-                ],
-                usize::from(area.width),
-            );
-            frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), hints]), area);
-        }
-        Mode::Help => {
-            let hints = render_hints(&[("any key", "close")], usize::from(area.width));
-            frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), hints]), area);
         }
     }
 }

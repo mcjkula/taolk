@@ -1,4 +1,4 @@
-use crate::app::{App, Mode};
+use crate::app::{App, Focus, Overlay};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -19,86 +19,36 @@ fn reconnect_pill(state: ConnState) -> Option<Span<'static>> {
     }
 }
 
+fn pill(label: &'static str) -> Span<'static> {
+    Span::styled(
+        label,
+        Style::default()
+            .fg(Color::White)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )
+}
+
+fn mode_label(app: &App) -> Span<'static> {
+    match app.overlay {
+        Some(Overlay::Help) => pill(" HELP "),
+        Some(Overlay::Confirm) => pill(" CONFIRM "),
+        Some(Overlay::Compose) => pill(" NEW THREAD "),
+        Some(Overlay::Message) => pill(" MESSAGE "),
+        Some(Overlay::CreateChannel) => pill(" CREATE CHANNEL "),
+        Some(Overlay::CreateChannelDesc) => pill(" CHANNEL DESC "),
+        Some(Overlay::CreateGroupMembers) => pill(" SELECT MEMBERS "),
+        Some(Overlay::Search) => pill(" SEARCH "),
+        Some(Overlay::SenderPicker) => pill(" COPY SS58 "),
+        None => match app.focus {
+            Focus::Composer => pill(" INSERT "),
+            Focus::Timeline => pill(" NORMAL "),
+        },
+    }
+}
+
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    let mode = match app.mode {
-        Mode::Normal => Span::styled(
-            " NORMAL ",
-            Style::default()
-                .fg(Color::White)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Mode::Insert => Span::styled(
-            " INSERT ",
-            Style::default()
-                .fg(Color::White)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Mode::Compose => Span::styled(
-            " NEW THREAD ",
-            Style::default()
-                .fg(Color::White)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Mode::Confirm => Span::styled(
-            " CONFIRM ",
-            Style::default()
-                .fg(Color::White)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Mode::Message => Span::styled(
-            " MESSAGE ",
-            Style::default()
-                .fg(Color::White)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Mode::CreateChannel => Span::styled(
-            " CREATE CHANNEL ",
-            Style::default()
-                .fg(Color::White)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Mode::CreateChannelDesc => Span::styled(
-            " CHANNEL DESC ",
-            Style::default()
-                .fg(Color::White)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Mode::CreateGroupMembers => Span::styled(
-            " SELECT MEMBERS ",
-            Style::default()
-                .fg(Color::White)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Mode::Search => Span::styled(
-            " SEARCH ",
-            Style::default()
-                .fg(Color::White)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Mode::SenderPicker => Span::styled(
-            " COPY SS58 ",
-            Style::default()
-                .fg(Color::White)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Mode::Help => Span::styled(
-            " HELP ",
-            Style::default()
-                .fg(Color::White)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-    };
+    let mode = mode_label(app);
 
     let status_span = if let Some((status, is_error)) = app.current_status() {
         if app.is_busy() {

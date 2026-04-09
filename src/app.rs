@@ -6,10 +6,15 @@ use taolk::event::ConnState;
 use taolk::session::Session;
 use taolk::types::{BlockRef, Pubkey};
 
-#[derive(PartialEq, Clone, Copy)]
-pub enum Mode {
-    Normal,
-    Insert,
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Focus {
+    Composer,
+    Timeline,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Overlay {
+    Help,
     Confirm,
     Compose,
     Message,
@@ -18,7 +23,6 @@ pub enum Mode {
     CreateGroupMembers,
     Search,
     SenderPicker,
-    Help,
 }
 
 pub struct LockedOutbound {
@@ -42,7 +46,9 @@ pub enum View {
 pub struct App {
     pub session: Session,
     pub running: bool,
-    pub mode: Mode,
+    pub focus: Focus,
+    pub overlay: Option<Overlay>,
+    pub focus_before_overlay: Focus,
     pub view: View,
     pub show_sidebar: bool,
     pub input: String,
@@ -91,7 +97,9 @@ impl App {
         Self {
             session,
             running: true,
-            mode: Mode::Normal,
+            focus: Focus::Timeline,
+            overlay: None,
+            focus_before_overlay: Focus::Timeline,
             view: View::Inbox,
             show_sidebar: true,
             input: String::new(),
@@ -154,9 +162,44 @@ impl App {
         self.cursor_pos = 0;
     }
 
-    pub fn enter_mode(&mut self, mode: Mode) {
+    pub fn default_focus_for_view(&self) -> Focus {
+        match self.view {
+            View::Thread(_) | View::Channel(_) | View::Group(_) => Focus::Composer,
+            View::Inbox | View::Outbox | View::ChannelDir => Focus::Timeline,
+        }
+    }
+
+    pub fn enter_overlay(&mut self, overlay: Overlay) {
         self.reset_input();
-        self.mode = mode;
+        self.focus_before_overlay = self.focus;
+        self.overlay = Some(overlay);
+    }
+
+    pub fn close_overlay(&mut self) {
+        self.overlay = None;
+        self.focus = self.focus_before_overlay;
+    }
+
+    pub fn close_overlay_to(&mut self, focus: Focus) {
+        self.overlay = None;
+        self.focus = focus;
+        self.focus_before_overlay = focus;
+    }
+
+    pub fn focus_composer(&mut self) {
+        self.focus = Focus::Composer;
+    }
+
+    pub fn focus_timeline(&mut self) {
+        self.focus = Focus::Timeline;
+    }
+
+    pub fn is_overlay(&self, o: Overlay) -> bool {
+        self.overlay == Some(o)
+    }
+
+    pub fn is_composing(&self) -> bool {
+        self.overlay.is_none() && self.focus == Focus::Composer
     }
 
     pub fn check_not_sending(&mut self) -> bool {
@@ -603,28 +646,38 @@ impl App {
     }
 
     pub fn select_sidebar(&mut self, index: usize) {
-        if self.mode == Mode::Insert {
+        if self.is_composing() {
             self.save_draft();
-            self.mode = Mode::Normal;
         }
+        self.overlay = None;
         self.scroll_offset = 0;
         let selectable: Vec<View> = self.sidebar_rows().into_iter().flatten().collect();
         if let Some(&view) = selectable.get(index) {
             self.view = view;
         }
         self.mark_read();
+        self.focus = self.default_focus_for_view();
+        self.focus_before_overlay = self.focus;
+        if self.focus == Focus::Composer {
+            self.load_draft();
+        }
     }
 
     pub fn select_sidebar_row(&mut self, row: usize) {
         let rows = self.sidebar_rows();
         if let Some(Some(view)) = rows.get(row) {
-            if self.mode == Mode::Insert {
+            if self.is_composing() {
                 self.save_draft();
-                self.mode = Mode::Normal;
             }
+            self.overlay = None;
             self.scroll_offset = 0;
             self.view = *view;
             self.mark_read();
+            self.focus = self.default_focus_for_view();
+            self.focus_before_overlay = self.focus;
+            if self.focus == Focus::Composer {
+                self.load_draft();
+            }
         }
     }
 

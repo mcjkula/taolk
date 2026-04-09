@@ -9,7 +9,7 @@ use taolk::{
     session, types, util, wallet,
 };
 
-use app::{App, Mode};
+use app::{App, Focus, Overlay};
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 use crossterm::ExecutableCommand;
@@ -560,7 +560,8 @@ fn dispatch_pending_send(
             app.pending_remark = Some(remark.clone());
             app.pending_text = Some(text);
             app.pending_fee = None;
-            app.mode = Mode::Confirm;
+            app.reset_input();
+            app.overlay = Some(Overlay::Confirm);
 
             let signing = app.session.signing();
             let ss58 = app.session.my_ss58.clone();
@@ -1192,7 +1193,7 @@ fn run_session(
                 fee_display,
                 fee_raw,
             }) => {
-                if app.mode == Mode::Confirm {
+                if app.is_overlay(Overlay::Confirm) {
                     app.pending_fee = Some(fee_display);
                 }
                 if let Some(raw) = fee_raw {
@@ -1432,9 +1433,9 @@ fn handle_mouse(
         if app.show_sidebar && x < sidebar_width {
             let row = usize::from(y.saturating_sub(1));
             app.select_sidebar_row(row);
-        } else if y >= input_area_y && !app.sending {
+        } else if y >= input_area_y && !app.sending && app.overlay.is_none() {
             app.load_draft();
-            app.mode = Mode::Insert;
+            app.focus_composer();
         }
     }
 }
@@ -1445,18 +1446,23 @@ fn handle_key(
     send_tx: &std::sync::mpsc::Sender<event::Event>,
     rt: &tokio::runtime::Runtime,
 ) {
-    match app.mode {
-        Mode::Normal => handle_normal_key(app, key, send_tx),
-        Mode::Insert => handle_insert_key(app, key),
-        Mode::Confirm => handle_confirm_key(app, key, send_tx),
-        Mode::Compose => handle_compose_key(app, key),
-        Mode::Message => handle_message_key(app, key),
-        Mode::CreateChannel => handle_create_channel_key(app, key),
-        Mode::CreateChannelDesc => handle_create_channel_desc_key(app, key, send_tx, rt),
-        Mode::CreateGroupMembers => handle_create_group_members_key(app, key, send_tx),
-        Mode::Search => handle_search_key(app, key),
-        Mode::SenderPicker => handle_sender_picker_key(app, key),
-        Mode::Help => handle_help_key(app, key),
+    if let Some(overlay) = app.overlay {
+        match overlay {
+            Overlay::Help => handle_help_key(app, key),
+            Overlay::Confirm => handle_confirm_key(app, key, send_tx),
+            Overlay::Compose => handle_compose_key(app, key),
+            Overlay::Message => handle_message_key(app, key),
+            Overlay::CreateChannel => handle_create_channel_key(app, key),
+            Overlay::CreateChannelDesc => handle_create_channel_desc_key(app, key, send_tx, rt),
+            Overlay::CreateGroupMembers => handle_create_group_members_key(app, key, send_tx),
+            Overlay::Search => handle_search_key(app, key),
+            Overlay::SenderPicker => handle_sender_picker_key(app, key),
+        }
+        return;
+    }
+    match app.focus {
+        Focus::Composer => handle_composer_key(app, key),
+        Focus::Timeline => handle_timeline_key(app, key, send_tx),
     }
 }
 
@@ -1483,12 +1489,12 @@ fn handle_help_key(app: &mut App, key: crossterm::event::KeyEvent) {
         }
         _ => {
             app.help_scroll.set(0);
-            app.mode = Mode::Normal;
+            app.close_overlay();
         }
     }
 }
 
-fn handle_normal_key(
+fn handle_timeline_key(
     app: &mut App,
     key: crossterm::event::KeyEvent,
     send_tx: &std::sync::mpsc::Sender<event::Event>,
@@ -1499,7 +1505,7 @@ fn handle_normal_key(
     if app.view == app::View::ChannelDir && handle_channel_dir_key(app, key, send_tx) {
         return;
     }
-    handle_global_normal_key(app, key, send_tx);
+    handle_global_timeline_key(app, key, send_tx);
 }
 
 fn handle_channel_dir_key(
@@ -1593,21 +1599,21 @@ fn handle_channel_dir_key(
             if !app.check_not_sending() {
                 return true;
             }
-            app.enter_mode(Mode::CreateChannel);
+            app.enter_overlay(Overlay::CreateChannel);
             true
         }
         _ => false,
     }
 }
 
-fn handle_global_normal_key(
+fn handle_global_timeline_key(
     app: &mut App,
     key: crossterm::event::KeyEvent,
     send_tx: &std::sync::mpsc::Sender<event::Event>,
 ) {
     match key.code {
         KeyCode::Char('?') => {
-            app.mode = Mode::Help;
+            app.enter_overlay(Overlay::Help);
         }
         KeyCode::Char('q') => {
             let has_drafts = app.session.threads.iter().any(|c| !c.draft.is_empty())
@@ -1628,16 +1634,16 @@ fn handle_global_normal_key(
         {
             app.load_draft();
             app.scroll_offset = 0;
-            app.mode = Mode::Insert;
+            app.focus_composer();
         }
         KeyCode::Char('m') => {
             if !app.check_not_sending() {
                 return;
             }
-            app.enter_mode(Mode::Message);
+            app.enter_overlay(Overlay::Message);
         }
         KeyCode::Char('n') => {
-            app.enter_mode(Mode::Compose);
+            app.enter_overlay(Overlay::Compose);
         }
         KeyCode::Char('c') => {
             app.channel_dir_cursor = 0;
@@ -1655,7 +1661,7 @@ fn handle_global_normal_key(
             let my_pk = app.session.pubkey();
             let my_ss58 = app.session.my_ss58.clone();
             app.pending_group_members.push((my_pk, my_ss58));
-            app.mode = Mode::CreateGroupMembers;
+            app.enter_overlay(Overlay::CreateGroupMembers);
         }
         KeyCode::Char('r') => {
             let refs = match app.view {
@@ -1680,14 +1686,14 @@ fn handle_global_normal_key(
         }
         KeyCode::Char('/') => {
             app.search_query.clear();
-            app.enter_mode(Mode::Search);
+            app.enter_overlay(Overlay::Search);
         }
         KeyCode::Char('y') if app.view != app::View::ChannelDir => {
             let senders = app.build_picker_senders();
             if !senders.is_empty() {
                 app.picker_senders = senders;
                 app.contact_idx = 0;
-                app.mode = Mode::SenderPicker;
+                app.enter_overlay(Overlay::SenderPicker);
             }
         }
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -1720,7 +1726,7 @@ fn handle_global_normal_key(
     }
 }
 
-fn handle_insert_key(app: &mut App, key: crossterm::event::KeyEvent) {
+fn handle_composer_key(app: &mut App, key: crossterm::event::KeyEvent) {
     match key.code {
         KeyCode::Esc => {
             if app.msg_recipient.is_some() {
@@ -1731,7 +1737,7 @@ fn handle_insert_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 app.save_draft();
                 app.set_status("Draft saved");
             }
-            app.mode = Mode::Normal;
+            app.focus_timeline();
         }
         KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if !app.input.is_empty() {
@@ -1811,7 +1817,8 @@ fn handle_compose_key(app: &mut App, key: crossterm::event::KeyEvent) {
                     }
                     let ss58 = util::ss58_short(&pubkey);
                     app.msg_recipient = Some((pubkey, ss58));
-                    app.enter_mode(Mode::Insert);
+                    app.close_overlay_to(Focus::Composer);
+                    app.reset_input();
                 }
                 Err(e) => {
                     app.set_error(format!("Invalid address: {e}"));
@@ -1821,7 +1828,7 @@ fn handle_compose_key(app: &mut App, key: crossterm::event::KeyEvent) {
         KeyCode::Esc => {
             if app.input.is_empty() {
                 app.contact_idx = 0;
-                app.mode = Mode::Normal;
+                app.close_overlay();
             } else {
                 app.reset_input();
             }
@@ -1876,7 +1883,7 @@ fn handle_message_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 if app.input.is_empty() {
                     app.clear_standalone();
                     app.contact_idx = 0;
-                    app.mode = Mode::Normal;
+                    app.close_overlay();
                 } else {
                     app.reset_input();
                 }
@@ -1896,15 +1903,18 @@ fn handle_message_key(app: &mut App, key: crossterm::event::KeyEvent) {
         match key.code {
             KeyCode::Char('p') => {
                 app.msg_type = Some(0x01);
-                app.mode = Mode::Insert;
+                app.close_overlay_to(Focus::Composer);
+                app.reset_input();
             }
             KeyCode::Char('e') => {
                 app.msg_type = Some(0x02);
-                app.mode = Mode::Insert;
+                app.close_overlay_to(Focus::Composer);
+                app.reset_input();
             }
             KeyCode::Esc => {
                 app.clear_standalone();
-                app.enter_mode(Mode::Normal);
+                app.reset_input();
+                app.close_overlay();
             }
             _ => {}
         }
@@ -1927,12 +1937,13 @@ fn handle_create_channel_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 return;
             }
             app.pending_channel_name = Some(name);
-            app.enter_mode(Mode::CreateChannelDesc);
+            app.reset_input();
+            app.overlay = Some(Overlay::CreateChannelDesc);
         }
         KeyCode::Esc => {
             app.reset_input();
             app.pending_channel_name = None;
-            app.mode = Mode::Normal;
+            app.close_overlay();
         }
         _ => {
             handle_text_input(app, key);
@@ -1959,7 +1970,7 @@ fn handle_create_channel_desc_key(
             let name = match &app.pending_channel_name {
                 Some(n) => n.clone(),
                 None => {
-                    app.mode = Mode::Normal;
+                    app.close_overlay();
                     return;
                 }
             };
@@ -1968,7 +1979,7 @@ fn handle_create_channel_desc_key(
                 Ok(n) => n,
                 Err(e) => {
                     app.set_status(format!("Invalid channel name: {e}"));
-                    app.mode = Mode::Normal;
+                    app.close_overlay();
                     return;
                 }
             };
@@ -1976,7 +1987,7 @@ fn handle_create_channel_desc_key(
                 Ok(d) => d,
                 Err(e) => {
                     app.set_status(format!("Invalid description: {e}"));
-                    app.mode = Mode::Normal;
+                    app.close_overlay();
                     return;
                 }
             };
@@ -1985,7 +1996,7 @@ fn handle_create_channel_desc_key(
                     app.pending_remark = Some(remark.clone());
                     app.pending_text = None;
                     app.pending_fee = None;
-                    app.mode = Mode::Confirm;
+                    app.overlay = Some(Overlay::Confirm);
 
                     let signing = app.session.signing();
                     let ss58 = app.session.my_ss58.clone();
@@ -2022,7 +2033,7 @@ fn handle_create_channel_desc_key(
         KeyCode::Esc => {
             app.input = app.pending_channel_name.take().unwrap_or_default();
             app.cursor_pos = app.input.len();
-            app.mode = Mode::CreateChannel;
+            app.overlay = Some(Overlay::CreateChannel);
         }
         _ => {
             handle_text_input(app, key);
@@ -2115,7 +2126,7 @@ fn handle_create_group_members_key(
             app.view = app::View::Group(idx);
             app.reset_input();
             app.scroll_offset = 0;
-            app.mode = Mode::Insert;
+            app.close_overlay_to(Focus::Composer);
         }
         KeyCode::Down => {
             let len = app.filtered_contacts().len();
@@ -2139,7 +2150,7 @@ fn handle_create_group_members_key(
                 app.contact_idx = 0;
             } else {
                 app.pending_group_members.clear();
-                app.mode = Mode::Normal;
+                app.close_overlay();
             }
         }
         _ => {
@@ -2154,11 +2165,11 @@ fn handle_search_key(app: &mut App, key: crossterm::event::KeyEvent) {
     match key.code {
         KeyCode::Esc => {
             app.search_query.clear();
-            app.mode = Mode::Normal;
+            app.close_overlay();
         }
         KeyCode::Enter => {
             app.search_query = app.input.clone();
-            app.mode = Mode::Normal;
+            app.close_overlay();
         }
         _ => {
             if handle_text_input(app, key) {
@@ -2173,7 +2184,7 @@ fn handle_sender_picker_key(app: &mut App, key: crossterm::event::KeyEvent) {
     match key.code {
         KeyCode::Esc => {
             app.picker_senders.clear();
-            app.mode = Mode::Normal;
+            app.close_overlay();
         }
         KeyCode::Up | KeyCode::Char('k') => {
             if len > 0 {
@@ -2194,7 +2205,7 @@ fn handle_sender_picker_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 copy_sender(app, &short, pk.as_ref());
             }
             app.picker_senders.clear();
-            app.mode = Mode::Normal;
+            app.close_overlay();
         }
         _ => {}
     }
@@ -2245,7 +2256,7 @@ fn handle_confirm_key(
                     util::format_balance_short(balance, decimals, &symbol),
                     util::format_fee(fee, decimals, &symbol),
                 ));
-                app.mode = Mode::Insert;
+                app.close_overlay_to(Focus::Composer);
                 return;
             }
             if let Some(remark) = app.pending_remark.take() {
@@ -2293,7 +2304,9 @@ fn handle_confirm_key(
             app.pending_view = view;
             app.pending_text = text;
             app.clear_draft();
-            app.enter_mode(Mode::Normal);
+            app.reset_input();
+            let focus = app.default_focus_for_view();
+            app.close_overlay_to(focus);
         }
         KeyCode::Esc => {
             app.pending_remark = None;
@@ -2303,18 +2316,18 @@ fn handle_confirm_key(
                     app.input = text;
                     app.cursor_pos = app.input.len();
                 }
-                app.mode = Mode::Insert;
+                app.close_overlay_to(Focus::Composer);
             } else if app.is_pending_channel() {
                 app.input = app.pending_channel_desc.take().unwrap_or_default();
                 app.cursor_pos = app.input.len();
                 app.pending_text = None;
-                app.mode = Mode::CreateChannelDesc;
+                app.overlay = Some(Overlay::CreateChannelDesc);
             } else if let Some(text) = app.pending_text.take() {
                 app.input = text;
                 app.cursor_pos = app.input.len();
-                app.mode = Mode::Insert;
+                app.close_overlay_to(Focus::Composer);
             } else {
-                app.mode = Mode::Insert;
+                app.close_overlay_to(Focus::Composer);
             }
         }
         _ => {}
