@@ -1,4 +1,5 @@
 pub mod chrome;
+pub mod composer;
 mod help;
 mod input;
 mod messages;

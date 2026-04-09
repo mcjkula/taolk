@@ -1306,8 +1306,7 @@ fn run_session(
                         app.view = app::View::Inbox;
                     }
                     if let Some(text) = app.pending_text.take() {
-                        app.input = text;
-                        app.cursor_pos = app.input.len();
+                        app.input.set(text);
                     }
                     app.sending = false;
                     app.pending_view = None;
@@ -1358,45 +1357,12 @@ fn build_send_remark(
 }
 
 fn handle_text_input(app: &mut App, key: crossterm::event::KeyEvent) -> bool {
-    match key.code {
-        KeyCode::Char(c) => {
-            app.input.insert(app.cursor_pos, c);
-            app.cursor_pos += 1;
-        }
-        KeyCode::Backspace => {
-            if app.cursor_pos > 0 {
-                app.cursor_pos -= 1;
-                app.input.remove(app.cursor_pos);
-            }
-        }
-        KeyCode::Delete => {
-            if app.cursor_pos < app.input.len() {
-                app.input.remove(app.cursor_pos);
-            }
-        }
-        KeyCode::Left => {
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                app.cursor_pos = app.input[..app.cursor_pos].rfind(' ').unwrap_or(0);
-            } else {
-                app.cursor_pos = app.cursor_pos.saturating_sub(1);
-            }
-        }
-        KeyCode::Right => {
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                app.cursor_pos = app.input[app.cursor_pos..]
-                    .find(' ')
-                    .map(|p| app.cursor_pos + p + 1)
-                    .unwrap_or(app.input.len());
-            } else if app.cursor_pos < app.input.len() {
-                app.cursor_pos += 1;
-            }
-        }
-        KeyCode::Home => app.cursor_pos = 0,
-        KeyCode::End => app.cursor_pos = app.input.len(),
-        _ => return false,
+    if app.input.handle_edit_key(key) {
+        app.contact_idx = 0;
+        true
+    } else {
+        false
     }
-    app.contact_idx = 0;
-    true
 }
 
 fn handle_mouse(
@@ -1741,30 +1707,7 @@ fn handle_composer_key(app: &mut App, key: crossterm::event::KeyEvent) {
         }
         KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if !app.input.is_empty() {
-                app.input.insert(app.cursor_pos, '\n');
-                app.cursor_pos += 1;
-            }
-        }
-        KeyCode::Up => {
-            let before = &app.input[..app.cursor_pos];
-            if let Some(nl) = before.rfind('\n') {
-                let col = app.cursor_pos - nl - 1;
-                let prev_start = before[..nl].rfind('\n').map_or(0, |p| p + 1);
-                let prev_len = nl - prev_start;
-                app.cursor_pos = prev_start + col.min(prev_len);
-            }
-        }
-        KeyCode::Down => {
-            let before = &app.input[..app.cursor_pos];
-            let line_start = before.rfind('\n').map_or(0, |p| p + 1);
-            let col = app.cursor_pos - line_start;
-            if let Some(nl) = app.input[app.cursor_pos..].find('\n') {
-                let next_start = app.cursor_pos + nl + 1;
-                let next_end = app.input[next_start..]
-                    .find('\n')
-                    .map_or(app.input.len(), |p| next_start + p);
-                let next_len = next_end - next_start;
-                app.cursor_pos = next_start + col.min(next_len);
+                app.input.insert_newline();
             }
         }
         KeyCode::Enter => {
@@ -1773,7 +1716,7 @@ fn handle_composer_key(app: &mut App, key: crossterm::event::KeyEvent) {
             }
             // Defer encryption + remark build to the main loop, which has access to the
             // terminal/events needed for the password prompt in ephemeral mode.
-            app.pending_send_text = Some(app.input.clone());
+            app.pending_send_text = Some(app.input.as_str().to_string());
         }
         _ => {
             handle_text_input(app, key);
@@ -1788,7 +1731,7 @@ fn resolve_address_input(app: &App) -> String {
         let (_, pubkey) = &contacts[idx];
         util::ss58_from_pubkey(pubkey)
     } else {
-        app.input.trim().to_string()
+        app.input.as_str().trim().to_string()
     }
 }
 
@@ -1834,12 +1777,10 @@ fn handle_compose_key(app: &mut App, key: crossterm::event::KeyEvent) {
             }
         }
         KeyCode::Backspace => {
-            app.input.pop();
-            app.cursor_pos = app.input.len();
+            app.input.delete_before();
         }
         KeyCode::Char(c) => {
-            app.input.push(c);
-            app.cursor_pos = app.input.len();
+            app.input.insert_char(c);
             app.contact_idx = 0;
         }
         _ => {}
@@ -1889,12 +1830,10 @@ fn handle_message_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 }
             }
             KeyCode::Backspace => {
-                app.input.pop();
-                app.cursor_pos = app.input.len();
+                app.input.delete_before();
             }
             KeyCode::Char(c) => {
-                app.input.push(c);
-                app.cursor_pos = app.input.len();
+                app.input.insert_char(c);
                 app.contact_idx = 0;
             }
             _ => {}
@@ -1924,7 +1863,7 @@ fn handle_message_key(app: &mut App, key: crossterm::event::KeyEvent) {
 fn handle_create_channel_key(app: &mut App, key: crossterm::event::KeyEvent) {
     match key.code {
         KeyCode::Enter => {
-            let name = app.input.trim().to_string();
+            let name = app.input.as_str().trim().to_string();
             if name.is_empty() {
                 app.set_error("Channel name required");
                 return;
@@ -1959,7 +1898,7 @@ fn handle_create_channel_desc_key(
 ) {
     match key.code {
         KeyCode::Enter => {
-            let desc = app.input.trim().to_string();
+            let desc = app.input.as_str().trim().to_string();
             if desc.len() > samp::CHANNEL_DESC_MAX {
                 app.set_error(format!(
                     "Description too long (max {} characters)",
@@ -2031,8 +1970,8 @@ fn handle_create_channel_desc_key(
             }
         }
         KeyCode::Esc => {
-            app.input = app.pending_channel_name.take().unwrap_or_default();
-            app.cursor_pos = app.input.len();
+            app.input
+                .set(app.pending_channel_name.take().unwrap_or_default());
             app.overlay = Some(Overlay::CreateChannel);
         }
         _ => {
@@ -2068,7 +2007,7 @@ fn handle_create_group_members_key(
                     }
                 }
             } else {
-                let input = app.input.trim().to_string();
+                let input = app.input.as_str().trim().to_string();
                 let contacts = app.filtered_contacts();
                 if let Some((ss58, pk)) = contacts.get(app.contact_idx % contacts.len().max(1)) {
                     let pk = *pk;
@@ -2168,12 +2107,12 @@ fn handle_search_key(app: &mut App, key: crossterm::event::KeyEvent) {
             app.close_overlay();
         }
         KeyCode::Enter => {
-            app.search_query = app.input.clone();
+            app.search_query = app.input.as_str().to_string();
             app.close_overlay();
         }
         _ => {
             if handle_text_input(app, key) {
-                app.search_query = app.input.clone();
+                app.search_query = app.input.as_str().to_string();
             }
         }
     }
@@ -2313,18 +2252,16 @@ fn handle_confirm_key(
             app.pending_fee = None;
             if app.is_pending_group() {
                 if let Some(text) = app.pending_text.take() {
-                    app.input = text;
-                    app.cursor_pos = app.input.len();
+                    app.input.set(text);
                 }
                 app.close_overlay_to(Focus::Composer);
             } else if app.is_pending_channel() {
-                app.input = app.pending_channel_desc.take().unwrap_or_default();
-                app.cursor_pos = app.input.len();
+                app.input
+                    .set(app.pending_channel_desc.take().unwrap_or_default());
                 app.pending_text = None;
                 app.overlay = Some(Overlay::CreateChannelDesc);
             } else if let Some(text) = app.pending_text.take() {
-                app.input = text;
-                app.cursor_pos = app.input.len();
+                app.input.set(text);
                 app.close_overlay_to(Focus::Composer);
             } else {
                 app.close_overlay_to(Focus::Composer);

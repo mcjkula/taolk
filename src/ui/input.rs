@@ -5,7 +5,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-fn render_hints(pairs: &[(&str, &str)], width: usize) -> Line<'static> {
+pub(super) fn render_hints(pairs: &[(&str, &str)], width: usize) -> Line<'static> {
     let mut spans = Vec::new();
     let mut used: usize = 1;
     for (key, label) in pairs {
@@ -26,7 +26,7 @@ fn render_hints(pairs: &[(&str, &str)], width: usize) -> Line<'static> {
     Line::from(spans)
 }
 
-fn fit(s: &str, max: usize) -> String {
+pub(super) fn fit(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
     }
@@ -36,7 +36,7 @@ fn fit(s: &str, max: usize) -> String {
     format!("{}\u{2026}", &s[..max - 1])
 }
 
-fn visible_input(
+pub(super) fn visible_input(
     text: &str,
     cursor: usize,
     width: usize,
@@ -164,7 +164,8 @@ fn render_single_input(
     let avail = (usize::from(area.width)).saturating_sub(prompt_width + 1);
     let counter_width = limit.map_or(0, |l| format!(" {}/{}", app.input.len(), l).len());
     let text_width = avail.saturating_sub(counter_width);
-    let (text_spans, cursor_off) = visible_input(&app.input, app.cursor_pos, text_width, limit);
+    let (text_spans, cursor_off) =
+        visible_input(app.input.as_str(), app.input.cursor(), text_width, limit);
 
     let mut spans = vec![Span::raw(" "), prompt_span];
     spans.extend(text_spans);
@@ -181,7 +182,7 @@ fn render_single_input(
     }
 }
 
-fn compose_hints(width: usize, multiline: bool) -> Line<'static> {
+pub(super) fn compose_hints(width: usize, multiline: bool) -> Line<'static> {
     if multiline {
         render_hints(
             &[
@@ -197,107 +198,6 @@ fn compose_hints(width: usize, multiline: bool) -> Line<'static> {
             &[("Enter", "send"), ("Ctrl+N", "newline"), ("Esc", "cancel")],
             width,
         )
-    }
-}
-
-fn cursor_line_col(text: &str, byte_pos: usize) -> (usize, usize) {
-    let before = &text[..byte_pos.min(text.len())];
-    let line = before.matches('\n').count();
-    let col = before.rfind('\n').map_or(byte_pos, |nl| byte_pos - nl - 1);
-    (line, col)
-}
-
-fn render_compose_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) {
-    let prompt = "> ";
-    let prompt_width: usize = 3;
-    let w = usize::from(area.width);
-    let hints = compose_hints(w, app.input.contains('\n'));
-
-    if app.input.is_empty() {
-        let placeholder = match (&app.msg_recipient, app.msg_type) {
-            (Some((_, ss58)), Some(0x01)) => format!("public to {ss58}..."),
-            (Some((_, ss58)), Some(0x02)) => format!("encrypted to {ss58}..."),
-            (Some((_, ss58)), None) => format!("new thread to {ss58}..."),
-            _ if matches!(app.view, crate::app::View::Channel(_)) => {
-                "Post to channel...".to_string()
-            }
-            _ if matches!(app.view, crate::app::View::Group(idx) if app.session.groups.get(idx).is_some_and(|g| g.group_ref == taolk::types::BlockRef::ZERO)) =>
-            {
-                let n = app.pending_group_members.len();
-                format!("First message to group ({n} members)...")
-            }
-            _ if matches!(app.view, crate::app::View::Group(_)) => "Post to group...".to_string(),
-            _ => "Type a message...".to_string(),
-        };
-        let input_line = Line::from(vec![
-            Span::raw(" "),
-            Span::styled(prompt, Style::default().fg(Color::DarkGray)),
-            Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
-        ]);
-        frame.render_widget(Paragraph::new(vec![sep, hints, input_line]), area);
-        let cursor_x = area.x + u16::try_from(prompt_width).unwrap_or(u16::MAX);
-        let cursor_y = area.y + 2;
-        if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
-            frame.set_cursor_position((cursor_x, cursor_y));
-        }
-        return;
-    }
-
-    let avail = w.saturating_sub(prompt_width + 1);
-    let lines_vec: Vec<&str> = app.input.split('\n').collect();
-    let total_lines = lines_vec.len();
-    let (cursor_line, cursor_col) = cursor_line_col(&app.input, app.cursor_pos);
-
-    let max_visible = (usize::from(area.height)).saturating_sub(2);
-    let max_visible = max_visible.max(1);
-
-    let scroll_start = if cursor_line >= max_visible {
-        cursor_line - max_visible + 1
-    } else {
-        0
-    };
-    let scroll_end = (scroll_start + max_visible).min(total_lines);
-
-    let mut paragraph_lines: Vec<Line> = vec![sep, hints];
-
-    for i in scroll_start..scroll_end {
-        let line_text = lines_vec.get(i).unwrap_or(&"");
-        let is_cursor_line = i == cursor_line;
-
-        let (text_spans, _) = visible_input(
-            line_text,
-            if is_cursor_line { cursor_col } else { 0 },
-            avail,
-            None,
-        );
-
-        let line_prompt = if i == scroll_start && scroll_start == 0 {
-            prompt
-        } else {
-            "  "
-        };
-
-        let mut spans = vec![
-            Span::raw(" "),
-            Span::styled(line_prompt, Style::default().fg(Color::DarkGray)),
-        ];
-        spans.extend(text_spans);
-        paragraph_lines.push(Line::from(spans));
-    }
-
-    frame.render_widget(Paragraph::new(paragraph_lines), area);
-
-    let visible_cursor_row = cursor_line - scroll_start;
-    let (_, cursor_off) = visible_input(
-        lines_vec.get(cursor_line).unwrap_or(&""),
-        cursor_col,
-        avail,
-        None,
-    );
-    let cursor_x = area.x + u16::try_from(prompt_width).unwrap_or(u16::MAX) + cursor_off;
-    let cursor_y = area.y + 2 + u16::try_from(visible_cursor_row).unwrap_or(u16::MAX);
-    if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
-        frame.set_cursor_position((cursor_x, cursor_y));
     }
 }
 
@@ -442,7 +342,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), hints]), area);
         }
         None if app.focus == Focus::Composer => {
-            render_compose_input(frame, app, sep, area);
+            super::composer::render_composer(frame, app, sep, area);
         }
         None => {
             let input_line = if let Some(draft) = app.current_draft() {
@@ -548,7 +448,8 @@ fn render_picker_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
     } else {
         let hints = render_hints(&[("Enter", "select"), ("Esc", "clear")], w);
         let avail = w.saturating_sub(6);
-        let (text_spans, cursor_off) = visible_input(&app.input, app.cursor_pos, avail, None);
+        let (text_spans, cursor_off) =
+            visible_input(app.input.as_str(), app.input.cursor(), avail, None);
         let mut spans = vec![Span::styled(" To: ", Style::default().fg(Color::DarkGray))];
         spans.extend(text_spans);
         let input_line = Line::from(spans);
@@ -602,7 +503,8 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area:
         let hints = render_hints(&[("Enter", "add"), ("Esc", "clear")], w);
         let avail = w.saturating_sub(10);
         let prompt_str = format!(" ({selected_count}): ");
-        let (text_spans, cursor_off) = visible_input(&app.input, app.cursor_pos, avail, None);
+        let (text_spans, cursor_off) =
+            visible_input(app.input.as_str(), app.input.cursor(), avail, None);
         let mut spans = vec![Span::styled(
             &prompt_str,
             Style::default().fg(Color::DarkGray),
@@ -640,32 +542,6 @@ mod tests {
     #[test]
     fn fit_max_one_returns_ellipsis() {
         assert_eq!(fit("hello", 1), "\u{2026}");
-    }
-
-    #[test]
-    fn cursor_line_col_first_line() {
-        assert_eq!(cursor_line_col("hello world", 5), (0, 5));
-    }
-
-    #[test]
-    fn cursor_line_col_after_newline() {
-        assert_eq!(cursor_line_col("foo\nbar", 5), (1, 1));
-    }
-
-    #[test]
-    fn cursor_line_col_at_newline() {
-        assert_eq!(cursor_line_col("foo\nbar", 4), (1, 0));
-    }
-
-    #[test]
-    fn cursor_line_col_third_line() {
-        assert_eq!(cursor_line_col("a\nb\nc", 4), (2, 0));
-    }
-
-    #[test]
-    fn cursor_line_col_byte_past_end_clamps() {
-        let (line, _) = cursor_line_col("foo", 99);
-        assert_eq!(line, 0);
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use crate::ui::composer::TextBuffer;
 use std::cell::{Cell, RefCell};
 use std::time::Instant;
 use taolk::audio::Audio;
@@ -51,8 +52,7 @@ pub struct App {
     pub focus_before_overlay: Focus,
     pub view: View,
     pub show_sidebar: bool,
-    pub input: String,
-    pub cursor_pos: usize,
+    pub input: TextBuffer,
     pub channel_dir_cursor: usize,
     pub channel_dir_input: String,
     pub status_message: Option<(String, Instant, u64, bool)>,
@@ -102,8 +102,7 @@ impl App {
             focus_before_overlay: Focus::Timeline,
             view: View::Inbox,
             show_sidebar: true,
-            input: String::new(),
-            cursor_pos: 0,
+            input: TextBuffer::new(),
             channel_dir_cursor: 0,
             channel_dir_input: String::new(),
             status_message: None,
@@ -159,7 +158,6 @@ impl App {
 
     pub fn reset_input(&mut self) {
         self.input.clear();
-        self.cursor_pos = 0;
     }
 
     pub fn default_focus_for_view(&self) -> Focus {
@@ -283,20 +281,21 @@ impl App {
                 .map(|g| (ConversationKind::Group, g.group_ref)),
             _ => None,
         };
+        let draft = self.input.as_str().to_string();
         match self.view {
             View::Thread(i) => {
                 if let Some(thread) = self.session.threads.get_mut(i) {
-                    thread.draft = self.input.clone();
+                    thread.draft = draft.clone();
                 }
             }
             View::Channel(i) => {
                 if let Some(ch) = self.session.channels.get_mut(i) {
-                    ch.draft = self.input.clone();
+                    ch.draft = draft.clone();
                 }
             }
             View::Group(i) => {
                 if let Some(g) = self.session.groups.get_mut(i) {
-                    g.draft = self.input.clone();
+                    g.draft = draft.clone();
                 }
             }
             _ => {}
@@ -304,7 +303,7 @@ impl App {
         if let Some((kind, bref)) = key {
             self.session
                 .db
-                .save_draft(kind, bref.block().get(), bref.index().get(), &self.input);
+                .save_draft(kind, bref.block().get(), bref.index().get(), &draft);
         }
     }
 
@@ -315,8 +314,7 @@ impl App {
             View::Group(i) => self.session.groups.get(i).map(|g| g.draft.clone()),
             _ => None,
         };
-        self.input = draft.unwrap_or_default();
-        self.cursor_pos = self.input.len();
+        self.input.set(draft.unwrap_or_default());
     }
 
     pub fn current_draft(&self) -> Option<&str> {
@@ -396,7 +394,7 @@ impl App {
     }
 
     pub fn filtered_contacts(&self) -> Vec<(String, Pubkey)> {
-        let filter = self.input.to_lowercase();
+        let filter = self.input.as_str().to_lowercase();
         if filter.is_empty() {
             return self.session.known_contacts();
         }
