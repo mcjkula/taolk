@@ -1,5 +1,4 @@
 use bip39::Mnemonic;
-use curve25519_dalek::scalar::Scalar;
 use hmac::Hmac;
 use schnorrkel::keys::{ExpansionMode, MiniSecretKey};
 use sha2::Sha512;
@@ -21,8 +20,8 @@ impl DecryptionKeys {
         }
     }
 
-    pub fn scalar(&self) -> Scalar {
-        Scalar::from_bytes_mod_order(*self.view_scalar)
+    pub fn scalar(&self) -> samp::ViewScalar {
+        samp::ViewScalar::from_bytes(*self.view_scalar)
     }
 
     pub fn seed(&self) -> Option<&[u8; 32]> {

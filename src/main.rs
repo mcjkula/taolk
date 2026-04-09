@@ -506,7 +506,7 @@ fn dispatch_unlock_all(
     };
     let my_pubkey = app.session.pubkey();
     let view_scalar = app.session.view_scalar();
-    let keys = taolk::secret::DecryptionKeys::new(view_scalar.to_bytes(), Some(*seed));
+    let keys = taolk::secret::DecryptionKeys::new(*view_scalar.expose_secret(), Some(*seed));
     let pending: Vec<app::LockedOutbound> = std::mem::take(&mut app.locked_outbound);
     let mut unlocked = 0usize;
     for entry in pending {
@@ -773,7 +773,7 @@ fn run_session(
     let db = db::Db::open(
         wallet_name,
         seed,
-        chain_info.chain_params.genesis_hash.as_bytes(),
+        chain_info.chain_params.genesis_hash().as_bytes(),
     )?;
     let keep_seed = !cfg.security.require_password_per_send;
     let node_url_typed = taolk::types::NodeUrl::parse(node_url)
@@ -813,13 +813,13 @@ fn run_session(
     if used_cache {
         let url = node_url.to_string();
         let tx = event_tx.clone();
-        let expected = *chain_info.chain_params.genesis_hash.as_bytes();
+        let expected = *chain_info.chain_params.genesis_hash().as_bytes();
         rt.spawn(async move {
             let fresh = match extrinsic::fetch_chain_info(url.as_str()).await {
                 Ok(c) => c,
                 Err(_) => return,
             };
-            if fresh.chain_params.genesis_hash.as_bytes() != &expected {
+            if fresh.chain_params.genesis_hash().as_bytes() != &expected {
                 let _ = tx.send(event::Event::GenesisMismatch);
                 return;
             }

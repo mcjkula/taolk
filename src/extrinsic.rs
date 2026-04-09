@@ -6,6 +6,7 @@ use futures_util::{SinkExt, StreamExt};
 use samp::extrinsic::{ChainParams, build_signed_extrinsic};
 use samp::metadata::{ErrorTable, Metadata, StorageLayout};
 use samp::scale::decode_compact;
+use samp::{CallArgs, CallIdx, ExtrinsicNonce, PalletIdx, SpecVersion, TxVersion};
 use serde_json::{Value, json};
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 
@@ -94,11 +95,11 @@ pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, ChainError> {
     Ok(ChainInfo {
         name,
         ss58_prefix,
-        chain_params: ChainParams {
-            genesis_hash: samp::GenesisHash::from_bytes(genesis_bytes),
-            spec_version,
-            tx_version,
-        },
+        chain_params: ChainParams::new(
+            samp::GenesisHash::from_bytes(genesis_bytes),
+            SpecVersion::new(spec_version),
+            TxVersion::new(tx_version),
+        ),
         account_storage,
         errors: Arc::new(metadata.errors().clone()),
     })
@@ -136,11 +137,11 @@ async fn refresh_signing_params(
     Ok(ChainInfo {
         name: base.name.clone(),
         ss58_prefix: base.ss58_prefix,
-        chain_params: ChainParams {
-            genesis_hash: samp::GenesisHash::from_bytes(genesis_hash),
-            spec_version,
-            tx_version,
-        },
+        chain_params: ChainParams::new(
+            samp::GenesisHash::from_bytes(genesis_hash),
+            SpecVersion::new(spec_version),
+            TxVersion::new(tx_version),
+        ),
         account_storage: base.account_storage.clone(),
         errors: base.errors.clone(),
     })
@@ -188,13 +189,13 @@ async fn read_text_result_raw(
     }
 }
 
-fn build_remark_call_args(remark: &samp::RemarkBytes) -> Result<Vec<u8>, ChainError> {
+fn build_remark_call_args(remark: &samp::RemarkBytes) -> Result<CallArgs, ChainError> {
     let remark_len = u64::try_from(remark.len())
         .map_err(|_| ChainError::MessageTooLong { len: remark.len() })?;
     let mut args = Vec::with_capacity(remark.len() + 5);
     samp::scale::encode_compact(remark_len, &mut args);
     args.extend_from_slice(remark.as_bytes());
-    Ok(args)
+    Ok(CallArgs::from_bytes(args))
 }
 
 fn build_remark_with_event(
@@ -206,12 +207,12 @@ fn build_remark_with_event(
     let args = build_remark_call_args(remark)?;
     let public_key = signing.public_key();
     build_signed_extrinsic(
-        SYSTEM_REMARK_WITH_EVENT.0,
-        SYSTEM_REMARK_WITH_EVENT.1,
+        PalletIdx::new(SYSTEM_REMARK_WITH_EVENT.0),
+        CallIdx::new(SYSTEM_REMARK_WITH_EVENT.1),
         &args,
         &public_key,
         |msg| samp::Signature::from_bytes(signing.sign(msg)),
-        nonce,
+        ExtrinsicNonce::new(nonce),
         &chain_info.chain_params,
     )
     .map_err(ChainError::from)

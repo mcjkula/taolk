@@ -39,11 +39,11 @@ pub fn test_chain_info() -> ChainInfo {
     ChainInfo {
         name: taolk::types::ChainName::parse("Test").unwrap(),
         ss58_prefix: samp::Ss58Prefix::SUBSTRATE_GENERIC,
-        chain_params: ChainParams {
-            genesis_hash: samp::GenesisHash::from_bytes([0; 32]),
-            spec_version: 1,
-            tx_version: 1,
-        },
+        chain_params: ChainParams::new(
+            samp::GenesisHash::from_bytes([0; 32]),
+            samp::SpecVersion::new(1),
+            samp::TxVersion::new(1),
+        ),
         account_storage: StorageLayout {
             offset: 16,
             width: 8,
@@ -99,12 +99,12 @@ pub fn build_remark_ext(
     let ci = test_chain_info();
     let pk = sk.public_key();
     samp::extrinsic::build_signed_extrinsic(
-        0,
-        7,
-        &args,
+        samp::PalletIdx::new(0),
+        samp::CallIdx::new(7),
+        &samp::CallArgs::from_bytes(args),
         &pk,
         |msg| samp::Signature::from_bytes(sk.sign(msg)),
-        nonce,
+        samp::ExtrinsicNonce::new(nonce),
         &ci.chain_params,
     )
     .expect("build extrinsic")

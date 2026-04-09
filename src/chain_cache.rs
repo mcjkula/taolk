@@ -4,7 +4,7 @@ use std::sync::Arc;
 use blake2::digest::{Update, VariableOutput};
 use samp::extrinsic::ChainParams;
 use samp::metadata::{ErrorEntry, ErrorTable, StorageLayout};
-use samp::{GenesisHash, Ss58Prefix};
+use samp::{GenesisHash, SpecVersion, Ss58Prefix, TxVersion};
 use serde::{Deserialize, Serialize};
 
 use crate::error::SdkError;
@@ -55,9 +55,9 @@ impl ChainSnapshot {
         Self {
             chain_name: info.name.as_str().to_string(),
             ss58_prefix: info.ss58_prefix.get(),
-            genesis_hash: *info.chain_params.genesis_hash.as_bytes(),
-            spec_version: info.chain_params.spec_version,
-            tx_version: info.chain_params.tx_version,
+            genesis_hash: *info.chain_params.genesis_hash().as_bytes(),
+            spec_version: info.chain_params.spec_version().get(),
+            tx_version: info.chain_params.tx_version().get(),
             account_storage_offset: info.account_storage.offset,
             account_storage_width: info.account_storage.width,
             errors,
@@ -84,11 +84,11 @@ impl ChainSnapshot {
         let info = ChainInfo {
             name,
             ss58_prefix: ss58,
-            chain_params: ChainParams {
-                genesis_hash: GenesisHash::from_bytes(self.genesis_hash),
-                spec_version: self.spec_version,
-                tx_version: self.tx_version,
-            },
+            chain_params: ChainParams::new(
+                GenesisHash::from_bytes(self.genesis_hash),
+                SpecVersion::new(self.spec_version),
+                TxVersion::new(self.tx_version),
+            ),
             account_storage: StorageLayout {
                 offset: self.account_storage_offset,
                 width: self.account_storage_width,

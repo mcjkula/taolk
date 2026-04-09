@@ -1,8 +1,8 @@
 use samp::extrinsic::{extract_call, extract_signer as samp_extract_signer};
 use samp::scale::{decode_bytes, decode_compact};
 use samp::{
-    ContentType, EncryptedPayload, Remark, decode_channel_content, decode_group_content,
-    decode_group_members, decode_remark, decode_thread_content,
+    ContentType, EncryptedPayload, Remark, decode_group_content, decode_group_members,
+    decode_remark, decode_thread_content,
 };
 use serde_json::Value;
 use std::sync::mpsc::Sender;
@@ -88,11 +88,11 @@ pub fn source_from_extrinsic(
 
 fn extract_remark_from_call(ext_bytes: &samp::ExtrinsicBytes) -> Option<samp::RemarkBytes> {
     let call = extract_call(ext_bytes)?;
-    let pair = (call.pallet, call.call);
+    let pair = (call.pallet().get(), call.call().get());
     if pair != SYSTEM_REMARK && pair != SYSTEM_REMARK_WITH_EVENT {
         return None;
     }
-    let (payload, _) = decode_bytes(call.args)?;
+    let (payload, _) = decode_bytes(call.args().as_bytes())?;
     Some(samp::RemarkBytes::from_bytes(payload.to_vec()))
 }
 
@@ -186,24 +186,22 @@ pub fn process_remark(
         }
         Remark::Channel {
             channel_ref,
-            content,
+            reply_to,
+            continues,
+            body,
         } => {
-            if let Ok((reply_to, continues, body_bytes)) = decode_channel_content(content)
-                && let Ok(body) = String::from_utf8(body_bytes.to_vec())
-            {
-                let sender_ss58 = crate::util::ss58_short(&sender);
-                let _ = tx.send(Event::NewChannelMessage {
-                    sender,
-                    sender_ss58,
-                    channel_ref: *channel_ref,
-                    body,
-                    reply_to,
-                    continues,
-                    block_number,
-                    ext_index,
-                    timestamp,
-                });
-            }
+            let sender_ss58 = crate::util::ss58_short(&sender);
+            let _ = tx.send(Event::NewChannelMessage {
+                sender,
+                sender_ss58,
+                channel_ref: *channel_ref,
+                body: body.clone(),
+                reply_to: *reply_to,
+                continues: *continues,
+                block_number,
+                ext_index,
+                timestamp,
+            });
         }
         Remark::Group(payload) => {
             let scalar = keys.scalar();

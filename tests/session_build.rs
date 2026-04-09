@@ -5,7 +5,7 @@ use taolk::types::{BlockRef, Pubkey};
 
 const BOB_SAMP_SEED: [u8; 32] = [0xBB; 32];
 
-fn bob_scalar() -> curve25519_dalek::scalar::Scalar {
+fn bob_scalar() -> samp::ViewScalar {
     samp::sr25519_signing_scalar(&samp::Seed::from_bytes(BOB_SAMP_SEED))
 }
 

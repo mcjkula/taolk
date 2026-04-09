@@ -12,7 +12,7 @@ fn ext_to_hex(ext_bytes: &samp::ExtrinsicBytes) -> String {
 }
 
 fn make_keys(seed: &[u8; 32]) -> DecryptionKeys {
-    let view_scalar = samp::sr25519_signing_scalar(&samp::Seed::from_bytes(*seed)).to_bytes();
+    let view_scalar = *samp::sr25519_signing_scalar(&samp::Seed::from_bytes(*seed)).expose_secret();
     DecryptionKeys::new(view_scalar, Some(*seed))
 }
 

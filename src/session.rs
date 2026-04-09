@@ -6,7 +6,6 @@ use crate::error::{Result, SdkError};
 use crate::secret::{DecryptionKeys, Seed, SigningKey};
 use crate::types::{BlockRef, Pubkey};
 use chrono::{DateTime, Utc};
-use curve25519_dalek::scalar::Scalar;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -74,8 +73,9 @@ impl Session {
     ) -> Self {
         let pubkey = signing.public_key();
         let my_ss58 = crate::util::ss58_from_pubkey(&pubkey);
-        let view_scalar =
-            Zeroizing::new(samp::sr25519_signing_scalar(&samp::Seed::from_bytes(*seed)).to_bytes());
+        let view_scalar = Zeroizing::new(
+            *samp::sr25519_signing_scalar(&samp::Seed::from_bytes(*seed)).expose_secret(),
+        );
         let seed = if keep_seed { Some(seed) } else { None };
         Self {
             signing: Arc::new(signing),
@@ -131,7 +131,7 @@ impl Session {
         let db = Db::open(
             wallet_name,
             seed,
-            chain_info.chain_params.genesis_hash.as_bytes(),
+            chain_info.chain_params.genesis_hash().as_bytes(),
         )?;
 
         let mut session = Self::new(
@@ -209,8 +209,8 @@ impl Session {
         Arc::clone(&self.signing)
     }
 
-    pub fn view_scalar(&self) -> Scalar {
-        Scalar::from_bytes_mod_order(*self.view_scalar)
+    pub fn view_scalar(&self) -> samp::ViewScalar {
+        samp::ViewScalar::from_bytes(*self.view_scalar)
     }
 
     pub fn decryption_keys(&self) -> DecryptionKeys {
