@@ -2,12 +2,14 @@ pub mod chat_list;
 pub mod chrome;
 pub mod composer;
 mod help;
+pub mod hintbar;
 mod input;
 pub mod modal;
-mod status;
+pub mod statusline;
 pub mod symbols;
 pub mod theme;
 pub mod timeline;
+pub mod welcome;
 
 mod icons {
     pub const INBOX: &str = "\u{2709}";
@@ -19,25 +21,36 @@ mod icons {
     pub const GROUPS: &str = "\u{2299}";
     pub const CREATOR: &str = "\u{2605}";
     pub const DRAFT: &str = "\u{270E}";
-    pub const ERROR: &str = "\u{2717}";
-    pub const SUCCESS: &str = "\u{2713}";
 }
 
 use crate::app::App;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::widgets::Paragraph;
+
+pub const MIN_WIDTH: u16 = 100;
+pub const MIN_HEIGHT: u16 = 28;
 
 pub fn render(frame: &mut Frame, app: &App) {
     use crate::app::Overlay;
+
+    let area = frame.area();
+    if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
+        render_too_small(frame, area);
+        return;
+    }
+
     if app.overlay == Some(Overlay::Help) {
-        help::render(frame, app, frame.area());
+        help::render(frame, app, area);
         return;
     }
 
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(5), Constraint::Length(1)])
-        .split(frame.area());
+        .split(area);
 
     let main_area = outer[0];
     let status_area = outer[1];
@@ -54,7 +67,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         render_main_panel(frame, app, main_area);
     }
 
-    status::render(frame, app, status_area);
+    statusline::render(frame, app, status_area);
 }
 
 fn render_main_panel(frame: &mut Frame, app: &App, area: Rect) {
@@ -63,6 +76,11 @@ fn render_main_panel(frame: &mut Frame, app: &App, area: Rect) {
     let block = chrome::panel(theme, app.color_mode, focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
+
+    if welcome::should_render(app) && app.overlay.is_none() {
+        welcome::render(frame, app, inner);
+        return;
+    }
 
     let text_lines = if app.is_composing() && !app.input.is_empty() {
         app.input.split('\n').count().clamp(1, 4)
@@ -78,4 +96,13 @@ fn render_main_panel(frame: &mut Frame, app: &App, area: Rect) {
 
     timeline::render(frame, app, rows[0]);
     input::render(frame, app, rows[1]);
+}
+
+fn render_too_small(frame: &mut Frame, area: Rect) {
+    let msg = format!(
+        "taolk requires at least {MIN_WIDTH}x{MIN_HEIGHT} — current {}x{}",
+        area.width, area.height,
+    );
+    let lines = vec![Line::raw(""), Line::raw(msg)];
+    frame.render_widget(Paragraph::new(lines).style(Style::default()), area);
 }

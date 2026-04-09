@@ -1,10 +1,13 @@
-use crate::app::{App, Focus, Overlay};
+use crate::app::App;
+use crate::ui::hintbar;
+use crate::ui::theme::{apply_mode, theme_for};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use taolk::event::ConnState;
+use taolk::util::format_number;
 
 fn reconnect_pill(state: ConnState) -> Option<Span<'static>> {
     match state {
@@ -19,62 +22,35 @@ fn reconnect_pill(state: ConnState) -> Option<Span<'static>> {
     }
 }
 
-fn pill(label: &'static str) -> Span<'static> {
-    Span::styled(
-        label,
-        Style::default()
-            .fg(Color::White)
-            .bg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    )
-}
-
-fn mode_label(app: &App) -> Span<'static> {
-    match app.overlay {
-        Some(Overlay::Help) => pill(" HELP "),
-        Some(Overlay::Confirm) => pill(" CONFIRM "),
-        Some(Overlay::Compose) => pill(" NEW THREAD "),
-        Some(Overlay::Message) => pill(" MESSAGE "),
-        Some(Overlay::CreateChannel) => pill(" CREATE CHANNEL "),
-        Some(Overlay::CreateChannelDesc) => pill(" CHANNEL DESC "),
-        Some(Overlay::CreateGroupMembers) => pill(" SELECT MEMBERS "),
-        Some(Overlay::Search) => pill(" SEARCH "),
-        Some(Overlay::SenderPicker) => pill(" COPY SS58 "),
-        None => match app.focus {
-            Focus::Composer => pill(" INSERT "),
-            Focus::Timeline => pill(" NORMAL "),
-        },
-    }
-}
-
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    let mode = mode_label(app);
+    let theme = theme_for(app.theme);
+    let mode = app.color_mode;
 
-    let status_span = if let Some((status, is_error)) = app.current_status() {
+    let left = if let Some((status, is_error)) = app.current_status() {
         if app.is_busy() {
             let spinner = app.spinner_1();
-            Span::styled(
+            Line::from(Span::styled(
                 format!(" {spinner} {status} "),
-                Style::default().fg(Color::Cyan),
-            )
+                Style::default().fg(apply_mode(mode, theme.accent)),
+            ))
         } else if is_error {
-            Span::styled(
-                format!(" {} {status} ", super::icons::ERROR),
+            Line::from(Span::styled(
+                format!(" \u{2717} {status} "),
                 Style::default().fg(Color::Red),
-            )
+            ))
         } else {
-            Span::styled(
-                format!(" {} {status} ", super::icons::SUCCESS),
-                Style::default().fg(Color::White),
-            )
+            Line::from(Span::styled(
+                format!(" \u{2713} {status} "),
+                Style::default().fg(apply_mode(mode, theme.text_strong)),
+            ))
         }
     } else if !app.search_query.is_empty() {
-        Span::styled(
+        Line::from(Span::styled(
             format!(" /{} ", app.search_query),
-            Style::default().fg(Color::Cyan),
-        )
+            Style::default().fg(apply_mode(mode, theme.accent)),
+        ))
     } else {
-        Span::raw("")
+        hintbar::hints(app)
     };
 
     let highlight_frames: u32 = 8;
@@ -98,18 +74,18 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             Color::Green
         }
     } else {
-        Color::White
+        apply_mode(mode, theme.text)
     };
-    let balance_span = Span::styled(&balance_str, Style::default().fg(balance_color));
+    let balance_span = Span::styled(balance_str.clone(), Style::default().fg(balance_color));
 
     let block_str = format!(" #{} ", format_number(u128::from(app.session.block_number)));
     let block_fresh = app.frame.wrapping_sub(app.block_changed_at) < highlight_frames;
     let block_color = if block_fresh {
-        Color::White
+        apply_mode(mode, theme.text_strong)
     } else {
-        Color::DarkGray
+        apply_mode(mode, theme.text_dim)
     };
-    let block_span = Span::styled(&block_str, Style::default().fg(block_color));
+    let block_span = Span::styled(block_str.clone(), Style::default().fg(block_color));
 
     let reconnect = reconnect_pill(app.connection);
     let reconnect_width = reconnect
@@ -133,24 +109,13 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         + u16::try_from(balance_str.len()).unwrap_or(u16::MAX)
         + u16::try_from(block_str.len()).unwrap_or(u16::MAX)
         + reconnect_width;
-    let mode_width = u16::try_from(mode.width()).unwrap_or(u16::MAX);
-    let max_status = usize::from(area.width.saturating_sub(mode_width + right_width + 1));
-    let status_span = if status_span.width() > max_status {
-        let content = status_span.content.to_string();
-        let truncated = if max_status > 2 {
-            format!("{}\u{2026}", &content[..max_status - 1])
-        } else {
-            String::new()
-        };
-        Span::styled(truncated, status_span.style)
-    } else {
-        status_span
-    };
-    let used = mode_width + u16::try_from(status_span.width()).unwrap_or(u16::MAX);
-    let padding = area.width.saturating_sub(used + right_width);
+
+    let left_width = u16::try_from(left.width()).unwrap_or(u16::MAX);
+    let padding = area.width.saturating_sub(left_width + right_width);
     let pad_span = Span::raw(" ".repeat(usize::from(padding)));
 
-    let mut spans = vec![mode, status_span, pad_span];
+    let mut spans: Vec<Span<'static>> = left.spans.into_iter().collect();
+    spans.push(pad_span);
     if let Some(rc) = reconnect {
         spans.push(rc);
     }
@@ -162,5 +127,3 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
-
-use taolk::util::format_number;
