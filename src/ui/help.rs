@@ -15,9 +15,27 @@ pub const KEYBINDS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
-        "Normal",
+        "Sidebar",
         &[
-            ("i", "Compose / reply"),
+            ("\u{2191} / \u{2193}", "Previous / next conversation"),
+            ("Tab / Shift-Tab", "Previous / next conversation"),
+            ("Space", "Toggle sidebar"),
+        ],
+    ),
+    (
+        "Page content",
+        &[
+            ("j / k", "Down / up one line"),
+            ("Ctrl+D / Ctrl+U", "Half-page down / up"),
+            ("PgDn / PgUp", "Page down / up"),
+            ("G / End", "Bottom"),
+            ("Home", "Top"),
+        ],
+    ),
+    (
+        "Actions",
+        &[
+            ("i", "Compose / reply in current conversation"),
             ("n", "New thread"),
             ("m", "Standalone message (public or encrypted)"),
             ("c", "Browse channels"),
@@ -25,13 +43,18 @@ pub const KEYBINDS: &[(&str, &[(&str, &str)])] = &[
             ("/", "Search current view"),
             ("y", "Copy sender SS58"),
             ("r", "Refresh / fill DAG gaps"),
-            ("Space", "Toggle sidebar"),
-            ("j / k", "Down / up"),
-            ("Ctrl+D / Ctrl+U", "Half-page down / up"),
-            ("PgDn / PgUp", "Page down / up"),
-            ("G / Home", "Bottom / top"),
-            ("Tab / Shift-Tab", "Next / previous conversation"),
+            ("U", "Unlock all locked-outbound messages"),
             ("q", "Quit (warns if drafts exist)"),
+        ],
+    ),
+    (
+        "Channel directory",
+        &[
+            ("j / k", "Move channel cursor down / up"),
+            ("type digits/`:`", "Enter a channel ref (block:index)"),
+            ("Enter", "Subscribe to cursor or typed ref"),
+            ("+", "Create a new channel"),
+            ("Esc", "Clear input or back to Inbox"),
         ],
     ),
     (

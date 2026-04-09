@@ -1551,18 +1551,18 @@ fn handle_channel_dir_key(
     }
 
     match key.code {
-        KeyCode::Up if !typing => {
+        KeyCode::Char('k') if !has_ctrl && !typing => {
             app.channel_dir_cursor = app.channel_dir_cursor.saturating_sub(1);
             true
         }
-        KeyCode::Down if !typing => {
+        KeyCode::Char('j') if !has_ctrl && !typing => {
             if !app.session.known_channels.is_empty() {
                 app.channel_dir_cursor =
                     (app.channel_dir_cursor + 1).min(app.session.known_channels.len() - 1);
             }
             true
         }
-        KeyCode::Char('c') if !has_ctrl && !typing => {
+        KeyCode::Char('+') if !has_ctrl && !typing => {
             if !app.check_not_sending() {
                 return true;
             }
@@ -1685,8 +1685,10 @@ fn handle_global_normal_key(
         KeyCode::Home => app.scroll_offset = usize::MAX,
         KeyCode::Char('G') | KeyCode::End => app.scroll_offset = 0,
         KeyCode::Char(' ') => app.show_sidebar = !app.show_sidebar,
-        KeyCode::Char('j') | KeyCode::Tab | KeyCode::Down => app.next_sidebar(),
-        KeyCode::Char('k') | KeyCode::BackTab | KeyCode::Up => app.prev_sidebar(),
+        KeyCode::Tab | KeyCode::Down => app.next_sidebar(),
+        KeyCode::BackTab | KeyCode::Up => app.prev_sidebar(),
+        KeyCode::Char('j') => app.scroll_offset = app.scroll_offset.saturating_sub(1),
+        KeyCode::Char('k') => app.scroll_offset = app.scroll_offset.saturating_add(1),
         _ => {}
     }
 }
