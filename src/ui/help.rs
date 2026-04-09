@@ -156,11 +156,14 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         columns[idx].extend(card_lines);
     }
 
+    let grid_width = columns_qty * card_width + columns_qty.saturating_sub(1) * COLUMN_GAP;
+    let left_pad = width.saturating_sub(grid_width) / 2;
+
     let max_rows = columns.iter().map(|c| c.len()).max().unwrap_or(0);
     let mut page: Vec<Line<'static>> = Vec::with_capacity(max_rows);
     for row in 0..max_rows {
         let mut spans: Vec<Span<'static>> = Vec::new();
-        spans.push(Span::raw(" ".repeat(SIDE_MARGIN)));
+        spans.push(Span::raw(" ".repeat(left_pad)));
         for (j, col) in columns.iter().enumerate() {
             if j > 0 {
                 spans.push(Span::raw(" ".repeat(COLUMN_GAP)));
@@ -174,8 +177,17 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         page.push(Line::from(spans));
     }
 
-    let total_rows = u16::try_from(page.len()).unwrap_or(u16::MAX);
     let visible = body.height;
+    let grid_rows = u16::try_from(max_rows).unwrap_or(u16::MAX);
+    let top_pad = visible.saturating_sub(grid_rows) / 2;
+    if top_pad > 0 {
+        let blank = Line::from(Span::raw(String::new()));
+        for _ in 0..top_pad {
+            page.insert(0, blank.clone());
+        }
+    }
+
+    let total_rows = u16::try_from(page.len()).unwrap_or(u16::MAX);
     let max_scroll = total_rows.saturating_sub(visible);
     let scroll = app.help_scroll.get().min(max_scroll);
     app.help_scroll.set(scroll);
