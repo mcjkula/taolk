@@ -43,11 +43,14 @@ fn build_encrypted_message_decryptable() {
     let remark = session
         .build_encrypted_message(&ALICE_SEED, &recipient, &mb("hello"))
         .unwrap();
-    let samp::Remark::Encrypted(payload) = samp::decode_remark(&remark).unwrap() else {
+    let samp::Remark::Encrypted {
+        nonce, ciphertext, ..
+    } = samp::decode_remark(&remark).unwrap()
+    else {
         panic!("expected Encrypted");
     };
 
-    let plaintext = samp::decrypt(&payload, &bob_scalar()).unwrap();
+    let plaintext = samp::decrypt(&ciphertext, &nonce, &bob_scalar()).unwrap();
     assert_eq!(std::str::from_utf8(plaintext.as_bytes()).unwrap(), "hello");
 }
 
@@ -59,11 +62,14 @@ fn build_thread_root_decryptable() {
     let remark = session
         .build_thread_root(&ALICE_SEED, &recipient, &mb("thread start"))
         .unwrap();
-    let samp::Remark::Thread(payload) = samp::decode_remark(&remark).unwrap() else {
+    let samp::Remark::Thread {
+        nonce, ciphertext, ..
+    } = samp::decode_remark(&remark).unwrap()
+    else {
         panic!("expected Thread");
     };
 
-    let plaintext = samp::decrypt(&payload, &bob_scalar()).unwrap();
+    let plaintext = samp::decrypt(&ciphertext, &nonce, &bob_scalar()).unwrap();
     let (thread_ref, _reply_to, _continues, body) =
         samp::decode_thread_content(plaintext.as_bytes()).unwrap();
 
@@ -113,11 +119,11 @@ fn build_group_create_decryptable() {
     let remark = session
         .build_group_create(&ALICE_SEED, &members, &mb("group hello"))
         .unwrap();
-    let samp::Remark::Group(payload) = samp::decode_remark(&remark).unwrap() else {
+    let samp::Remark::Group { nonce, content } = samp::decode_remark(&remark).unwrap() else {
         panic!("expected Group");
     };
 
-    let plaintext = samp::decrypt_from_group(&payload, &bob_scalar(), Some(2)).unwrap();
+    let plaintext = samp::decrypt_from_group(&content, &nonce, &bob_scalar(), Some(2)).unwrap();
 
     let (_group_ref, _reply_to, _continues, body) =
         samp::decode_thread_content(plaintext.as_bytes()).unwrap();

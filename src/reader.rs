@@ -1,7 +1,7 @@
 use samp::extrinsic::{extract_call, extract_signer as samp_extract_signer};
 use samp::scale::{decode_bytes, decode_compact};
 use samp::{
-    ContentType, EncryptedPayload, Remark, decode_group_content, decode_group_members,
+    Ciphertext, ContentType, Nonce, Remark, ViewTag, decode_group_content, decode_group_members,
     decode_remark, decode_thread_content,
 };
 use serde_json::Value;
@@ -155,8 +155,14 @@ pub fn process_remark(
                 timestamp,
             });
         }
-        Remark::Encrypted(payload) => process_one_to_one(
-            payload,
+        Remark::Encrypted {
+            view_tag,
+            nonce,
+            ciphertext,
+        } => process_one_to_one(
+            *view_tag,
+            nonce,
+            ciphertext,
             ContentType::Encrypted,
             sender,
             my_pubkey,
@@ -165,8 +171,14 @@ pub fn process_remark(
             tx,
             false,
         ),
-        Remark::Thread(payload) => process_one_to_one(
-            payload,
+        Remark::Thread {
+            view_tag,
+            nonce,
+            ciphertext,
+        } => process_one_to_one(
+            *view_tag,
+            nonce,
+            ciphertext,
             ContentType::Thread,
             sender,
             my_pubkey,
@@ -203,10 +215,10 @@ pub fn process_remark(
                 timestamp,
             });
         }
-        Remark::Group(payload) => {
+        Remark::Group { nonce, content } => {
             let scalar = keys.scalar();
 
-            let plaintext = match samp::decrypt_from_group(payload, &scalar, None) {
+            let plaintext = match samp::decrypt_from_group(content, nonce, &scalar, None) {
                 Ok(pt) => pt,
                 Err(_) => return,
             };
@@ -265,7 +277,9 @@ pub fn process_remark(
 
 #[allow(clippy::too_many_arguments)]
 fn process_one_to_one(
-    payload: &EncryptedPayload,
+    view_tag: ViewTag,
+    nonce: &Nonce,
+    ciphertext: &Ciphertext,
     ct: ContentType,
     sender: Pubkey,
     my_pubkey: &Pubkey,
@@ -281,11 +295,11 @@ fn process_one_to_one(
     let scalar = keys.scalar();
 
     if !is_mine {
-        let tag = match samp::check_view_tag(payload, &scalar) {
+        let tag = match samp::check_view_tag(ciphertext, &scalar) {
             Ok(t) => t,
             Err(_) => return,
         };
-        if tag != payload.view_tag {
+        if tag != view_tag {
             return;
         }
     }
@@ -302,9 +316,9 @@ fn process_one_to_one(
             return;
         };
         let sender_seed = samp::Seed::from_bytes(*seed_bytes);
-        samp::decrypt_as_sender(payload, &sender_seed)
+        samp::decrypt_as_sender(ciphertext, nonce, &sender_seed)
     } else {
-        samp::decrypt(payload, &scalar)
+        samp::decrypt(ciphertext, nonce, &scalar)
     };
 
     let plaintext = match plaintext {
@@ -315,7 +329,8 @@ fn process_one_to_one(
     let mut recipient = *my_pubkey;
     if is_mine
         && let Some(seed_bytes) = keys.seed()
-        && let Ok(r) = samp::unseal_recipient(payload, &samp::Seed::from_bytes(*seed_bytes))
+        && let Ok(r) =
+            samp::unseal_recipient(ciphertext, nonce, &samp::Seed::from_bytes(*seed_bytes))
     {
         recipient = r;
     }
