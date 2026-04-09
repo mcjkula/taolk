@@ -26,6 +26,11 @@ use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders};
 
 pub fn render(frame: &mut Frame, app: &App) {
+    if app.mode == crate::app::Mode::Help {
+        help::render(frame, app, frame.area());
+        return;
+    }
+
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(5), Constraint::Length(1)])
@@ -47,10 +52,6 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 
     status::render(frame, app, status_area);
-
-    if app.mode == crate::app::Mode::Help {
-        help::render(frame, frame.area());
-    }
 }
 
 fn render_main_panel(frame: &mut Frame, app: &App, area: Rect) {

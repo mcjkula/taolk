@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::time::Instant;
 use taolk::audio::Audio;
 use taolk::event::ConnState;
@@ -61,6 +61,7 @@ pub struct App {
     pub msg_recipient: Option<(Pubkey, String)>,
     pub msg_type: Option<u8>,
     pub scroll_offset: usize,
+    pub help_scroll: Cell<u16>,
     pub quit_confirm: bool,
     pub search_query: String,
     pub contact_idx: usize,
@@ -106,6 +107,7 @@ impl App {
             msg_recipient: None,
             msg_type: None,
             scroll_offset: 0,
+            help_scroll: Cell::new(0),
             quit_confirm: false,
             search_query: String::new(),
             contact_idx: 0,

@@ -1,135 +1,249 @@
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::Paragraph;
+use unicode_width::UnicodeWidthStr;
 
-pub const KEYBINDS: &[(&str, &[(&str, &str)])] = &[
-    (
-        "Global",
-        &[
-            ("?", "Show this help"),
-            ("Ctrl+L", "Lock session"),
-            ("Ctrl+W", "Switch wallet"),
-            ("Ctrl+C", "Quit immediately"),
-        ],
-    ),
-    (
-        "Sidebar",
-        &[
+use crate::app::App;
+
+struct Card {
+    title: &'static str,
+    entries: &'static [(&'static str, &'static str)],
+}
+
+const CARDS: &[Card] = &[
+    Card {
+        title: "Sidebar",
+        entries: &[
             ("\u{2191} / \u{2193}", "Previous / next conversation"),
-            ("Tab / Shift-Tab", "Previous / next conversation"),
+            ("Tab / S-Tab", "Previous / next conversation"),
             ("Space", "Toggle sidebar"),
         ],
-    ),
-    (
-        "Page content",
-        &[
+    },
+    Card {
+        title: "Page content",
+        entries: &[
             ("j / k", "Down / up one line"),
-            ("Ctrl+D / Ctrl+U", "Half-page down / up"),
+            ("C-d / C-u", "Half-page down / up"),
             ("PgDn / PgUp", "Page down / up"),
             ("G / End", "Bottom"),
             ("Home", "Top"),
         ],
-    ),
-    (
-        "Actions",
-        &[
-            ("i", "Compose / reply in current conversation"),
+    },
+    Card {
+        title: "Actions",
+        entries: &[
+            ("i", "Compose or reply in current"),
             ("n", "New thread"),
-            ("m", "Standalone message (public or encrypted)"),
+            ("m", "Standalone message"),
             ("c", "Browse channels"),
             ("g", "Create group"),
             ("/", "Search current view"),
             ("y", "Copy sender SS58"),
             ("r", "Refresh / fill DAG gaps"),
-            ("U", "Unlock all locked-outbound messages"),
-            ("q", "Quit (warns if drafts exist)"),
+            ("U", "Unlock all locked outbound"),
+            ("?", "Show this help"),
+            ("q", "Quit (warns if drafts)"),
+            ("C-c", "Quit immediately"),
+            ("C-l", "Lock session"),
+            ("C-w", "Switch wallet"),
         ],
-    ),
-    (
-        "Channel directory",
-        &[
-            ("j / k", "Move channel cursor down / up"),
-            ("type digits/`:`", "Enter a channel ref (block:index)"),
-            ("Enter", "Subscribe to cursor or typed ref"),
+    },
+    Card {
+        title: "Channel directory",
+        entries: &[
+            ("j / k", "Move channel cursor"),
+            ("digits / :", "Type a channel ref"),
+            ("Enter", "Subscribe to ref"),
             ("+", "Create a new channel"),
-            ("Esc", "Clear input or back to Inbox"),
+            ("Esc", "Clear input or back"),
         ],
-    ),
-    (
-        "Insert",
-        &[
-            ("Enter", "Send (preview fee in Confirm)"),
-            ("Ctrl+N", "Insert newline"),
+    },
+    Card {
+        title: "Insert",
+        entries: &[
+            ("Enter", "Send (preview fee)"),
+            ("C-n", "Insert newline"),
             ("Esc", "Save draft and exit"),
+            ("C-\u{2190} / C-\u{2192}", "Jump by word"),
             ("Backspace", "Delete left"),
-            ("Ctrl+\u{2190} / Ctrl+\u{2192}", "Word jump"),
         ],
-    ),
-    (
-        "Confirm",
-        &[("Enter", "Submit transaction"), ("Esc", "Back to edit")],
-    ),
-    (
-        "Compose / Message",
-        &[
-            ("type", "Filter contacts or paste SS58"),
+    },
+    Card {
+        title: "Confirm",
+        entries: &[("Enter", "Submit transaction"), ("Esc", "Back to edit")],
+    },
+    Card {
+        title: "Compose / Message",
+        entries: &[
+            ("type", "Filter or paste SS58"),
             ("\u{2191} / \u{2193}", "Pick contact"),
-            ("Enter", "Confirm and start composing"),
+            ("C-n", "Swap public/encrypted"),
+            ("Enter", "Confirm and compose"),
             ("Esc", "Cancel"),
         ],
-    ),
-    (
-        "Sender picker (y)",
-        &[
+    },
+    Card {
+        title: "Sender picker",
+        entries: &[
             ("\u{2191} / \u{2193}", "Pick sender"),
             ("Enter", "Copy SS58 to clipboard"),
             ("Esc", "Cancel"),
         ],
-    ),
+    },
+    Card {
+        title: "Group members",
+        entries: &[
+            ("type", "Filter or paste SS58"),
+            ("\u{2191} / \u{2193}", "Pick contact"),
+            ("Enter", "Add or remove"),
+            ("Tab", "Done, create group"),
+            ("Esc", "Cancel"),
+        ],
+    },
 ];
 
-pub fn render(frame: &mut Frame, area: Rect) {
-    let content = build_lines();
-    let want_h = u16::try_from(content.len())
-        .unwrap_or(u16::MAX)
-        .saturating_add(4)
-        .min(area.height);
-    let want_w = 64.min(area.width);
-    let rect = super::modal::centered_rect(area, want_w, want_h);
+const CARD_H_PAD: usize = 2;
+const CARD_ENTRY_GAP: usize = 2;
+const COLUMN_GAP: usize = 2;
+const SIDE_MARGIN: usize = 2;
 
-    frame.render_widget(Clear, rect);
-    let block = Block::default()
-        .title(Span::styled(
-            " Help — press any key to close ",
+pub fn render(frame: &mut Frame, app: &App, area: Rect) {
+    let body = Rect {
+        x: area.x,
+        y: area.y.saturating_add(1),
+        width: area.width,
+        height: area.height.saturating_sub(2),
+    };
+
+    let header = Paragraph::new(Line::from(vec![
+        Span::styled(
+            " taolk \u{2014} help ",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
-        ))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
-    let inner = block.inner(rect);
-    frame.render_widget(block, rect);
-    frame.render_widget(Paragraph::new(content), inner);
+        ),
+        Span::styled(
+            " (j/k scroll, Esc/q to close) ",
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]))
+    .alignment(Alignment::Center);
+    let header_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: 1,
+    };
+    frame.render_widget(header, header_area);
+
+    let width = usize::from(body.width);
+    let card_width = compute_card_width();
+    let columns_qty =
+        ((width.saturating_sub(SIDE_MARGIN * 2) + COLUMN_GAP) / (card_width + COLUMN_GAP)).max(1);
+
+    let mut columns: Vec<Vec<Line<'static>>> = vec![Vec::new(); columns_qty];
+    let mut heights: Vec<usize> = vec![0; columns_qty];
+
+    for card in CARDS {
+        let card_lines = render_card(card, card_width);
+        let (idx, _) = heights.iter().enumerate().min_by_key(|(_, h)| **h).unwrap();
+        if !columns[idx].is_empty() {
+            columns[idx].push(blank_line(card_width));
+        }
+        heights[idx] += card_lines.len() + 1;
+        columns[idx].extend(card_lines);
+    }
+
+    let max_rows = columns.iter().map(|c| c.len()).max().unwrap_or(0);
+    let mut page: Vec<Line<'static>> = Vec::with_capacity(max_rows);
+    for row in 0..max_rows {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        spans.push(Span::raw(" ".repeat(SIDE_MARGIN)));
+        for (j, col) in columns.iter().enumerate() {
+            if j > 0 {
+                spans.push(Span::raw(" ".repeat(COLUMN_GAP)));
+            }
+            if row < col.len() {
+                spans.extend(col[row].spans.iter().cloned());
+            } else {
+                spans.push(Span::raw(" ".repeat(card_width)));
+            }
+        }
+        page.push(Line::from(spans));
+    }
+
+    let total_rows = u16::try_from(page.len()).unwrap_or(u16::MAX);
+    let visible = body.height;
+    let max_scroll = total_rows.saturating_sub(visible);
+    let scroll = app.help_scroll.get().min(max_scroll);
+    app.help_scroll.set(scroll);
+    frame.render_widget(Paragraph::new(page).scroll((scroll, 0)), body);
+
+    if total_rows > visible {
+        let footer = Paragraph::new(Line::from(Span::styled(
+            format!(" {}/{} ", scroll + 1, max_scroll + 1),
+            Style::default().fg(Color::DarkGray),
+        )))
+        .alignment(Alignment::Right);
+        let footer_area = Rect {
+            x: area.x,
+            y: area.y + area.height.saturating_sub(1),
+            width: area.width,
+            height: 1,
+        };
+        frame.render_widget(footer, footer_area);
+    }
 }
 
-fn build_lines() -> Vec<Line<'static>> {
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    for (group, rows) in KEYBINDS {
-        lines.push(Line::styled(
-            format!(" {group}"),
+fn compute_card_width() -> usize {
+    let mut max_entry = 0usize;
+    let mut max_title = 0usize;
+    for card in CARDS {
+        max_title = max_title.max(UnicodeWidthStr::width(card.title));
+        for (key, desc) in card.entries {
+            let w = UnicodeWidthStr::width(*key) + UnicodeWidthStr::width(*desc) + CARD_ENTRY_GAP;
+            max_entry = max_entry.max(w);
+        }
+    }
+    (max_entry + CARD_H_PAD * 2).max(max_title + CARD_H_PAD * 2 + 2)
+}
+
+fn render_card(card: &Card, width: usize) -> Vec<Line<'static>> {
+    let mut lines = Vec::with_capacity(card.entries.len() + 3);
+    let title_w = UnicodeWidthStr::width(card.title);
+    let left = (width.saturating_sub(title_w)) / 2;
+    let right = width.saturating_sub(title_w).saturating_sub(left);
+    lines.push(Line::from(vec![
+        Span::raw(" ".repeat(left)),
+        Span::styled(
+            card.title.to_string(),
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
-        ));
-        for (key, desc) in *rows {
-            lines.push(Line::from(vec![
-                Span::styled(format!("   {key:<18}"), Style::default().fg(Color::Cyan)),
-                Span::styled(*desc, Style::default().fg(Color::White)),
-            ]));
-        }
-        lines.push(Line::raw(""));
+        ),
+        Span::raw(" ".repeat(right)),
+    ]));
+    lines.push(blank_line(width));
+
+    for (key, desc) in card.entries {
+        let key_w = UnicodeWidthStr::width(*key);
+        let desc_w = UnicodeWidthStr::width(*desc);
+        let used = CARD_H_PAD * 2 + key_w + desc_w;
+        let gap = width.saturating_sub(used).max(1);
+        lines.push(Line::from(vec![
+            Span::raw(" ".repeat(CARD_H_PAD)),
+            Span::styled((*desc).to_string(), Style::default().fg(Color::White)),
+            Span::raw(" ".repeat(gap)),
+            Span::styled((*key).to_string(), Style::default().fg(Color::Cyan)),
+            Span::raw(" ".repeat(CARD_H_PAD)),
+        ]));
     }
+    lines.push(blank_line(width));
     lines
+}
+
+fn blank_line(width: usize) -> Line<'static> {
+    Line::from(Span::raw(" ".repeat(width)))
 }

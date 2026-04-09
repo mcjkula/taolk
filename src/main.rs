@@ -1457,8 +1457,32 @@ fn handle_key(
     }
 }
 
-fn handle_help_key(app: &mut App, _key: crossterm::event::KeyEvent) {
-    app.mode = Mode::Normal;
+fn handle_help_key(app: &mut App, key: crossterm::event::KeyEvent) {
+    let cur = app.help_scroll.get();
+    match key.code {
+        KeyCode::Char('j') | KeyCode::Down => {
+            app.help_scroll.set(cur.saturating_add(1));
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            app.help_scroll.set(cur.saturating_sub(1));
+        }
+        KeyCode::PageDown => {
+            app.help_scroll.set(cur.saturating_add(10));
+        }
+        KeyCode::PageUp => {
+            app.help_scroll.set(cur.saturating_sub(10));
+        }
+        KeyCode::Home => {
+            app.help_scroll.set(0);
+        }
+        KeyCode::End | KeyCode::Char('G') => {
+            app.help_scroll.set(u16::MAX);
+        }
+        _ => {
+            app.help_scroll.set(0);
+            app.mode = Mode::Normal;
+        }
+    }
 }
 
 fn handle_normal_key(

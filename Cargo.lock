@@ -3042,6 +3042,7 @@ dependencies = [
  "toml 0.8.23",
  "trybuild",
  "twox-hash",
+ "unicode-width",
  "zeroize",
 ]
 
