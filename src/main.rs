@@ -182,9 +182,9 @@ fn run_tui(
 
     loop {
         let result = if first_login || force_picker {
-            run_lock_screen(&mut terminal, &events, wallets, preselected)?
+            run_lock_screen(&mut terminal, &events, wallets, preselected, cfg)?
         } else {
-            run_lock_screen(&mut terminal, &events, &[], Some(&current_wallet))?
+            run_lock_screen(&mut terminal, &events, &[], Some(&current_wallet), cfg)?
         };
 
         let (wallet_name, seed) = match result {
@@ -236,10 +236,29 @@ fn run_lock_screen(
     events: &TuiEventHandler,
     wallets: &[String],
     preselected: Option<&str>,
+    cfg: &config::Config,
 ) -> Result<UnlockResult, Box<dyn std::error::Error>> {
-    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::style::{Modifier, Style};
     use ratatui::text::{Line, Span};
-    use ratatui::widgets::Paragraph;
+    use ratatui::widgets::{Block, Paragraph};
+    use ui::theme::{apply_mode, theme_for};
+
+    let theme = theme_for(cfg.ui.theme);
+    let color_mode = cfg.ui.colors;
+    let root_style = Style::default()
+        .bg(apply_mode(color_mode, theme.bg))
+        .fg(apply_mode(color_mode, theme.text));
+    let logo_style = Style::default()
+        .fg(apply_mode(color_mode, theme.accent))
+        .add_modifier(Modifier::BOLD);
+    let subtitle_style = Style::default().fg(apply_mode(color_mode, theme.text_dim));
+    let dim_style = Style::default().fg(apply_mode(color_mode, theme.text_dim));
+    let active_style = Style::default()
+        .fg(apply_mode(color_mode, theme.text_strong))
+        .add_modifier(Modifier::BOLD);
+    let prompt_active_style = Style::default().fg(apply_mode(color_mode, theme.text_strong));
+    let prompt_idle_style = Style::default().fg(apply_mode(color_mode, theme.text_dim));
+    let error_style = Style::default().fg(apply_mode(color_mode, theme.error));
 
     const LOGO: &[&str] = &[
         "   \u{2591}\u{2588}\u{2588}                                     \u{2591}\u{2588}\u{2588} \u{2591}\u{2588}\u{2588}",
@@ -276,6 +295,7 @@ fn run_lock_screen(
 
             let area = frame.area();
             let w = area.width;
+            frame.render_widget(Block::default().style(root_style), area);
 
             let content_height = 18;
             let top_pad = vertical_pad(content_height, area.height);
@@ -287,18 +307,11 @@ fn run_lock_screen(
 
             let logo_pad = horizontal_pad(55, w);
             for logo_line in LOGO {
-                lines.push(Line::styled(
-                    format!("{logo_pad}{logo_line}"),
-                    Style::default().fg(Color::Cyan),
-                ));
+                lines.push(Line::styled(format!("{logo_pad}{logo_line}"), logo_style));
             }
 
             lines.push(Line::raw(""));
-            lines.push(centered_line(
-                SUBTITLE,
-                w,
-                Style::default().fg(Color::DarkGray),
-            ));
+            lines.push(centered_line(SUBTITLE, w, subtitle_style));
             lines.push(Line::raw(""));
             lines.push(Line::raw(""));
 
@@ -310,70 +323,49 @@ fn run_lock_screen(
 
                 let mut spans: Vec<Span<'static>> = Vec::new();
                 if win_start > 0 {
-                    spans.push(Span::styled(
-                        "\u{2039}  ",
-                        Style::default().fg(Color::DarkGray),
-                    ));
+                    spans.push(Span::styled("\u{2039}  ", dim_style));
                 } else {
                     spans.push(Span::raw("   "));
                 }
                 for (i, name) in wallets[win_start..win_end].iter().enumerate() {
                     if i > 0 {
-                        spans.push(Span::styled(
-                            "  \u{2014}  ",
-                            Style::default().fg(Color::DarkGray),
-                        ));
+                        spans.push(Span::styled("  \u{2014}  ", dim_style));
                     }
                     if win_start + i == wallet_idx {
-                        spans.push(Span::styled(
-                            name.clone(),
-                            Style::default()
-                                .fg(Color::White)
-                                .add_modifier(Modifier::BOLD),
-                        ));
+                        spans.push(Span::styled(name.clone(), active_style));
                     } else {
-                        spans.push(Span::styled(
-                            name.clone(),
-                            Style::default().fg(Color::DarkGray),
-                        ));
+                        spans.push(Span::styled(name.clone(), dim_style));
                     }
                 }
                 if win_end < wallets.len() {
-                    spans.push(Span::styled(
-                        "  \u{203A}",
-                        Style::default().fg(Color::DarkGray),
-                    ));
+                    spans.push(Span::styled("  \u{203A}", dim_style));
                 } else {
                     spans.push(Span::raw("  "));
                 }
 
                 lines.push(centered_spans(spans, w));
             } else {
-                lines.push(centered_line(
-                    &current_wallet,
-                    w,
-                    Style::default().fg(Color::White),
-                ));
+                lines.push(centered_line(&current_wallet, w, active_style));
             }
 
             lines.push(Line::raw(""));
 
             let prompt = "Password: ";
-            let prompt_color = if inserting {
-                Color::White
+            let prompt_style = if inserting {
+                prompt_active_style
             } else {
-                Color::DarkGray
+                prompt_idle_style
             };
             let pp_str = horizontal_pad(prompt.len(), w);
             let prompt_x_offset = pp_str.len();
             lines.push(Line::from(vec![
                 Span::raw(pp_str),
-                Span::styled(prompt, Style::default().fg(prompt_color)),
+                Span::styled(prompt, prompt_style),
             ]));
 
             if let Some(err) = &error_msg {
                 lines.push(Line::raw(""));
-                lines.push(centered_line(err, w, Style::default().fg(Color::Red)));
+                lines.push(centered_line(err, w, error_style));
             } else {
                 lines.push(Line::raw(""));
                 lines.push(Line::raw(""));
@@ -386,13 +378,9 @@ fn run_lock_screen(
             } else {
                 "i unlock \u{00B7} q quit"
             };
-            lines.push(centered_line(
-                hints,
-                w,
-                Style::default().fg(Color::DarkGray),
-            ));
+            lines.push(centered_line(hints, w, dim_style));
 
-            frame.render_widget(Paragraph::new(lines), area);
+            frame.render_widget(Paragraph::new(lines).style(root_style), area);
 
             if inserting {
                 let cursor_y =
@@ -485,8 +473,10 @@ fn acquire_seed(
             .cached_seed()
             .map(|s| zeroize::Zeroizing::new(*s)));
     }
-    Ok(prompt_password_modal(terminal, events, wallet_name)?
-        .map(|seed| zeroize::Zeroizing::new(*seed.as_bytes())))
+    Ok(
+        prompt_password_modal(terminal, events, wallet_name, app.theme, app.color_mode)?
+            .map(|seed| zeroize::Zeroizing::new(*seed.as_bytes())),
+    )
 }
 
 fn dispatch_unlock_all(
@@ -599,11 +589,28 @@ fn prompt_password_modal(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     events: &TuiEventHandler,
     wallet_name: &str,
+    theme_choice: taolk::config::ThemeChoice,
+    color_mode: taolk::config::ColorMode,
 ) -> Result<Option<taolk::secret::Seed>, Box<dyn std::error::Error>> {
     use ratatui::layout::Rect;
-    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::style::{Modifier, Style};
     use ratatui::text::{Line, Span};
-    use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+    use ratatui::widgets::{Block, Clear, Paragraph};
+    use ui::theme::{apply_mode, theme_for};
+
+    let theme = theme_for(theme_choice);
+    let surface_style = Style::default()
+        .bg(apply_mode(color_mode, theme.surface))
+        .fg(apply_mode(color_mode, theme.text));
+    let title_style = Style::default()
+        .fg(apply_mode(color_mode, theme.accent))
+        .add_modifier(Modifier::BOLD);
+    let border_style = Style::default()
+        .fg(apply_mode(color_mode, theme.border_focus))
+        .add_modifier(Modifier::BOLD);
+    let prompt_style = Style::default().fg(apply_mode(color_mode, theme.text_strong));
+    let error_style = Style::default().fg(apply_mode(color_mode, theme.error));
+    let hint_style = Style::default().fg(apply_mode(color_mode, theme.text_dim));
 
     let mut password = zeroize::Zeroizing::new(String::new());
     let mut error_msg: Option<String> = None;
@@ -616,15 +623,14 @@ fn prompt_password_modal(
             let rect = crate::ui::modal::centered_rect(area, want_w, want_h);
 
             frame.render_widget(Clear, rect);
-            let block = Block::default()
+            let block = Block::bordered()
                 .title(Span::styled(
                     format!(" Confirm password — {wallet_name} "),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
+                    title_style,
                 ))
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan));
+                .border_type(crate::ui::symbols::PANEL_BORDER)
+                .border_style(border_style)
+                .style(surface_style);
             let inner = block.inner(rect);
             frame.render_widget(block, rect);
 
@@ -632,25 +638,22 @@ fn prompt_password_modal(
             lines.push(Line::raw(""));
             lines.push(Line::from(vec![
                 Span::raw("  "),
-                Span::styled("Password: ", Style::default().fg(Color::White)),
+                Span::styled("Password: ", prompt_style),
             ]));
             if let Some(err) = &error_msg {
                 lines.push(Line::raw(""));
                 lines.push(Line::from(vec![
                     Span::raw("  "),
-                    Span::styled(err.clone(), Style::default().fg(Color::Red)),
+                    Span::styled(err.clone(), error_style),
                 ]));
             } else {
                 lines.push(Line::raw(""));
                 lines.push(Line::from(vec![
                     Span::raw("  "),
-                    Span::styled(
-                        "Enter sign \u{00B7} Esc cancel",
-                        Style::default().fg(Color::DarkGray),
-                    ),
+                    Span::styled("Enter sign \u{00B7} Esc cancel", hint_style),
                 ]));
             }
-            frame.render_widget(Paragraph::new(lines), inner);
+            frame.render_widget(Paragraph::new(lines).style(surface_style), inner);
 
             let cursor_x = inner.x + 2 + "Password: ".len() as u16;
             let cursor_y = inner.y + 1;
@@ -709,23 +712,37 @@ fn prompt_password_modal(
 fn draw_connecting(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     node_url: &str,
+    cfg: &config::Config,
 ) -> Result<(), std::io::Error> {
     use ratatui::layout::Alignment;
-    use ratatui::style::{Color, Style};
+    use ratatui::style::Style;
     use ratatui::text::{Line, Span};
-    use ratatui::widgets::Paragraph;
+    use ratatui::widgets::{Block, Paragraph};
+    use ui::theme::{apply_mode, theme_for};
+
+    let theme = theme_for(cfg.ui.theme);
+    let mode = cfg.ui.colors;
+    let root_style = Style::default()
+        .bg(apply_mode(mode, theme.bg))
+        .fg(apply_mode(mode, theme.text));
+    let dim = Style::default().fg(apply_mode(mode, theme.text_dim));
+    let accent = Style::default().fg(apply_mode(mode, theme.accent));
+
     terminal.draw(|frame| {
         let area = frame.area();
+        frame.render_widget(Block::default().style(root_style), area);
         let mut lines: Vec<Line> = Vec::new();
         for _ in 0..(area.height / 2).saturating_sub(1) {
             lines.push(Line::raw(""));
         }
         lines.push(Line::from(vec![
-            Span::styled("Connecting to ", Style::default().fg(Color::DarkGray)),
-            Span::styled(node_url.to_string(), Style::default().fg(Color::Cyan)),
-            Span::styled("\u{2026}", Style::default().fg(Color::DarkGray)),
+            Span::styled("Connecting to ", dim),
+            Span::styled(node_url.to_string(), accent),
+            Span::styled("\u{2026}", dim),
         ]));
-        let p = Paragraph::new(lines).alignment(Alignment::Center);
+        let p = Paragraph::new(lines)
+            .alignment(Alignment::Center)
+            .style(root_style);
         frame.render_widget(p, area);
     })?;
     Ok(())
@@ -735,8 +752,9 @@ fn fetch_fresh_blocking(
     rt: &tokio::runtime::Runtime,
     node_url: &str,
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    cfg: &config::Config,
 ) -> Result<(extrinsic::ChainInfo, String, u32), Box<dyn std::error::Error>> {
-    draw_connecting(terminal, node_url)?;
+    draw_connecting(terminal, node_url, cfg)?;
     let info = rt
         .block_on(extrinsic::fetch_chain_info(node_url))
         .map_err(|e| format!("Failed to fetch chain info: {e}"))?;
@@ -766,7 +784,7 @@ fn run_session(
         match chain_cache::load(node_url).and_then(|s| s.into_chain_info().ok()) {
             Some((info, sym, dec)) => (info, sym, dec, true),
             None => {
-                let (info, sym, dec) = fetch_fresh_blocking(&rt, node_url, terminal)?;
+                let (info, sym, dec) = fetch_fresh_blocking(&rt, node_url, terminal, cfg)?;
                 (info, sym, dec, false)
             }
         };
