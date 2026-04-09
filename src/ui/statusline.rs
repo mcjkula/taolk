@@ -1,5 +1,6 @@
 use crate::app::App;
 use crate::config::ColorMode;
+use crate::ui::chrome;
 use crate::ui::hintbar;
 use crate::ui::theme::{Theme, apply_mode, theme_for};
 use ratatui::Frame;
@@ -126,5 +127,8 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     spans.push(balance_span);
     spans.push(block_span);
 
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(chrome::fill_style(theme, mode)),
+        area,
+    );
 }

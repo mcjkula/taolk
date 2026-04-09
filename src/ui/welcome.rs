@@ -19,6 +19,9 @@ const BANNER: &[&str] = &[
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let theme = theme_for(app.theme);
     let mode = app.color_mode;
+    frame
+        .buffer_mut()
+        .set_style(area, crate::ui::chrome::fill_style(theme, mode));
     let accent = Style::default()
         .fg(apply_mode(mode, theme.accent))
         .add_modifier(Modifier::BOLD);

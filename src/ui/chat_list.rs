@@ -11,6 +11,9 @@ use ratatui::widgets::{List, ListItem};
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let theme = theme_for(app.theme);
     let mode = app.color_mode;
+    frame
+        .buffer_mut()
+        .set_style(area, chrome::fill_style(theme, mode));
     let text_style = Style::default().fg(apply_mode(mode, theme.text));
     let selected_style = Style::default()
         .fg(apply_mode(mode, theme.accent))
@@ -318,7 +321,12 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         .title(" \u{03C4}alk ")
         .title_style(title_style);
 
-    frame.render_widget(List::new(items).block(block), area);
+    frame.render_widget(
+        List::new(items)
+            .block(block)
+            .style(chrome::fill_style(theme, mode)),
+        area,
+    );
 }
 
 use taolk::util::truncate;

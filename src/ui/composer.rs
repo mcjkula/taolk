@@ -271,6 +271,9 @@ fn next_char_boundary(s: &str, mut pos: usize) -> usize {
 pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) {
     use super::input::{compose_hints, styles, visible_input};
     let st = styles(app);
+    let fill =
+        crate::ui::chrome::fill_style(crate::ui::theme::theme_for(app.theme), app.color_mode);
+    frame.buffer_mut().set_style(area, fill);
     let prompt = "> ";
     let prompt_width: usize = 3;
     let w = usize::from(area.width);

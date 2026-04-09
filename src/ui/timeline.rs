@@ -248,6 +248,8 @@ fn date_separator(date_str: &str, s: Styles) -> Line<'static> {
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     app.sender_click_regions.borrow_mut().clear();
+    let fill = crate::ui::chrome::fill_style(theme_for(app.theme), app.color_mode);
+    frame.buffer_mut().set_style(area, fill);
     if app.overlay == Some(Overlay::Compose)
         || (app.overlay == Some(Overlay::Message) && app.msg_recipient.is_none())
     {
@@ -392,7 +394,7 @@ fn render_standalone(
         }
     }
 
-    render_scrolled(frame, lines, 0, area);
+    render_scrolled(frame, app, lines, 0, area);
 }
 
 fn title_header_line(
@@ -440,7 +442,7 @@ fn render_threaded(
     );
     render_pending(&mut lines, app, view);
     record_sender_clicks(app, &pending_clicks, lines.len(), app.scroll_offset, area);
-    render_scrolled(frame, lines, app.scroll_offset, area);
+    render_scrolled(frame, app, lines, app.scroll_offset, area);
 }
 
 fn render_thread(frame: &mut Frame, app: &App, thread_idx: usize, area: Rect) {
@@ -676,7 +678,7 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    render_scrolled(frame, lines, app.scroll_offset, area);
+    render_scrolled(frame, app, lines, app.scroll_offset, area);
 }
 
 fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
@@ -721,7 +723,7 @@ fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
         ]));
     }
 
-    render_scrolled(frame, lines, app.scroll_offset, area);
+    render_scrolled(frame, app, lines, app.scroll_offset, area);
 }
 
 fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
@@ -770,7 +772,7 @@ fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
         ]));
     }
 
-    render_scrolled(frame, lines, 0, area);
+    render_scrolled(frame, app, lines, 0, area);
 }
 
 fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
@@ -832,7 +834,7 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
         ]));
     }
 
-    render_scrolled(frame, lines, app.scroll_offset, area);
+    render_scrolled(frame, app, lines, app.scroll_offset, area);
 }
 
 fn render_pending(lines: &mut Vec<Line<'static>>, app: &App, view: View) {
@@ -1104,12 +1106,19 @@ fn dim(text: &str, s: Styles) -> Line<'static> {
     Line::styled(text.to_string(), Style::default().fg(s.dim))
 }
 
-fn render_scrolled(frame: &mut ratatui::Frame, lines: Vec<Line<'_>>, scroll: usize, area: Rect) {
+fn render_scrolled(
+    frame: &mut ratatui::Frame,
+    app: &App,
+    lines: Vec<Line<'_>>,
+    scroll: usize,
+    area: Rect,
+) {
     let visible = usize::from(area.height);
     let bottom = lines.len().saturating_sub(visible);
     let start = bottom.saturating_sub(scroll);
     let end = (start + visible).min(lines.len());
-    frame.render_widget(Paragraph::new(lines[start..end].to_vec()), area);
+    let fill = crate::ui::chrome::fill_style(theme_for(app.theme), app.color_mode);
+    frame.render_widget(Paragraph::new(lines[start..end].to_vec()).style(fill), area);
 }
 
 fn record_sender_clicks(

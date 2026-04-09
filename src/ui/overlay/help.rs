@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
@@ -113,15 +113,13 @@ const SIDE_MARGIN: usize = 2;
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let theme = theme_for(app.theme);
     let mode = app.color_mode;
-    let root_style = Style::default()
-        .bg(apply_mode(mode, theme.bg))
-        .fg(apply_mode(mode, theme.text));
+    let root_style = crate::ui::chrome::fill_style(theme, mode);
     let accent = Style::default()
         .fg(apply_mode(mode, theme.accent))
         .add_modifier(Modifier::BOLD);
     let dim = Style::default().fg(apply_mode(mode, theme.text_dim));
 
-    frame.render_widget(Block::default().style(root_style), area);
+    frame.buffer_mut().set_style(area, root_style);
 
     let body = Rect {
         x: area.x,

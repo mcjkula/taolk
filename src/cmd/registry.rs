@@ -21,7 +21,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "theme",
-        summary: "Switch theme (mocha|latte|tokyo-night|gruvbox-dark|rose-pine|monochrome)",
+        summary: "Switch theme (terminal|mocha|latte|tokyo-night|gruvbox-dark|rose-pine)",
         run: run_theme,
     },
     Command {

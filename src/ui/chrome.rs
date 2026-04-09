@@ -4,6 +4,18 @@ use crate::ui::theme::{Theme, apply_mode};
 use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Padding};
 
+pub fn fill_style(theme: &Theme, mode: ColorMode) -> Style {
+    Style::default()
+        .bg(apply_mode(mode, theme.bg))
+        .fg(apply_mode(mode, theme.text))
+}
+
+pub fn surface_style(theme: &Theme, mode: ColorMode) -> Style {
+    Style::default()
+        .bg(apply_mode(mode, theme.surface))
+        .fg(apply_mode(mode, theme.text))
+}
+
 pub fn panel(theme: &Theme, mode: ColorMode, focused: bool) -> Block<'static> {
     let border_color = if focused {
         theme.border_focus

@@ -5,34 +5,34 @@ use std::path::PathBuf;
 #[serde(rename_all = "kebab-case")]
 pub enum ThemeChoice {
     #[default]
+    Terminal,
     Mocha,
     Latte,
     TokyoNight,
     GruvboxDark,
     RosePine,
-    Monochrome,
 }
 
 impl ThemeChoice {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Terminal => "terminal",
             Self::Mocha => "mocha",
             Self::Latte => "latte",
             Self::TokyoNight => "tokyo-night",
             Self::GruvboxDark => "gruvbox-dark",
             Self::RosePine => "rose-pine",
-            Self::Monochrome => "monochrome",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
+            "terminal" => Some(Self::Terminal),
             "mocha" => Some(Self::Mocha),
             "latte" => Some(Self::Latte),
             "tokyo-night" => Some(Self::TokyoNight),
             "gruvbox-dark" => Some(Self::GruvboxDark),
             "rose-pine" => Some(Self::RosePine),
-            "monochrome" => Some(Self::Monochrome),
             _ => None,
         }
     }
@@ -278,8 +278,8 @@ pub const KEYS: &[KeyDef] = &[
         key: "ui.theme",
         section: "ui",
         field: "theme",
-        description: "Color theme (mocha, latte, tokyo-night, gruvbox-dark, rose-pine, monochrome)",
-        default_display: "mocha",
+        description: "Color theme (terminal, mocha, latte, tokyo-night, gruvbox-dark, rose-pine)",
+        default_display: "terminal",
     },
     KeyDef {
         key: "ui.icons",
@@ -430,7 +430,7 @@ pub fn set_key(key: &str, raw: &[String]) -> Result<String, ConfigError> {
         "ui.theme" => {
             let s = raw.first().map(String::as_str).unwrap_or("");
             ThemeChoice::parse(s).ok_or_else(|| ConfigError::InvalidValue {
-                expected: "mocha|latte|tokyo-night|gruvbox-dark|rose-pine|monochrome".into(),
+                expected: "terminal|mocha|latte|tokyo-night|gruvbox-dark|rose-pine".into(),
                 got: s.into(),
             })?;
             toml::Value::String(s.into())

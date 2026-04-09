@@ -1,4 +1,5 @@
 use crate::app::{App, Focus, Overlay};
+use crate::ui::chrome;
 use crate::ui::theme::{apply_mode, theme_for};
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -233,6 +234,8 @@ pub(super) fn compose_hints(width: usize, multiline: bool, s: Styles) -> Line<'s
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let st = styles(app);
+    let fill = chrome::fill_style(theme_for(app.theme), app.color_mode);
+    frame.buffer_mut().set_style(area, fill);
     let sep = Line::styled(
         "\u{2500}".repeat(usize::from(area.width)),
         Style::default().fg(st.dim),

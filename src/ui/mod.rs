@@ -28,7 +28,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::Paragraph;
 
 pub const MIN_WIDTH: u16 = 100;
 pub const MIN_HEIGHT: u16 = 28;
@@ -39,10 +39,8 @@ pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
     let theme = theme::theme_for(app.theme);
     let mode = app.color_mode;
-    let root_style = Style::default()
-        .bg(theme::apply_mode(mode, theme.bg))
-        .fg(theme::apply_mode(mode, theme.text));
-    frame.render_widget(Block::default().style(root_style), area);
+    let root_style = chrome::fill_style(theme, mode);
+    frame.buffer_mut().set_style(area, root_style);
 
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
         render_too_small(frame, app, area);

@@ -158,31 +158,40 @@ pub const ROSE_PINE: Theme = Theme {
     ],
 };
 
-pub const MONOCHROME: Theme = Theme {
+pub const TERMINAL: Theme = Theme {
     bg: Color::Reset,
     surface: Color::Reset,
     text: Color::Reset,
-    text_dim: Color::Reset,
-    text_strong: Color::Reset,
-    border: Color::Reset,
-    border_focus: Color::Reset,
-    accent: Color::Reset,
-    accent_alt: Color::Reset,
+    text_dim: Color::DarkGray,
+    text_strong: Color::White,
+    border: Color::DarkGray,
+    border_focus: Color::Cyan,
+    accent: Color::Cyan,
+    accent_alt: Color::Magenta,
     error: Color::Red,
     warning: Color::Yellow,
     success: Color::Green,
-    timestamp: Color::Reset,
-    sender_rotation: [Color::Reset; 8],
+    timestamp: Color::DarkGray,
+    sender_rotation: [
+        Color::Cyan,
+        Color::Green,
+        Color::Magenta,
+        Color::Blue,
+        Color::Yellow,
+        Color::LightCyan,
+        Color::LightMagenta,
+        Color::LightBlue,
+    ],
 };
 
 pub const fn theme_for(choice: ThemeChoice) -> &'static Theme {
     match choice {
+        ThemeChoice::Terminal => &TERMINAL,
         ThemeChoice::Mocha => &MOCHA,
         ThemeChoice::Latte => &LATTE,
         ThemeChoice::TokyoNight => &TOKYO_NIGHT,
         ThemeChoice::GruvboxDark => &GRUVBOX_DARK,
         ThemeChoice::RosePine => &ROSE_PINE,
-        ThemeChoice::Monochrome => &MONOCHROME,
     }
 }
 
@@ -219,12 +228,12 @@ mod tests {
     #[test]
     fn every_choice_maps_to_its_theme() {
         for (choice, expected_border) in [
+            (ThemeChoice::Terminal, TERMINAL.border),
             (ThemeChoice::Mocha, MOCHA.border),
             (ThemeChoice::Latte, LATTE.border),
             (ThemeChoice::TokyoNight, TOKYO_NIGHT.border),
             (ThemeChoice::GruvboxDark, GRUVBOX_DARK.border),
             (ThemeChoice::RosePine, ROSE_PINE.border),
-            (ThemeChoice::Monochrome, MONOCHROME.border),
         ] {
             assert_eq!(theme_for(choice).border, expected_border);
         }
@@ -256,9 +265,21 @@ mod tests {
     }
 
     #[test]
-    fn monochrome_preserves_alert_semantics() {
-        assert_eq!(MONOCHROME.error, Color::Red);
-        assert_eq!(MONOCHROME.warning, Color::Yellow);
-        assert_eq!(MONOCHROME.success, Color::Green);
+    fn terminal_theme_inherits_bg_and_text() {
+        assert_eq!(TERMINAL.bg, Color::Reset);
+        assert_eq!(TERMINAL.text, Color::Reset);
+    }
+
+    #[test]
+    fn terminal_theme_uses_ansi_semantics() {
+        assert_eq!(TERMINAL.error, Color::Red);
+        assert_eq!(TERMINAL.warning, Color::Yellow);
+        assert_eq!(TERMINAL.success, Color::Green);
+        assert_eq!(TERMINAL.accent, Color::Cyan);
+    }
+
+    #[test]
+    fn default_choice_is_terminal() {
+        assert_eq!(ThemeChoice::default(), ThemeChoice::Terminal);
     }
 }

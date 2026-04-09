@@ -171,6 +171,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         Some(s) => s,
         None => return,
     };
+    let surface = chrome::surface_style(theme, mode);
     let prompt = Line::from(vec![
         Span::styled(" > ", Style::default().fg(apply_mode(mode, theme.accent))),
         Span::styled(
@@ -178,7 +179,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             Style::default().fg(apply_mode(mode, theme.text)),
         ),
     ]);
-    frame.render_widget(Paragraph::new(prompt), rows[0]);
+    frame.render_widget(Paragraph::new(prompt).style(surface), rows[0]);
 
     let selected_style = Style::default()
         .fg(apply_mode(mode, theme.accent))
@@ -208,7 +209,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             ListItem::new(line)
         })
         .collect();
-    frame.render_widget(List::new(items), rows[1]);
+    frame.render_widget(List::new(items).style(surface), rows[1]);
 
     let cursor_x = rows[0].x + 3 + u16::try_from(state.query.cursor()).unwrap_or(u16::MAX);
     let cursor_y = rows[0].y;
