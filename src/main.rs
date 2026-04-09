@@ -1423,12 +1423,74 @@ fn handle_key(
             Overlay::CreateGroupMembers => handle_create_group_members_key(app, key, send_tx),
             Overlay::Search => handle_search_key(app, key),
             Overlay::SenderPicker => handle_sender_picker_key(app, key),
+            Overlay::CommandPalette => handle_palette_key(app, key),
+            Overlay::FuzzyJump => handle_jump_key(app, key),
         }
         return;
+    }
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('p') => {
+                app.open_palette();
+                return;
+            }
+            KeyCode::Char('j') => {
+                app.open_jump();
+                return;
+            }
+            _ => {}
+        }
     }
     match app.focus {
         Focus::Composer => handle_composer_key(app, key),
         Focus::Timeline => handle_timeline_key(app, key, send_tx),
+    }
+}
+
+fn handle_palette_key(app: &mut App, key: crossterm::event::KeyEvent) {
+    use ui::overlay::palette::Action;
+    let action = match app.palette.as_mut() {
+        Some(state) => state.handle_key(key),
+        None => {
+            app.close_overlay();
+            return;
+        }
+    };
+    match action {
+        Action::None => {}
+        Action::Close => app.close_palette(),
+        Action::Run(cmd, args) => {
+            let args_vec: Vec<&str> = args.split_whitespace().collect();
+            let run = cmd.run;
+            app.close_palette();
+            if let Err(e) = run(app, &args_vec) {
+                app.set_error(e);
+            }
+        }
+    }
+}
+
+fn handle_jump_key(app: &mut App, key: crossterm::event::KeyEvent) {
+    use ui::overlay::jump::Action;
+    let action = match app.jump.as_mut() {
+        Some(state) => state.handle_key(key),
+        None => {
+            app.close_overlay();
+            return;
+        }
+    };
+    match action {
+        Action::None => {}
+        Action::Close => app.close_jump(),
+        Action::Jump(view) => {
+            app.view = view;
+            app.focus = app.default_focus_for_view();
+            app.scroll_offset = 0;
+            if app.focus == Focus::Composer {
+                app.load_draft();
+            }
+            app.close_jump();
+        }
     }
 }
 

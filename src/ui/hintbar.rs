@@ -49,6 +49,16 @@ fn pairs_for(app: &App) -> &'static [(&'static str, &'static str)] {
             ("Enter", "copy"),
             ("Esc", "cancel"),
         ],
+        Some(Overlay::CommandPalette) => &[
+            ("\u{2191}\u{2193}", "nav"),
+            ("Enter", "run"),
+            ("Esc", "cancel"),
+        ],
+        Some(Overlay::FuzzyJump) => &[
+            ("\u{2191}\u{2193}", "nav"),
+            ("Enter", "jump"),
+            ("Esc", "cancel"),
+        ],
         None => match app.focus {
             Focus::Composer => &[("Enter", "send"), ("C-n", "newline"), ("Esc", "leave")],
             Focus::Timeline => &[

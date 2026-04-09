@@ -1,10 +1,10 @@
 pub mod chat_list;
 pub mod chrome;
 pub mod composer;
-mod help;
 pub mod hintbar;
 mod input;
 pub mod modal;
+pub mod overlay;
 pub mod statusline;
 pub mod symbols;
 pub mod theme;
@@ -43,7 +43,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 
     if app.overlay == Some(Overlay::Help) {
-        help::render(frame, app, area);
+        overlay::help::render(frame, app, area);
         return;
     }
 
@@ -68,6 +68,12 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 
     statusline::render(frame, app, status_area);
+
+    match app.overlay {
+        Some(Overlay::CommandPalette) => overlay::palette::render(frame, app),
+        Some(Overlay::FuzzyJump) => overlay::jump::render(frame, app),
+        _ => {}
+    }
 }
 
 fn render_main_panel(frame: &mut Frame, app: &App, area: Rect) {

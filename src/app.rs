@@ -1,4 +1,6 @@
 use crate::ui::composer::TextBuffer;
+use crate::ui::overlay::jump::JumpState;
+use crate::ui::overlay::palette::PaletteState;
 use std::cell::{Cell, RefCell};
 use std::time::Instant;
 use taolk::audio::Audio;
@@ -24,6 +26,8 @@ pub enum Overlay {
     CreateGroupMembers,
     Search,
     SenderPicker,
+    CommandPalette,
+    FuzzyJump,
 }
 
 pub struct LockedOutbound {
@@ -34,7 +38,7 @@ pub struct LockedOutbound {
     pub remark_bytes: samp::RemarkBytes,
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum View {
     Inbox,
     Outbox,
@@ -90,6 +94,8 @@ pub struct App {
     pub picker_senders: Vec<(String, Option<Pubkey>)>,
     pub sender_click_regions: RefCell<Vec<(u16, u16, u16, String)>>,
     pub connection: ConnState,
+    pub palette: Option<PaletteState>,
+    pub jump: Option<JumpState>,
 }
 
 impl App {
@@ -140,7 +146,29 @@ impl App {
             picker_senders: Vec::new(),
             sender_click_regions: RefCell::new(Vec::new()),
             connection: ConnState::Connected,
+            palette: None,
+            jump: None,
         }
+    }
+
+    pub fn open_palette(&mut self) {
+        self.palette = Some(PaletteState::new());
+        self.enter_overlay(Overlay::CommandPalette);
+    }
+
+    pub fn close_palette(&mut self) {
+        self.palette = None;
+        self.close_overlay();
+    }
+
+    pub fn open_jump(&mut self) {
+        self.jump = Some(JumpState::new(self));
+        self.enter_overlay(Overlay::FuzzyJump);
+    }
+
+    pub fn close_jump(&mut self) {
+        self.jump = None;
+        self.close_overlay();
     }
 
     pub fn set_status(&mut self, msg: impl Into<String>) {

@@ -421,6 +421,17 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             };
             frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), input_line]), area);
         }
+        Some(Overlay::CommandPalette) | Some(Overlay::FuzzyJump) => {
+            let hints = render_hints(
+                &[
+                    ("\u{2191}\u{2193}", "navigate"),
+                    ("Enter", "select"),
+                    ("Esc", "cancel"),
+                ],
+                usize::from(area.width),
+            );
+            frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), hints]), area);
+        }
     }
 }
 
