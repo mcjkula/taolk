@@ -651,12 +651,12 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
         );
         let name_str = format!("#{}", info.name);
 
-        let name_color = if subscribed {
-            palette::MUTED
-        } else if selected {
+        let name_color = if selected {
             Color::Reset
-        } else {
+        } else if !subscribed {
             palette::ACCENT
+        } else {
+            Color::Reset
         };
         let name_mod = if selected {
             Modifier::BOLD
