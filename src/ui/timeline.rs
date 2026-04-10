@@ -286,8 +286,8 @@ fn render_standalone(
                 .format(&app.config.date_format)
                 .to_string();
             let (type_icon, type_label, badge_bg) = match msg.content_type {
-                0x00 => (super::icons::PUBLIC, "public", Color::Cyan),
-                0x02 => (super::icons::ENCRYPTED, "encrypted", Color::Magenta),
+                0x10 => (super::icons::PUBLIC, "public", Color::Cyan),
+                0x11 => (super::icons::ENCRYPTED, "encrypted", Color::Magenta),
                 other => (
                     super::icons::BLOCK,
                     &*format!("0x{other:02x}"),
