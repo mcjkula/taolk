@@ -134,6 +134,9 @@ fn run_group(app: &mut App, _: &[&str]) -> CmdResult {
         return Err("busy sending".into());
     }
     app.pending_group_members.clear();
+    let my_pk = app.session.pubkey();
+    let my_ss58 = app.session.my_ss58.clone();
+    app.pending_group_members.push((my_pk, my_ss58));
     app.contact_idx = 0;
     app.enter_overlay(Overlay::CreateGroupMembers);
     Ok(())

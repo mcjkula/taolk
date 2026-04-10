@@ -798,14 +798,19 @@ fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
 fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
     let contacts = app.filtered_contacts();
     let total = app.session.known_contacts().len();
-    let selected_count = app.pending_group_members.len();
+    let my_pubkey = app.session.pubkey();
+    let others_selected = app
+        .pending_group_members
+        .iter()
+        .filter(|(pk, _)| *pk != my_pubkey)
+        .count();
     let w = usize::from(area.width);
 
     let mut lines: Vec<Line> = vec![
         header_line(
             super::icons::GROUPS,
             "Select Members",
-            &format!("{selected_count} selected, {total} known"),
+            &format!("{others_selected} selected, {total} known"),
             w,
         ),
         separator(area.width),
@@ -820,22 +825,17 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     for (i, (_, pubkey)) in contacts.iter().enumerate() {
+        if *pubkey == my_pubkey {
+            continue;
+        }
         let cursor = i == app.contact_idx % contacts.len().max(1) && app.input.is_empty();
         let is_member = app.pending_group_members.iter().any(|(pk, _)| pk == pubkey);
-        let is_self = *pubkey == app.session.pubkey();
         let full_addr = taolk::util::ss58_from_pubkey(pubkey);
-        let label = if is_self {
-            format!("{full_addr} (You)")
-        } else {
-            full_addr
-        };
         let addr_max = w.saturating_sub(6);
 
         let indicator = if cursor { "> " } else { "  " };
         let check = if is_member { "\u{F012C} " } else { "  " };
-        let addr_color = if is_self {
-            palette::MUTED
-        } else if cursor {
+        let addr_color = if cursor {
             Color::Reset
         } else if is_member {
             palette::SUCCESS
@@ -852,7 +852,7 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(indicator, Style::default().fg(palette::ACCENT)),
             Span::styled(check, Style::default().fg(palette::SUCCESS)),
             Span::styled(
-                truncate(&label, addr_max),
+                truncate(&full_addr, addr_max),
                 Style::default().fg(addr_color).add_modifier(addr_mod),
             ),
         ]));
