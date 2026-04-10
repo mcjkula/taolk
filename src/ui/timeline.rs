@@ -340,7 +340,7 @@ fn render_standalone(
 
     if let Some(text) = pending {
         let spinner = app.spinner_16();
-        let (type_icon, type_label) = if app.msg_type == Some(0x01) {
+        let (type_icon, type_label) = if app.pending_msg_type == Some(0x01) {
             (super::icons::PUBLIC, "public")
         } else {
             (super::icons::ENCRYPTED, "encrypted")

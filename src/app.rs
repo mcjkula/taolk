@@ -63,6 +63,7 @@ pub struct App {
     pub pending_text: Option<String>,
     pub pending_fee: Option<String>,
     pub pending_view: Option<View>,
+    pub pending_msg_type: Option<u8>,
     pub pending_send_text: Option<String>,
     pub locked_outbound: Vec<LockedOutbound>,
     pub pending_unlock_all: bool,
@@ -115,6 +116,7 @@ impl App {
             pending_text: None,
             pending_fee: None,
             pending_view: None,
+            pending_msg_type: None,
             pending_send_text: None,
             locked_outbound: Vec::new(),
             pending_unlock_all: false,
@@ -528,6 +530,7 @@ impl App {
         self.pending_text = None;
         self.pending_fee = None;
         self.pending_view = None;
+        self.pending_msg_type = None;
         self.pending_channel_name = None;
         self.pending_channel_desc = None;
         self.pending_group_members.clear();

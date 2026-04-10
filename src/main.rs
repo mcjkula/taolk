@@ -2348,6 +2348,7 @@ fn handle_confirm_key(
                     }
                 }
             }
+            app.pending_msg_type = app.msg_type;
             app.clear_standalone();
             let view = app.pending_view;
             let text = app.pending_text.take();
