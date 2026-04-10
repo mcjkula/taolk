@@ -119,6 +119,10 @@ enum Commands {
         #[command(subcommand)]
         action: cmd::config::ConfigAction,
     },
+    Db {
+        #[command(subcommand)]
+        action: cmd::db::DbAction,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -128,6 +132,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Some(Commands::Wallet { action }) => cmd::wallet::run(action),
         Some(Commands::Config { action }) => cmd::config::run(action),
+        Some(Commands::Db { action }) => cmd::db::run(action),
         None => {
             let node = if cli.node != "wss://entrypoint-finney.opentensor.ai:443" {
                 cli.node
