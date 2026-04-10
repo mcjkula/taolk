@@ -26,13 +26,17 @@ fn pairs_for(app: &App) -> &'static [(&'static str, &'static str)] {
             ("Enter", "select"),
             ("Esc", "cancel"),
         ],
-        Some(Overlay::Message) => &[
-            ("\u{F005D}\u{F0045}", "nav"),
-            ("Enter", "select"),
-            ("p", "public"),
-            ("e", "encrypted"),
-            ("Esc", "cancel"),
-        ],
+        Some(Overlay::Message) => {
+            if app.msg_recipient.is_some() {
+                &[("p", "public"), ("e", "encrypted"), ("Esc", "cancel")]
+            } else {
+                &[
+                    ("\u{F005D}\u{F0045}", "nav"),
+                    ("Enter", "select"),
+                    ("Esc", "cancel"),
+                ]
+            }
+        }
         Some(Overlay::CreateChannel) => &[("Enter", "next"), ("Esc", "cancel")],
         Some(Overlay::CreateChannelDesc) => &[("Enter", "create"), ("Esc", "back")],
         Some(Overlay::CreateGroupMembers) => &[
@@ -72,6 +76,13 @@ fn pairs_for(app: &App) -> &'static [(&'static str, &'static str)] {
                     ("C-j", "jump"),
                     ("?", "help"),
                     ("q", "quit"),
+                ],
+                View::ChannelDir => &[
+                    ("j/k", "browse"),
+                    ("Enter", "subscribe"),
+                    ("+", "create"),
+                    ("Esc", "back"),
+                    ("?", "help"),
                 ],
                 _ => &[("/", "cmd"), ("C-j", "jump"), ("?", "help"), ("q", "quit")],
             },

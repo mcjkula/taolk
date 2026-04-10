@@ -633,6 +633,9 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
             Modifier::empty()
         };
 
+        if i > 0 {
+            lines.push(Line::raw(""));
+        }
         lines.push(Line::from(vec![
             Span::styled(indicator, Style::default().fg(palette::ACCENT)),
             Span::styled("  ", Style::default().fg(palette::MUTED)),
@@ -645,9 +648,9 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
         ]));
 
         if !info.description.is_empty() {
-            let desc_max = (usize::from(area.width)).saturating_sub(5);
+            let desc_max = (usize::from(area.width)).saturating_sub(7);
             lines.push(Line::from(vec![
-                Span::raw("    "),
+                Span::raw("      "),
                 Span::styled(
                     truncate(&info.description, desc_max),
                     Style::default().fg(palette::MUTED),

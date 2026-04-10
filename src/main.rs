@@ -338,7 +338,7 @@ fn run_lock_screen(
                 lines.push(centered_spans(spans, w));
             } else {
                 lines.push(centered_line(
-                    &format!("{} {}", ui::icons::WALLET, current_wallet),
+                    &format!("{} Wallet: {}", ui::icons::WALLET, current_wallet),
                     w,
                     active_style,
                 ));
@@ -1797,7 +1797,7 @@ fn handle_composer_key(app: &mut App, key: crossterm::event::KeyEvent) {
 
 fn resolve_address_input(app: &App) -> String {
     let contacts = app.filtered_contacts();
-    if !contacts.is_empty() && !app.input.is_empty() {
+    if !contacts.is_empty() {
         let idx = app.contact_idx % contacts.len();
         let (_, pubkey) = &contacts[idx];
         util::ss58_from_pubkey(pubkey)
