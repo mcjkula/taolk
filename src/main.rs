@@ -337,22 +337,27 @@ fn run_lock_screen(
 
                 lines.push(centered_spans(spans, w));
             } else {
-                lines.push(centered_line(&current_wallet, w, active_style));
+                lines.push(centered_line(
+                    &format!("{} {}", ui::icons::WALLET, current_wallet),
+                    w,
+                    active_style,
+                ));
             }
 
             lines.push(Line::raw(""));
 
-            let prompt = "Password: ";
+            let prompt = format!("{} Password: ", ui::icons::KEY);
+            let prompt_cols = prompt.chars().count();
             let prompt_style = if inserting {
                 prompt_active_style
             } else {
                 prompt_idle_style
             };
-            let pp_str = horizontal_pad(prompt.len(), w);
+            let pp_str = horizontal_pad(prompt_cols, w);
             let prompt_x_offset = pp_str.len();
             lines.push(Line::from(vec![
                 Span::raw(pp_str),
-                Span::styled(prompt, prompt_style),
+                Span::styled(prompt.clone(), prompt_style),
             ]));
 
             if let Some(err) = &error_msg {
@@ -379,7 +384,7 @@ fn run_lock_screen(
                     area.y + u16::try_from(top_pad).unwrap_or(u16::MAX) + 7 + 1 + 1 + 2 + 1 + 1;
                 let cursor_x = area.x
                     + u16::try_from(prompt_x_offset).unwrap_or(u16::MAX)
-                    + u16::try_from(prompt.len()).unwrap_or(u16::MAX);
+                    + u16::try_from(prompt_cols).unwrap_or(u16::MAX);
                 if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
                     frame.set_cursor_position((cursor_x, cursor_y));
                 }
@@ -617,11 +622,13 @@ fn prompt_password_modal(
             let inner = block.inner(rect);
             frame.render_widget(block, rect);
 
+            let prompt_text = format!("{} Password: ", ui::icons::KEY);
+            let prompt_cols = u16::try_from(prompt_text.chars().count()).unwrap_or(u16::MAX);
             let mut lines: Vec<Line> = Vec::new();
             lines.push(Line::raw(""));
             lines.push(Line::from(vec![
                 Span::raw("  "),
-                Span::styled("Password: ", prompt_style),
+                Span::styled(prompt_text, prompt_style),
             ]));
             if let Some(err) = &error_msg {
                 lines.push(Line::raw(""));
@@ -638,7 +645,7 @@ fn prompt_password_modal(
             }
             frame.render_widget(Paragraph::new(lines), inner);
 
-            let cursor_x = inner.x + 2 + "Password: ".len() as u16;
+            let cursor_x = inner.x + 2 + prompt_cols;
             let cursor_y = inner.y + 1;
             if cursor_x < inner.x + inner.width && cursor_y < inner.y + inner.height {
                 frame.set_cursor_position(Rect {

@@ -370,17 +370,31 @@ fn render_standalone(
     render_scrolled(frame, lines, 0, area);
 }
 
+fn id_block_str(id_str: &str) -> String {
+    if id_str.is_empty() {
+        String::new()
+    } else {
+        format!("{} {}", super::icons::BLOCK, id_str)
+    }
+}
+
+fn id_block_reserve(id_str: &str) -> usize {
+    use unicode_width::UnicodeWidthStr;
+    if id_str.is_empty() {
+        0
+    } else {
+        UnicodeWidthStr::width(id_block_str(id_str).as_str()) + 1
+    }
+}
+
 fn title_header_line(
     title: String,
     title_color: Color,
     id_str: String,
     width: usize,
 ) -> Line<'static> {
-    let id_reserve = if id_str.is_empty() {
-        0
-    } else {
-        id_str.len() + 1
-    };
+    let id_block = id_block_str(&id_str);
+    let id_reserve = id_block_reserve(&id_str);
     let title_display_width = title.chars().count();
     let left_used = 1 + title_display_width;
     let pad = width.saturating_sub(left_used + id_reserve);
@@ -392,7 +406,7 @@ fn title_header_line(
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" ".repeat(pad)),
-        Span::styled(id_str, Style::default().fg(palette::MUTED)),
+        Span::styled(id_block, Style::default().fg(palette::MUTED)),
     ])
 }
 
@@ -433,11 +447,7 @@ fn render_thread(frame: &mut Frame, app: &App, thread_idx: usize, area: Rect) {
             thread.thread_ref.index().get()
         )
     };
-    let id_reserve = if id_str.is_empty() {
-        0
-    } else {
-        id_str.len() + 1
-    };
+    let id_reserve = id_block_reserve(&id_str);
     let peer = truncate(&thread.peer_ss58, w.saturating_sub(2 + id_reserve)).to_string();
 
     let lines = vec![
@@ -467,7 +477,7 @@ fn render_channel(frame: &mut Frame, app: &App, chan_idx: usize, area: Rect) {
         channel.channel_ref.block().get(),
         channel.channel_ref.index().get()
     );
-    let id_reserve = id_str.len() + 1;
+    let id_reserve = id_block_reserve(&id_str);
     let title = format!(
         "#{}",
         truncate(&channel.name, w.saturating_sub(2 + id_reserve))
@@ -511,11 +521,7 @@ fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
             group.group_ref.index().get()
         )
     };
-    let id_reserve = if id_str.is_empty() {
-        0
-    } else {
-        id_str.len() + 1
-    };
+    let id_reserve = id_block_reserve(&id_str);
     let title = group_member_title(group, app, w.saturating_sub(2 + id_reserve));
 
     let lines = vec![
@@ -600,7 +606,8 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
         let indicator = if selected { "> " } else { "  " };
         let check = if subscribed { " \u{F012C}" } else { "" };
         let id_str = format!(
-            " {}:{}",
+            " {} {}:{}",
+            super::icons::BLOCK,
             info.channel_ref.block().get(),
             info.channel_ref.index().get()
         );

@@ -31,6 +31,13 @@ pub mod icons {
     pub const LOCK_CLOCK: &str = "\u{F097F}";
     pub const HISTORY: &str = "\u{F02DA}";
 
+    // Chain primitives
+    pub const BLOCK: &str = "\u{F01A7}";
+
+    // Lock screen
+    pub const WALLET: &str = "\u{F0BDD}";
+    pub const KEY: &str = "\u{F030B}";
+
     // Navigation
     // ARROW_UP/DOWN/LEFT/RIGHT are inlined at call sites because Rust const rules
     // forbid combo string composition from const refs. Codepoints:

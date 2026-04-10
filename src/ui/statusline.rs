@@ -75,7 +75,11 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     };
     let balance_span = Span::styled(balance_str.clone(), balance_style);
 
-    let block_str = format!(" #{} ", format_number(u128::from(app.session.block_number)));
+    let block_str = format!(
+        " {} {} ",
+        icons::BLOCK,
+        format_number(u128::from(app.session.block_number))
+    );
     let block_fresh = app.frame.wrapping_sub(app.block_changed_at) < highlight_frames;
     let block_style = if block_fresh {
         palette::strong()
