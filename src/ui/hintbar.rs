@@ -64,7 +64,7 @@ fn pairs_for(app: &App) -> &'static [(&'static str, &'static str)] {
         None => match app.focus {
             Focus::Composer => &[
                 ("Enter", "send"),
-                ("S-Enter", "newline"),
+                ("S-Ent", "newline"),
                 ("/", "cmd"),
                 ("Esc", "leave"),
             ],

@@ -72,7 +72,7 @@ const CARDS: &[Card] = &[
         glyph: icons::DRAFT,
         entries: &[
             ("Enter", "Send (preview fee)"),
-            ("C-n", "Insert newline"),
+            ("S-Enter", "Insert newline"),
             ("Esc", "Save draft and exit"),
             ("C-\u{F004D} / C-\u{F0054}", "Jump by word"),
             ("Backspace", "Delete left"),
@@ -89,7 +89,6 @@ const CARDS: &[Card] = &[
         entries: &[
             ("type", "Filter or paste SS58"),
             ("\u{F005D} / \u{F0045}", "Pick contact"),
-            ("C-n", "Swap public/encrypted"),
             ("Enter", "Confirm and compose"),
             ("Esc", "Cancel"),
         ],
