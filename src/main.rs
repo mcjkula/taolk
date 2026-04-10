@@ -793,12 +793,15 @@ fn run_session(
         db,
     );
     let audio = audio::Audio::from_config(&cfg.notifications);
-    let mut app = App::new(session, audio);
+    let config = app::AppConfig {
+        sidebar_width: cfg.ui.sidebar_width,
+        timestamp_format: cfg.ui.timestamp_format.clone(),
+        date_format: cfg.ui.date_format.clone(),
+        audio,
+    };
+    let mut app = App::new(session, config);
     app.session.token_symbol = token_symbol;
     app.session.token_decimals = token_decimals;
-    app.sidebar_width = cfg.ui.sidebar_width;
-    app.timestamp_format = cfg.ui.timestamp_format.clone();
-    app.date_format = cfg.ui.date_format.clone();
     app.session.load_from_db();
 
     let event_tx = events.core_sender();
@@ -908,7 +911,7 @@ fn run_session(
             )?;
         }
 
-        terminal.draw(|frame| ui::render(frame, &app))?;
+        terminal.draw(|frame| ui::render(frame, &mut app))?;
 
         if cfg.security.lock_timeout > 0 && last_activity.elapsed() > lock_timeout {
             return Ok(SessionExit::Lock);
@@ -1043,7 +1046,7 @@ fn run_session(
                 }
 
                 if app.sound_armed && !is_mine {
-                    app.audio.play(audio::Sound::Dm);
+                    app.config.audio.play(audio::Sound::Dm);
                 }
             }
             TuiEvent::Core(event::Event::NewChannelMessage {
@@ -1084,7 +1087,7 @@ fn run_session(
                     } else {
                         audio::Sound::Ambient
                     };
-                    app.audio.play(sound);
+                    app.config.audio.play(sound);
                 }
             }
             TuiEvent::Core(event::Event::ChannelDiscovered {
@@ -1145,7 +1148,7 @@ fn run_session(
                     } else {
                         audio::Sound::Ambient
                     };
-                    app.audio.play(sound);
+                    app.config.audio.play(sound);
                 }
             }
             TuiEvent::Core(event::Event::SubmitRemark { remark }) => {
@@ -1410,7 +1413,7 @@ fn handle_mouse(
 
     let term_size = terminal.size().unwrap_or_default();
     let sidebar_width: u16 = if app.show_sidebar {
-        app.sidebar_width
+        app.config.sidebar_width
     } else {
         0
     };
@@ -1422,7 +1425,6 @@ fn handle_mouse(
         MouseEventKind::Down(MouseButton::Left) => {
             let hit = app
                 .sender_click_regions
-                .borrow()
                 .iter()
                 .find(|(row, c0, c1, _)| *row == y && x >= *c0 && x < *c1)
                 .map(|(_, _, _, ss58)| ss58.clone());
@@ -1545,28 +1547,27 @@ fn handle_jump_key(app: &mut App, key: crossterm::event::KeyEvent) {
 }
 
 fn handle_help_key(app: &mut App, key: crossterm::event::KeyEvent) {
-    let cur = app.help_scroll.get();
     match key.code {
         KeyCode::Char('j') | KeyCode::Down => {
-            app.help_scroll.set(cur.saturating_add(1));
+            app.help_scroll = app.help_scroll.saturating_add(1);
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            app.help_scroll.set(cur.saturating_sub(1));
+            app.help_scroll = app.help_scroll.saturating_sub(1);
         }
         KeyCode::PageDown => {
-            app.help_scroll.set(cur.saturating_add(10));
+            app.help_scroll = app.help_scroll.saturating_add(10);
         }
         KeyCode::PageUp => {
-            app.help_scroll.set(cur.saturating_sub(10));
+            app.help_scroll = app.help_scroll.saturating_sub(10);
         }
         KeyCode::Home => {
-            app.help_scroll.set(0);
+            app.help_scroll = 0;
         }
         KeyCode::End | KeyCode::Char('G') => {
-            app.help_scroll.set(u16::MAX);
+            app.help_scroll = u16::MAX;
         }
         _ => {
-            app.help_scroll.set(0);
+            app.help_scroll = 0;
             app.close_overlay();
         }
     }

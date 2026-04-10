@@ -1,12 +1,18 @@
 use crate::ui::composer::TextBuffer;
 use crate::ui::overlay::jump::JumpState;
 use crate::ui::overlay::palette::PaletteState;
-use std::cell::{Cell, RefCell};
 use std::time::Instant;
 use taolk::audio::Audio;
 use taolk::event::ConnState;
 use taolk::session::Session;
 use taolk::types::{BlockRef, Pubkey};
+
+pub struct AppConfig {
+    pub sidebar_width: u16,
+    pub timestamp_format: String,
+    pub date_format: String,
+    pub audio: Audio,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Focus {
@@ -75,7 +81,7 @@ pub struct App {
     pub msg_recipient: Option<(Pubkey, String)>,
     pub msg_type: Option<u8>,
     pub scroll_offset: usize,
-    pub help_scroll: Cell<u16>,
+    pub help_scroll: u16,
     pub quit_confirm: bool,
     pub search_query: String,
     pub contact_idx: usize,
@@ -86,20 +92,17 @@ pub struct App {
     pub block_changed_at: u32,
     pub balance_changed_at: u32,
     pub balance_decreased: bool,
-    pub sidebar_width: u16,
-    pub timestamp_format: String,
-    pub date_format: String,
-    pub audio: Audio,
+    pub config: AppConfig,
     pub sound_armed: bool,
     pub picker_senders: Vec<(String, Option<Pubkey>)>,
-    pub sender_click_regions: RefCell<Vec<(u16, u16, u16, String)>>,
+    pub sender_click_regions: Vec<(u16, u16, u16, String)>,
     pub connection: ConnState,
     pub palette: Option<PaletteState>,
     pub jump: Option<JumpState>,
 }
 
 impl App {
-    pub fn new(session: Session, audio: Audio) -> Self {
+    pub fn new(session: Session, config: AppConfig) -> Self {
         Self {
             session,
             running: true,
@@ -128,7 +131,7 @@ impl App {
             msg_recipient: None,
             msg_type: None,
             scroll_offset: 0,
-            help_scroll: Cell::new(0),
+            help_scroll: 0,
             quit_confirm: false,
             search_query: String::new(),
             contact_idx: 0,
@@ -139,13 +142,10 @@ impl App {
             block_changed_at: 0,
             balance_changed_at: 0,
             balance_decreased: false,
-            sidebar_width: 28,
-            timestamp_format: "%H:%M".into(),
-            date_format: "%Y-%m-%d %H:%M".into(),
-            audio,
+            config,
             sound_armed: false,
             picker_senders: Vec::new(),
-            sender_click_regions: RefCell::new(Vec::new()),
+            sender_click_regions: Vec::new(),
             connection: ConnState::Connected,
             palette: None,
             jump: None,

@@ -197,8 +197,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
     let total_rows = u16::try_from(page.len()).unwrap_or(u16::MAX);
     let max_scroll = total_rows.saturating_sub(visible);
-    let scroll = app.help_scroll.get().min(max_scroll);
-    app.help_scroll.set(scroll);
+    let scroll = app.help_scroll.min(max_scroll);
     frame.render_widget(Paragraph::new(page).scroll((scroll, 0)), body);
 
     if total_rows > visible {

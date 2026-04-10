@@ -212,8 +212,8 @@ fn date_separator(date_str: &str) -> Line<'static> {
     )
 }
 
-pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    app.sender_click_regions.borrow_mut().clear();
+pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
+    app.sender_click_regions.clear();
     if app.overlay == Some(Overlay::Compose)
         || (app.overlay == Some(Overlay::Message) && app.msg_recipient.is_none())
     {
@@ -283,7 +283,7 @@ fn render_standalone(
             let time = msg
                 .timestamp
                 .with_timezone(&chrono::Local)
-                .format(&app.date_format)
+                .format(&app.config.date_format)
                 .to_string();
             let (type_icon, type_label, badge_bg) = match msg.content_type {
                 0x00 => (super::icons::PUBLIC, "public", Color::Cyan),
@@ -439,7 +439,7 @@ fn render_threaded(
     empty_msg: &str,
     view: View,
     area: Rect,
-) {
+) -> Vec<(usize, u16, u16, String)> {
     let mut pending_clicks = Vec::new();
     render_messages(
         &mut lines,
@@ -453,17 +453,17 @@ fn render_threaded(
         lines.push(Line::raw(""));
         lines.push(dim(&format!("  {empty_msg}")));
     }
-    record_sender_clicks(app, &pending_clicks, lines.len(), app.scroll_offset, area);
+    let clicks = resolve_sender_clicks(&pending_clicks, lines.len(), app.scroll_offset, area);
     render_scrolled(frame, lines, app.scroll_offset, area);
+    clicks
 }
 
-fn render_thread(frame: &mut Frame, app: &App, thread_idx: usize, area: Rect) {
-    let thread = match app.session.threads.get(thread_idx) {
-        Some(t) => t,
-        None => return,
-    };
-
+fn render_thread(frame: &mut Frame, app: &mut App, thread_idx: usize, area: Rect) {
+    if thread_idx >= app.session.threads.len() {
+        return;
+    }
     let w = usize::from(area.width);
+    let thread = &app.session.threads[thread_idx];
     let id_str = if thread.thread_ref.is_zero() {
         String::new()
     } else {
@@ -475,24 +475,26 @@ fn render_thread(frame: &mut Frame, app: &App, thread_idx: usize, area: Rect) {
     };
     let id_reserve = id_block_reserve(&id_str);
     let peer = truncate(&thread.peer_ss58, w.saturating_sub(2 + id_reserve)).to_string();
-
     let lines = vec![
         title_header_line(peer, Color::Reset, id_str, w),
         separator(area.width),
     ];
 
-    render_threaded(
+    let clicks = render_threaded(
         frame,
         app,
         lines,
-        &thread.messages,
+        &app.session.threads[thread_idx].messages,
         "No messages in this thread",
         View::Thread(thread_idx),
         area,
     );
+    for (row, c0, c1, ss58) in clicks {
+        app.sender_click_regions.push((row as u16, c0, c1, ss58));
+    }
 }
 
-fn render_channel(frame: &mut Frame, app: &App, chan_idx: usize, area: Rect) {
+fn render_channel(frame: &mut Frame, app: &mut App, chan_idx: usize, area: Rect) {
     let channel = match app.session.channels.get(chan_idx) {
         Some(c) => c,
         None => return,
@@ -522,7 +524,7 @@ fn render_channel(frame: &mut Frame, app: &App, chan_idx: usize, area: Rect) {
 
     lines.push(separator(area.width));
 
-    render_threaded(
+    let clicks = render_threaded(
         frame,
         app,
         lines,
@@ -531,9 +533,12 @@ fn render_channel(frame: &mut Frame, app: &App, chan_idx: usize, area: Rect) {
         View::Channel(chan_idx),
         area,
     );
+    for (row, c0, c1, ss58) in clicks {
+        app.sender_click_regions.push((row as u16, c0, c1, ss58));
+    }
 }
 
-fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
+fn render_group(frame: &mut Frame, app: &mut App, group_idx: usize, area: Rect) {
     let group = match app.session.groups.get(group_idx) {
         Some(g) => g,
         None => return,
@@ -557,7 +562,7 @@ fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
         separator(area.width),
     ];
 
-    render_threaded(
+    let clicks = render_threaded(
         frame,
         app,
         lines,
@@ -566,6 +571,9 @@ fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
         View::Group(group_idx),
         area,
     );
+    for (row, c0, c1, ss58) in clicks {
+        app.sender_click_regions.push((row as u16, c0, c1, ss58));
+    }
 }
 
 fn group_member_title(group: &crate::conversation::Group, app: &App, title_max: usize) -> String {
@@ -979,7 +987,7 @@ fn render_messages(
             let time = msg
                 .timestamp
                 .with_timezone(&chrono::Local)
-                .format(&app.timestamp_format)
+                .format(&app.config.timestamp_format)
                 .to_string();
             let (name, name_color) = if msg.is_mine {
                 ("You".to_string(), palette::ACCENT)
@@ -1023,7 +1031,7 @@ fn render_messages(
             let time = msg
                 .timestamp
                 .with_timezone(&chrono::Local)
-                .format(&app.timestamp_format)
+                .format(&app.config.timestamp_format)
                 .to_string();
             let body_avail = width.saturating_sub(last_indent);
             let first_wrapped = if first_body_line.len() > body_avail && body_avail > 0 {
@@ -1070,7 +1078,7 @@ fn render_messages(
             let time = msg
                 .timestamp
                 .with_timezone(&chrono::Local)
-                .format(&app.timestamp_format)
+                .format(&app.config.timestamp_format)
                 .to_string();
             let (name, name_color) = if msg.is_mine {
                 ("You".to_string(), palette::ACCENT)
@@ -1179,24 +1187,24 @@ fn render_scrolled(frame: &mut ratatui::Frame, lines: Vec<Line<'_>>, scroll: usi
     frame.render_widget(Paragraph::new(lines[start..end].to_vec()), area);
 }
 
-fn record_sender_clicks(
-    app: &App,
+fn resolve_sender_clicks(
     pending: &[(usize, u16, u16, String)],
     lines_len: usize,
     scroll: usize,
     area: Rect,
-) {
+) -> Vec<(usize, u16, u16, String)> {
     let visible = usize::from(area.height);
     let bottom = lines_len.saturating_sub(visible);
     let start = bottom.saturating_sub(scroll);
     let end = (start + visible).min(lines_len);
-    let mut regions = app.sender_click_regions.borrow_mut();
+    let mut out = Vec::new();
     for (line_idx, c0, c1, ss58) in pending {
         if *line_idx >= start && *line_idx < end {
             let row = area.y + u16::try_from(*line_idx - start).unwrap_or(u16::MAX);
-            regions.push((row, area.x + *c0, area.x + *c1, ss58.clone()));
+            out.push((usize::from(row), area.x + *c0, area.x + *c1, ss58.clone()));
         }
     }
+    out
 }
 
 use taolk::util::truncate;

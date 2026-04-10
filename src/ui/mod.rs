@@ -72,7 +72,7 @@ use ratatui::widgets::Paragraph;
 pub const MIN_WIDTH: u16 = 60;
 pub const MIN_HEIGHT: u16 = 16;
 
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render(frame: &mut Frame, app: &mut App) {
     use crate::app::Overlay;
 
     let area = frame.area();
@@ -98,7 +98,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     if app.show_sidebar {
         let cols = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(app.sidebar_width), Constraint::Min(30)])
+            .constraints([
+                Constraint::Length(app.config.sidebar_width),
+                Constraint::Min(30),
+            ])
             .split(main_area);
 
         chat_list::render(frame, app, cols[0]);
@@ -116,7 +119,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 }
 
-fn render_main_panel(frame: &mut Frame, app: &App, area: Rect) {
+fn render_main_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.is_composing();
     let block = chrome::panel(focused);
     let inner = block.inner(area);
