@@ -24,10 +24,28 @@ pub const COMMANDS: &[Command] = &[
         run: run_quit,
     },
     Command {
-        name: "sidebar",
-        glyph: icons::MENU,
-        summary: "Toggle the sidebar",
-        run: run_sidebar,
+        name: "thread",
+        glyph: icons::THREADS,
+        summary: "Start a new thread with a contact",
+        run: run_thread,
+    },
+    Command {
+        name: "message",
+        glyph: icons::OUTBOX,
+        summary: "Send a one-off message (not a thread)",
+        run: run_message,
+    },
+    Command {
+        name: "group",
+        glyph: icons::GROUPS,
+        summary: "Create a new group conversation",
+        run: run_group,
+    },
+    Command {
+        name: "channels",
+        glyph: icons::CHANNELS,
+        summary: "Browse the channel directory",
+        run: run_channels,
     },
     Command {
         name: "search",
@@ -36,22 +54,10 @@ pub const COMMANDS: &[Command] = &[
         run: run_search,
     },
     Command {
-        name: "new",
-        glyph: icons::THREADS,
-        summary: "Start a new thread with a contact",
-        run: run_new,
-    },
-    Command {
-        name: "message",
-        glyph: icons::OUTBOX,
-        summary: "Send a standalone message",
-        run: run_message,
-    },
-    Command {
-        name: "channels",
-        glyph: icons::CHANNELS,
-        summary: "Browse the channel directory",
-        run: run_channels,
+        name: "sidebar",
+        glyph: icons::MENU,
+        summary: "Toggle the sidebar",
+        run: run_sidebar,
     },
     Command {
         name: "inbox",
@@ -65,6 +71,36 @@ pub const COMMANDS: &[Command] = &[
         summary: "Jump to the sent view",
         run: run_outbox,
     },
+    Command {
+        name: "refresh",
+        glyph: icons::REFRESH,
+        summary: "Reload and fill message gaps",
+        run: run_refresh,
+    },
+    Command {
+        name: "unlock",
+        glyph: icons::LOCK_OPEN,
+        summary: "Unlock all locked outbound messages",
+        run: run_unlock,
+    },
+    Command {
+        name: "copy",
+        glyph: icons::COPY,
+        summary: "Copy a sender's SS58 address",
+        run: run_copy,
+    },
+    Command {
+        name: "lock",
+        glyph: icons::ENCRYPTED,
+        summary: "Lock the session",
+        run: run_lock,
+    },
+    Command {
+        name: "wallet",
+        glyph: icons::SWAP,
+        summary: "Switch to a different wallet",
+        run: run_wallet,
+    },
 ];
 
 fn run_help(app: &mut App, _: &[&str]) -> CmdResult {
@@ -77,18 +113,7 @@ fn run_quit(app: &mut App, _: &[&str]) -> CmdResult {
     Ok(())
 }
 
-fn run_sidebar(app: &mut App, _: &[&str]) -> CmdResult {
-    app.show_sidebar = !app.show_sidebar;
-    Ok(())
-}
-
-fn run_search(app: &mut App, _: &[&str]) -> CmdResult {
-    app.search_query.clear();
-    app.enter_overlay(Overlay::Search);
-    Ok(())
-}
-
-fn run_new(app: &mut App, _: &[&str]) -> CmdResult {
+fn run_thread(app: &mut App, _: &[&str]) -> CmdResult {
     if !app.check_not_sending() {
         return Err("busy sending".into());
     }
@@ -104,12 +129,33 @@ fn run_message(app: &mut App, _: &[&str]) -> CmdResult {
     Ok(())
 }
 
+fn run_group(app: &mut App, _: &[&str]) -> CmdResult {
+    if !app.check_not_sending() {
+        return Err("busy sending".into());
+    }
+    app.pending_group_members.clear();
+    app.contact_idx = 0;
+    app.enter_overlay(Overlay::CreateGroupMembers);
+    Ok(())
+}
+
 fn run_channels(app: &mut App, _: &[&str]) -> CmdResult {
     app.channel_dir_cursor = 0;
     app.channel_dir_input.clear();
     app.scroll_offset = 0;
     app.view = View::ChannelDir;
     app.focus = Focus::Timeline;
+    Ok(())
+}
+
+fn run_search(app: &mut App, _: &[&str]) -> CmdResult {
+    app.search_query.clear();
+    app.enter_overlay(Overlay::Search);
+    Ok(())
+}
+
+fn run_sidebar(app: &mut App, _: &[&str]) -> CmdResult {
+    app.show_sidebar = !app.show_sidebar;
     Ok(())
 }
 
@@ -124,6 +170,41 @@ fn run_outbox(app: &mut App, _: &[&str]) -> CmdResult {
     app.view = View::Outbox;
     app.focus = Focus::Timeline;
     app.scroll_offset = 0;
+    Ok(())
+}
+
+fn run_refresh(app: &mut App, _: &[&str]) -> CmdResult {
+    app.refresh_requested = true;
+    app.set_status("Refreshing...");
+    Ok(())
+}
+
+fn run_unlock(app: &mut App, _: &[&str]) -> CmdResult {
+    if app.locked_outbound.is_empty() {
+        return Err("no locked outbound".into());
+    }
+    app.pending_unlock_all = true;
+    Ok(())
+}
+
+fn run_copy(app: &mut App, _: &[&str]) -> CmdResult {
+    let senders = app.build_picker_senders();
+    if senders.is_empty() {
+        return Err("no senders in current view".into());
+    }
+    app.picker_senders = senders;
+    app.contact_idx = 0;
+    app.enter_overlay(Overlay::SenderPicker);
+    Ok(())
+}
+
+fn run_lock(app: &mut App, _: &[&str]) -> CmdResult {
+    app.lock_requested = true;
+    Ok(())
+}
+
+fn run_wallet(app: &mut App, _: &[&str]) -> CmdResult {
+    app.wallet_switch_requested = true;
     Ok(())
 }
 

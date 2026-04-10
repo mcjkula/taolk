@@ -333,6 +333,11 @@ fn render_standalone(
         }
     }
 
+    if messages.is_empty() && pending.is_none() {
+        lines.push(Line::raw(""));
+        lines.push(dim("  No messages yet"));
+    }
+
     if let Some(text) = pending {
         let spinner = app.spinner_16();
         let (type_icon, type_label) = if app.msg_type == Some(0x01) {
@@ -421,6 +426,7 @@ fn render_threaded(
     app: &App,
     mut lines: Vec<Line<'static>>,
     messages: &[crate::conversation::ThreadMessage],
+    empty_msg: &str,
     view: View,
     area: Rect,
 ) {
@@ -433,6 +439,10 @@ fn render_threaded(
         &mut pending_clicks,
     );
     render_pending(&mut lines, app, view);
+    if messages.is_empty() && !(app.sending && app.pending_view == Some(view)) {
+        lines.push(Line::raw(""));
+        lines.push(dim(&format!("  {empty_msg}")));
+    }
     record_sender_clicks(app, &pending_clicks, lines.len(), app.scroll_offset, area);
     render_scrolled(frame, lines, app.scroll_offset, area);
 }
@@ -466,6 +476,7 @@ fn render_thread(frame: &mut Frame, app: &App, thread_idx: usize, area: Rect) {
         app,
         lines,
         &thread.messages,
+        "No messages in this thread",
         View::Thread(thread_idx),
         area,
     );
@@ -506,6 +517,7 @@ fn render_channel(frame: &mut Frame, app: &App, chan_idx: usize, area: Rect) {
         app,
         lines,
         &channel.messages,
+        "No messages in this channel yet",
         View::Channel(chan_idx),
         area,
     );
@@ -540,6 +552,7 @@ fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
         app,
         lines,
         &group.messages,
+        "No messages in this group yet",
         View::Group(group_idx),
         area,
     );
@@ -680,19 +693,33 @@ fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
     if total == 0 {
         lines.push(Line::raw(""));
         lines.push(dim("  No known contacts yet"));
-        lines.push(dim("  Paste an SS58 address below to message someone"));
+        lines.push(dim("  Paste an SS58 address below to send"));
     } else if contacts.is_empty() && !app.input.is_empty() {
         lines.push(Line::raw(""));
-        lines.push(dim("  No matches"));
+        let input = app.input.as_str();
+        if input.starts_with('5') && input.len() >= 48 {
+            lines.push(dim("  New contact \u{2014} Enter to send"));
+        } else {
+            lines.push(dim("  No matches"));
+        }
     }
 
+    let my_pubkey = app.session.pubkey();
     for (i, (_, pubkey)) in contacts.iter().enumerate() {
         let selected = i == app.contact_idx % contacts.len().max(1) && app.input.is_empty();
+        let is_self = *pubkey == my_pubkey;
         let full_addr = taolk::util::ss58_from_pubkey(pubkey);
+        let label = if is_self {
+            format!("{full_addr} (You)")
+        } else {
+            full_addr
+        };
         let addr_max = w.saturating_sub(4);
 
         let indicator = if selected { "> " } else { "  " };
-        let addr_color = if selected {
+        let addr_color = if is_self {
+            palette::MUTED
+        } else if selected {
             Color::Reset
         } else {
             palette::ACCENT
@@ -706,7 +733,7 @@ fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(vec![
             Span::styled(indicator, Style::default().fg(palette::ACCENT)),
             Span::styled(
-                truncate(&full_addr, addr_max),
+                truncate(&label, addr_max),
                 Style::default().fg(addr_color).add_modifier(addr_mod),
             ),
         ]));
@@ -797,6 +824,11 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
         let is_member = app.pending_group_members.iter().any(|(pk, _)| pk == pubkey);
         let is_self = *pubkey == app.session.pubkey();
         let full_addr = taolk::util::ss58_from_pubkey(pubkey);
+        let label = if is_self {
+            format!("{full_addr} (You)")
+        } else {
+            full_addr
+        };
         let addr_max = w.saturating_sub(6);
 
         let indicator = if cursor { "> " } else { "  " };
@@ -820,7 +852,7 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(indicator, Style::default().fg(palette::ACCENT)),
             Span::styled(check, Style::default().fg(palette::SUCCESS)),
             Span::styled(
-                truncate(&full_addr, addr_max),
+                truncate(&label, addr_max),
                 Style::default().fg(addr_color).add_modifier(addr_mod),
             ),
         ]));

@@ -919,6 +919,40 @@ fn run_session(
                     return Ok(SessionExit::SwitchWallet);
                 }
                 handle_key(&mut app, key, &event_tx, &rt);
+                if app.lock_requested {
+                    app.lock_requested = false;
+                    return Ok(SessionExit::Lock);
+                }
+                if app.wallet_switch_requested {
+                    app.wallet_switch_requested = false;
+                    return Ok(SessionExit::SwitchWallet);
+                }
+                if app.refresh_requested {
+                    app.refresh_requested = false;
+                    let refs = match app.view {
+                        app::View::Thread(idx) => {
+                            app.session.threads.get(idx).map(|c| c.gap_refs())
+                        }
+                        app::View::Channel(idx) => {
+                            app.session.channels.get(idx).map(|c| c.gap_refs())
+                        }
+                        app::View::Group(idx) => app.session.groups.get(idx).map(|g| g.gap_refs()),
+                        _ => None,
+                    };
+                    if let Some(refs) = refs {
+                        for block_ref in refs {
+                            let _ = event_tx.send(event::Event::FetchBlock { block_ref });
+                        }
+                    }
+                    if app.session.has_mirror
+                        && let app::View::Channel(idx) = app.view
+                        && let Some(ch) = app.session.channels.get(idx)
+                    {
+                        let _ = event_tx.send(event::Event::FetchChannelMirror {
+                            channel_ref: ch.channel_ref,
+                        });
+                    }
+                }
             }
             TuiEvent::Mouse(mouse) => {
                 last_activity = std::time::Instant::now();
@@ -1826,11 +1860,14 @@ fn handle_compose_key(app: &mut App, key: crossterm::event::KeyEvent) {
             match util::ss58_decode(&input) {
                 Ok(pubkey) => {
                     if pubkey == app.session.pubkey() {
-                        app.set_error("Cannot message yourself");
+                        let short = util::ss58_short(&pubkey);
+                        app.set_error(format!("Cannot message yourself ({short})"));
                         return;
                     }
                     let ss58 = util::ss58_short(&pubkey);
                     app.msg_recipient = Some((pubkey, ss58));
+                    app.view = app::View::Inbox;
+                    app.scroll_offset = 0;
                     app.close_overlay_to(Focus::Composer);
                     app.reset_input();
                 }
@@ -1879,7 +1916,8 @@ fn handle_message_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 match util::ss58_decode(&input) {
                     Ok(pubkey) => {
                         if pubkey == app.session.pubkey() {
-                            app.set_error("Cannot message yourself");
+                            let short = util::ss58_short(&pubkey);
+                            app.set_error(format!("Cannot message yourself ({short})"));
                             return;
                         }
                         let ss58 = util::ss58_short(&pubkey);

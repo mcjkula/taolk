@@ -47,6 +47,10 @@ pub mod icons {
     pub const MENU: &str = "\u{F035C}";
     pub const KEYBOARD: &str = "\u{F097B}";
     pub const COG: &str = "\u{F0493}";
+    pub const REFRESH: &str = "\u{F0450}";
+    pub const SWAP: &str = "\u{F04E1}";
+    pub const COPY: &str = "\u{F018F}";
+    pub const LOCK_OPEN: &str = "\u{F0340}";
 
     // Navigation
     // ARROW_UP/DOWN/LEFT/RIGHT are inlined at call sites because Rust const rules
