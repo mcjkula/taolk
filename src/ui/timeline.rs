@@ -360,7 +360,7 @@ fn render_standalone(
 
         lines.push(Line::raw(""));
         let mut spans = vec![Span::styled(
-            format!(" {spinner}  "),
+            format!(" {spinner} "),
             Style::default().fg(palette::MUTED),
         )];
         if let Some((icon, label)) = type_badge {
