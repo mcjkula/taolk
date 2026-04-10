@@ -69,8 +69,8 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
 
-pub const MIN_WIDTH: u16 = 100;
-pub const MIN_HEIGHT: u16 = 28;
+pub const MIN_WIDTH: u16 = 60;
+pub const MIN_HEIGHT: u16 = 16;
 
 pub fn render(frame: &mut Frame, app: &App) {
     use crate::app::Overlay;
