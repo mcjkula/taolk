@@ -23,7 +23,6 @@ codegen-units = 1
 samp = { path = "../../../skilaboo/rust" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "net", "time", "io-util"] }
 schnorrkel = "0.11"
-curve25519-dalek = { version = "4", features = ["digest"] }
 hkdf = "0.12"
 sha2 = "0.10"
 chacha20poly1305 = "0.10"
