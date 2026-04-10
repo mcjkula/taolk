@@ -1,5 +1,6 @@
 use crate::app::{App, Focus, Overlay, View};
 use crate::ui::icons;
+use taolk::types::BlockRef;
 
 pub type CmdResult = Result<(), String>;
 
@@ -69,6 +70,12 @@ pub const COMMANDS: &[Command] = &[
         run: run_help,
     },
     // System
+    Command {
+        name: "fetch",
+        glyph: icons::BLOCK,
+        summary: "Fetch remark(s) at block:index positions",
+        run: run_fetch,
+    },
     Command {
         name: "refresh",
         glyph: icons::REFRESH,
@@ -177,6 +184,28 @@ fn run_outbox(app: &mut App, _: &[&str]) -> CmdResult {
     app.view = View::Outbox;
     app.focus = Focus::Timeline;
     app.scroll_offset = 0;
+    Ok(())
+}
+
+fn run_fetch(app: &mut App, args: &[&str]) -> CmdResult {
+    if args.is_empty() {
+        return Err("fetch <block:index> [block:index ...]".into());
+    }
+    for arg in args {
+        let parts: Vec<&str> = arg.split(':').collect();
+        if parts.len() != 2 {
+            return Err(format!("invalid format \"{arg}\", expected block:index"));
+        }
+        let block: u32 = parts[0]
+            .parse()
+            .map_err(|_| format!("invalid block number in \"{arg}\""))?;
+        let index: u16 = parts[1]
+            .parse()
+            .map_err(|_| format!("invalid index in \"{arg}\""))?;
+        app.pending_fetches.push(BlockRef::from_parts(block, index));
+    }
+    let n = app.pending_fetches.len();
+    app.set_status(format!("Fetching {n} position(s)..."));
     Ok(())
 }
 

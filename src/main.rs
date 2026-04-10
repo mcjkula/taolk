@@ -968,6 +968,9 @@ fn run_session(
                         });
                     }
                 }
+                for block_ref in app.pending_fetches.drain(..) {
+                    let _ = event_tx.send(event::Event::FetchBlock { block_ref });
+                }
             }
             TuiEvent::Mouse(mouse) => {
                 last_activity = std::time::Instant::now();
