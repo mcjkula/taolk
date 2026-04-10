@@ -11,18 +11,7 @@ pub struct Command {
 }
 
 pub const COMMANDS: &[Command] = &[
-    Command {
-        name: "help",
-        glyph: icons::HELP,
-        summary: "Show the help overlay",
-        run: run_help,
-    },
-    Command {
-        name: "quit",
-        glyph: icons::EXIT,
-        summary: "Exit taolk",
-        run: run_quit,
-    },
+    // Compose
     Command {
         name: "thread",
         glyph: icons::THREADS,
@@ -41,12 +30,7 @@ pub const COMMANDS: &[Command] = &[
         summary: "Create a new group conversation",
         run: run_group,
     },
-    Command {
-        name: "channels",
-        glyph: icons::CHANNELS,
-        summary: "Browse the channel directory",
-        run: run_channels,
-    },
+    // Navigate
     Command {
         name: "search",
         glyph: icons::MAGNIFY,
@@ -54,10 +38,10 @@ pub const COMMANDS: &[Command] = &[
         run: run_search,
     },
     Command {
-        name: "sidebar",
-        glyph: icons::MENU,
-        summary: "Toggle the sidebar",
-        run: run_sidebar,
+        name: "channels",
+        glyph: icons::CHANNELS,
+        summary: "Browse the channel directory",
+        run: run_channels,
     },
     Command {
         name: "inbox",
@@ -71,6 +55,20 @@ pub const COMMANDS: &[Command] = &[
         summary: "Jump to the sent view",
         run: run_outbox,
     },
+    // View
+    Command {
+        name: "sidebar",
+        glyph: icons::MENU,
+        summary: "Toggle the sidebar",
+        run: run_sidebar,
+    },
+    Command {
+        name: "help",
+        glyph: icons::HELP,
+        summary: "Show the help overlay",
+        run: run_help,
+    },
+    // System
     Command {
         name: "refresh",
         glyph: icons::REFRESH,
@@ -78,16 +76,16 @@ pub const COMMANDS: &[Command] = &[
         run: run_refresh,
     },
     Command {
-        name: "unlock",
-        glyph: icons::LOCK_OPEN,
-        summary: "Unlock all locked outbound messages",
-        run: run_unlock,
-    },
-    Command {
         name: "copy",
         glyph: icons::COPY,
         summary: "Copy a sender's SS58 address",
         run: run_copy,
+    },
+    Command {
+        name: "unlock",
+        glyph: icons::LOCK_OPEN,
+        summary: "Unlock all locked outbound messages",
+        run: run_unlock,
     },
     Command {
         name: "lock",
@@ -100,6 +98,12 @@ pub const COMMANDS: &[Command] = &[
         glyph: icons::SWAP,
         summary: "Switch to a different wallet",
         run: run_wallet,
+    },
+    Command {
+        name: "quit",
+        glyph: icons::EXIT,
+        summary: "Exit taolk",
+        run: run_quit,
     },
 ];
 
