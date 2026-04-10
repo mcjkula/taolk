@@ -16,7 +16,10 @@ use crossterm::ExecutableCommand;
 use crossterm::event::{
     self as term_event, Event as TermEvent, KeyCode, KeyEvent, KeyModifiers, MouseEvent,
 };
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use crossterm::event::{
+    DisableMouseCapture, EnableMouseCapture, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
+};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -170,6 +173,9 @@ fn run_tui(
     if cfg.ui.mouse {
         stdout().execute(EnableMouseCapture)?;
     }
+    let _ = stdout().execute(PushKeyboardEnhancementFlags(
+        KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
+    ));
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
@@ -215,6 +221,7 @@ fn run_tui(
         }
     }
 
+    let _ = stdout().execute(PopKeyboardEnhancementFlags);
     if cfg.ui.mouse {
         stdout().execute(DisableMouseCapture)?;
     }
@@ -1811,9 +1818,13 @@ fn handle_composer_key(app: &mut App, key: crossterm::event::KeyEvent) {
             app.open_palette();
         }
         KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            if !app.input.is_empty() {
-                app.input.insert_newline();
-            }
+            app.input.insert_newline();
+        }
+        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            app.input.insert_newline();
+        }
+        KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
+            app.input.insert_newline();
         }
         KeyCode::Enter => {
             if !app.check_not_sending() {
