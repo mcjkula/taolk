@@ -48,7 +48,7 @@ impl ConversationKind {
             Self::Thread => "thread_messages",
             Self::Channel => "channel_messages",
             Self::Group => "group_messages",
-            Self::Inbox => "inbox_messages",
+            Self::Inbox => "inbox",
         }
     }
 
