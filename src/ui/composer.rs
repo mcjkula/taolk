@@ -277,8 +277,10 @@ pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
 
     if app.input.is_empty() {
         let placeholder = match (&app.msg_recipient, app.msg_type) {
-            (Some((_, ss58)), Some(0x01)) => format!("public to {ss58}..."),
-            (Some((_, ss58)), Some(0x02)) => format!("encrypted to {ss58}..."),
+            (Some((_, ss58)), Some(samp::ContentType::Public)) => format!("public to {ss58}..."),
+            (Some((_, ss58)), Some(samp::ContentType::Encrypted)) => {
+                format!("encrypted to {ss58}...")
+            }
             (Some((_, ss58)), None) => format!("new thread to {ss58}..."),
             _ if matches!(app.view, crate::app::View::Channel(_)) => {
                 "Post to channel...".to_string()

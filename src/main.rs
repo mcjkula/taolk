@@ -1373,8 +1373,8 @@ fn build_send_remark(
 ) -> error::Result<samp::RemarkBytes> {
     if let (Some((pubkey, _)), Some(ct)) = (&app.msg_recipient, app.msg_type) {
         return match ct {
-            0x01 => app.session.build_public_message(pubkey, body),
-            0x02 => app.session.build_encrypted_message(seed, pubkey, body),
+            samp::ContentType::Public => app.session.build_public_message(pubkey, body),
+            samp::ContentType::Encrypted => app.session.build_encrypted_message(seed, pubkey, body),
             _ => Err(error::SdkError::Other("Invalid message type".into())),
         };
     }
@@ -1964,12 +1964,12 @@ fn handle_message_key(app: &mut App, key: crossterm::event::KeyEvent) {
     } else {
         match key.code {
             KeyCode::Char('p') => {
-                app.msg_type = Some(0x01);
+                app.msg_type = Some(samp::ContentType::Public);
                 app.close_overlay_to(Focus::Composer);
                 app.reset_input();
             }
             KeyCode::Char('e') => {
-                app.msg_type = Some(0x02);
+                app.msg_type = Some(samp::ContentType::Encrypted);
                 app.close_overlay_to(Focus::Composer);
                 app.reset_input();
             }

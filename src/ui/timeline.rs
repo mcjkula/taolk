@@ -285,15 +285,18 @@ fn render_standalone(
                 .with_timezone(&chrono::Local)
                 .format(&app.config.date_format)
                 .to_string();
-            let (type_icon, type_label, badge_bg) = match msg.content_type {
-                0x10 => (super::icons::PUBLIC, "public", Color::Cyan),
-                0x11 => (super::icons::ENCRYPTED, "encrypted", Color::Magenta),
-                other => (
-                    super::icons::BLOCK,
-                    &*format!("0x{other:02x}"),
-                    Color::DarkGray,
-                ),
-            };
+            let (type_icon, type_label, badge_bg) =
+                match samp::ContentType::from_byte(msg.content_type) {
+                    Ok(samp::ContentType::Public) => (super::icons::PUBLIC, "public", Color::Cyan),
+                    Ok(samp::ContentType::Encrypted) => {
+                        (super::icons::ENCRYPTED, "encrypted", Color::Magenta)
+                    }
+                    _ => (
+                        super::icons::BLOCK,
+                        &*format!("0x{:02x}", msg.content_type),
+                        Color::DarkGray,
+                    ),
+                };
 
             lines.push(Line::from(vec![
                 Span::styled(format!(" {time} "), Style::default().fg(palette::MUTED)),
@@ -345,8 +348,8 @@ fn render_standalone(
     if let Some(text) = pending {
         let spinner = app.spinner_16();
         let type_badge: Option<(&str, &str)> = match app.pending_msg_type {
-            Some(0x01) => Some((super::icons::PUBLIC, "public")),
-            Some(0x02) => Some((super::icons::ENCRYPTED, "encrypted")),
+            Some(samp::ContentType::Public) => Some((super::icons::PUBLIC, "public")),
+            Some(samp::ContentType::Encrypted) => Some((super::icons::ENCRYPTED, "encrypted")),
             _ => None,
         };
         let recipient_label = app
