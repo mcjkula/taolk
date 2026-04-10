@@ -1323,10 +1323,20 @@ fn run_session(
                 timestamp,
                 remark_bytes,
             }) => {
-                if !app
-                    .locked_outbound
-                    .iter()
-                    .any(|m| m.block_number == block_number && m.ext_index == ext_index)
+                let block_ref = types::BlockRef::from_parts(block_number, ext_index);
+                let already_in_db = app
+                    .session
+                    .db
+                    .has_message_at(db::ConversationKind::Inbox, block_ref)
+                    || app
+                        .session
+                        .db
+                        .has_message_at(db::ConversationKind::Thread, block_ref);
+                if !already_in_db
+                    && !app
+                        .locked_outbound
+                        .iter()
+                        .any(|m| m.block_number == block_number && m.ext_index == ext_index)
                 {
                     app.locked_outbound.push(app::LockedOutbound {
                         sender,
