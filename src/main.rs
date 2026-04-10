@@ -2145,9 +2145,7 @@ fn handle_create_group_members_key(
                             ));
                         } else {
                             let short = util::ss58_short(&pk);
-                            app.pending_group_members.push((pk, short.clone()));
-                            app.session.peer_pubkeys.insert(short.clone(), pk);
-                            app.session.db.upsert_peer(&short, &pk);
+                            app.pending_group_members.push((pk, short));
                         }
                         app.reset_input();
                         app.contact_idx = 0;
