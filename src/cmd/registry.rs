@@ -71,9 +71,9 @@ pub const COMMANDS: &[Command] = &[
     },
     // System
     Command {
-        name: "fetch",
+        name: "get",
         glyph: icons::BLOCK,
-        summary: "Fetch remark(s) at block:index positions",
+        summary: "Get remark(s) at block:index positions",
         run: run_fetch,
     },
     Command {
@@ -189,7 +189,7 @@ fn run_outbox(app: &mut App, _: &[&str]) -> CmdResult {
 
 fn run_fetch(app: &mut App, args: &[&str]) -> CmdResult {
     if args.is_empty() {
-        return Err("fetch <block:index> [block:index ...]".into());
+        return Err("get <block:index> [block:index ...]".into());
     }
     for arg in args {
         let parts: Vec<&str> = arg.split(':').collect();
@@ -205,7 +205,7 @@ fn run_fetch(app: &mut App, args: &[&str]) -> CmdResult {
         app.pending_fetches.push(BlockRef::from_parts(block, index));
     }
     let n = app.pending_fetches.len();
-    app.set_status(format!("Fetching {n} position(s)..."));
+    app.set_status(format!("Getting {n} position(s)..."));
     Ok(())
 }
 
