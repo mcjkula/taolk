@@ -3,7 +3,7 @@ use crate::ui::hintbar;
 use crate::ui::icons;
 use crate::ui::palette;
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
@@ -73,7 +73,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         Style::default()
     };
-    let balance_span = Span::styled(balance_str.clone(), balance_style);
 
     let block_str = format!(
         " {} {} ",
@@ -86,7 +85,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         palette::dim()
     };
-    let block_span = Span::styled(block_str.clone(), block_style);
 
     let reconnect = reconnect_pill(app.connection);
     let reconnect_width = reconnect
@@ -98,32 +96,33 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         format!(" {} {} (U) ", icons::LOCK_CLOCK, app.locked_outbound.len())
     };
-    let locked_span = Span::styled(
-        locked_str.clone(),
-        Style::default()
-            .fg(palette::WARNING)
-            .add_modifier(Modifier::REVERSED | Modifier::BOLD),
-    );
 
-    let right_width = u16::try_from(locked_str.chars().count()).unwrap_or(u16::MAX)
-        + u16::try_from(balance_str.len()).unwrap_or(u16::MAX)
-        + u16::try_from(block_str.len()).unwrap_or(u16::MAX)
+    let right_width = u16::try_from(locked_str.chars().count()).unwrap_or(0)
+        + u16::try_from(balance_str.chars().count()).unwrap_or(0)
+        + u16::try_from(block_str.chars().count()).unwrap_or(0)
         + reconnect_width;
 
-    let left_width = u16::try_from(left.width()).unwrap_or(u16::MAX);
-    let padding = area.width.saturating_sub(left_width + right_width);
-    let pad_span = Span::raw(" ".repeat(usize::from(padding)));
+    let cols =
+        Layout::horizontal([Constraint::Min(0), Constraint::Length(right_width)]).split(area);
 
-    let mut spans: Vec<Span<'static>> = left.spans.into_iter().collect();
-    spans.push(pad_span);
+    frame.render_widget(Paragraph::new(left), cols[0]);
+
+    let mut right_spans: Vec<Span<'static>> = Vec::new();
     if let Some(rc) = reconnect {
-        spans.push(rc);
+        right_spans.push(rc);
     }
     if !locked_str.is_empty() {
-        spans.push(locked_span);
+        right_spans.push(Span::styled(
+            locked_str,
+            Style::default()
+                .fg(palette::WARNING)
+                .add_modifier(Modifier::REVERSED | Modifier::BOLD),
+        ));
     }
-    spans.push(balance_span);
-    spans.push(block_span);
+    if !balance_str.is_empty() {
+        right_spans.push(Span::styled(balance_str, balance_style));
+    }
+    right_spans.push(Span::styled(block_str, block_style));
 
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    frame.render_widget(Paragraph::new(Line::from(right_spans)), cols[1]);
 }
