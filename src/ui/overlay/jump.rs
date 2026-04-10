@@ -1,6 +1,7 @@
 use crate::app::{App, View};
 use crate::ui::chrome;
 use crate::ui::composer::TextBuffer;
+use crate::ui::icons;
 use crate::ui::modal::centered_rect;
 use crate::ui::palette;
 use crossterm::event::{KeyCode, KeyEvent};
@@ -13,7 +14,7 @@ use ratatui::widgets::{Clear, List, ListItem, Paragraph};
 #[derive(Debug, Clone)]
 pub struct JumpTarget {
     pub label: String,
-    pub hint: &'static str,
+    pub glyph: &'static str,
     pub view: View,
 }
 
@@ -42,23 +43,23 @@ impl JumpState {
         let mut targets: Vec<JumpTarget> = Vec::new();
         targets.push(JumpTarget {
             label: "Inbox".into(),
-            hint: "inbox",
+            glyph: icons::INBOX,
             view: View::Inbox,
         });
         targets.push(JumpTarget {
             label: "Sent".into(),
-            hint: "outbox",
+            glyph: icons::OUTBOX,
             view: View::Outbox,
         });
         targets.push(JumpTarget {
             label: "Channels".into(),
-            hint: "directory",
+            glyph: icons::CHANNELS,
             view: View::ChannelDir,
         });
         for (i, t) in app.session.threads.iter().enumerate() {
             targets.push(JumpTarget {
                 label: t.peer_ss58.clone(),
-                hint: "thread",
+                glyph: icons::THREADS,
                 view: View::Thread(i),
             });
         }
@@ -68,7 +69,7 @@ impl JumpState {
             }
             targets.push(JumpTarget {
                 label: format!("#{}", c.name),
-                hint: "channel",
+                glyph: icons::CHANNELS,
                 view: View::Channel(i),
             });
         }
@@ -76,7 +77,7 @@ impl JumpState {
             let members = g.members.len();
             targets.push(JumpTarget {
                 label: format!("group ({members})"),
-                hint: "group",
+                glyph: icons::GROUPS,
                 view: View::Group(i),
             });
         }
@@ -182,7 +183,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         .fg(palette::ACCENT)
         .add_modifier(Modifier::BOLD);
     let name_style = Style::default().fg(ratatui::style::Color::Reset);
-    let hint_style = Style::default().fg(palette::MUTED);
+    let glyph_style = Style::default().fg(palette::MUTED);
 
     let items: Vec<ListItem> = state
         .ranking
@@ -198,10 +199,17 @@ pub fn render(frame: &mut Frame, app: &App) {
                     if selected { selected_style } else { name_style },
                 ),
                 Span::styled(
-                    format!("{:<20} ", t.label),
+                    format!("{} ", t.glyph),
+                    if selected {
+                        selected_style
+                    } else {
+                        glyph_style
+                    },
+                ),
+                Span::styled(
+                    t.label.clone(),
                     if selected { selected_style } else { name_style },
                 ),
-                Span::styled(t.hint.to_string(), hint_style),
             ]);
             ListItem::new(line)
         })

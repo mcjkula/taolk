@@ -1,4 +1,5 @@
 use crate::app::{App, Focus, Overlay};
+use crate::ui::icons;
 use crate::ui::palette;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -122,9 +123,10 @@ fn render_single_input(
     limit: Option<usize>,
     area: Rect,
 ) {
+    use unicode_width::UnicodeWidthStr;
     let sep = sep_line(area.width);
     let prompt_span = Span::styled(prompt, Style::default().fg(palette::MUTED));
-    let prompt_width = prompt.len() + 1;
+    let prompt_width = UnicodeWidthStr::width(prompt) + 1;
 
     if app.input.is_empty() {
         let input_line = Line::from(vec![
@@ -164,7 +166,14 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
     match app.overlay {
         Some(Overlay::Search) => {
-            render_single_input(frame, app, "/", "Search messages...", None, area);
+            render_single_input(
+                frame,
+                app,
+                &format!("{} ", icons::MAGNIFY),
+                "Search messages...",
+                None,
+                area,
+            );
         }
         Some(Overlay::CreateChannel) => {
             render_single_input(
@@ -196,18 +205,18 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 let Some((_, ss58)) = app.msg_recipient.as_ref() else {
                     return;
                 };
-                let prefix_len = 31;
+                let prefix_len = 35;
                 let ss58_max = (usize::from(area.width)).saturating_sub(prefix_len);
                 let selector = Line::from(vec![
                     Span::raw(" "),
                     Span::styled("[p] ", Style::default().fg(palette::ACCENT)),
                     Span::styled(
-                        "public  ",
+                        format!("{} public  ", icons::PUBLIC),
                         Style::default().fg(ratatui::style::Color::Reset),
                     ),
                     Span::styled("[e] ", Style::default().fg(palette::ACCENT)),
                     Span::styled(
-                        "encrypted  ",
+                        format!("{} encrypted  ", icons::ENCRYPTED),
                         Style::default().fg(ratatui::style::Color::Reset),
                     ),
                     Span::styled(

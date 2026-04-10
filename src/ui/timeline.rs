@@ -230,14 +230,20 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     match app.view {
-        View::Inbox => {
-            render_standalone(frame, app, &app.session.inbox, "Inbox", "From", None, area)
-        }
+        View::Inbox => render_standalone(
+            frame,
+            app,
+            &app.session.inbox,
+            &format!("{} Inbox", super::icons::INBOX),
+            "From",
+            None,
+            area,
+        ),
         View::Outbox => render_standalone(
             frame,
             app,
             &app.session.outbox,
-            "Sent",
+            &format!("{} Sent", super::icons::OUTBOX),
             "To",
             pending_text(app, View::Outbox),
             area,
@@ -267,7 +273,7 @@ fn render_standalone(
     area: Rect,
 ) {
     let mut lines: Vec<Line> = vec![
-        header_line(title, "", usize::from(area.width)),
+        header_line("", title, "", usize::from(area.width)),
         separator(area.width),
     ];
 
@@ -586,6 +592,7 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
     let count = app.session.known_channels.len();
     let mut lines: Vec<Line> = vec![
         header_line(
+            super::icons::CHANNELS,
             "Channels",
             &format!("{count} available"),
             usize::from(area.width),
@@ -658,7 +665,12 @@ fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
     let w = usize::from(area.width);
 
     let mut lines: Vec<Line> = vec![
-        header_line("Contacts", &format!("{total} known"), w),
+        header_line(
+            super::icons::ACCOUNT,
+            "Contacts",
+            &format!("{total} known"),
+            w,
+        ),
         separator(area.width),
     ];
 
@@ -706,7 +718,12 @@ fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
     let w = usize::from(area.width);
 
     let mut lines: Vec<Line> = vec![
-        header_line("Copy SS58", &format!("{total} senders"), w),
+        header_line(
+            super::icons::ACCOUNT,
+            "Copy SS58",
+            &format!("{total} senders"),
+            w,
+        ),
         separator(area.width),
     ];
 
@@ -756,6 +773,7 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut lines: Vec<Line> = vec![
         header_line(
+            super::icons::GROUPS,
             "Select Members",
             &format!("{selected_count} selected, {total} known"),
             w,
@@ -1072,13 +1090,22 @@ fn render_messages(
     }
 }
 
-fn header_line(title: &str, right: &str, width: usize) -> Line<'static> {
-    let title_max = width.saturating_sub(right.len() + 3);
+fn header_line(glyph: &str, title: &str, right: &str, width: usize) -> Line<'static> {
+    use unicode_width::UnicodeWidthStr;
+    let glyph_part = if glyph.is_empty() {
+        String::new()
+    } else {
+        format!("{glyph} ")
+    };
+    let glyph_w = UnicodeWidthStr::width(glyph_part.as_str());
+    let right_w = UnicodeWidthStr::width(right);
+    let title_max = width.saturating_sub(right_w + 3 + glyph_w);
     let truncated = truncate(title, title_max);
-    let pad = width.saturating_sub(truncated.len() + 2 + right.len());
+    let title_w = UnicodeWidthStr::width(truncated.as_str());
+    let pad = width.saturating_sub(2 + glyph_w + title_w + right_w);
     Line::from(vec![
         Span::styled(
-            format!(" {truncated}"),
+            format!(" {glyph_part}{truncated}"),
             Style::default()
                 .fg(Color::Reset)
                 .add_modifier(Modifier::BOLD),

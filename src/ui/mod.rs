@@ -30,13 +30,23 @@ pub mod icons {
     pub const ERROR: &str = "\u{F0028}";
     pub const LOCK_CLOCK: &str = "\u{F097F}";
     pub const HISTORY: &str = "\u{F02DA}";
+    pub const SYNC: &str = "\u{F04E6}";
 
     // Chain primitives
     pub const BLOCK: &str = "\u{F01A7}";
 
-    // Lock screen
+    // Identity & secrets
+    pub const ACCOUNT: &str = "\u{F0B55}";
     pub const WALLET: &str = "\u{F0BDD}";
     pub const KEY: &str = "\u{F030B}";
+
+    // Commands & affordances
+    pub const HELP: &str = "\u{F0625}";
+    pub const EXIT: &str = "\u{F0206}";
+    pub const MAGNIFY: &str = "\u{F0349}";
+    pub const MENU: &str = "\u{F035C}";
+    pub const KEYBOARD: &str = "\u{F097B}";
+    pub const COG: &str = "\u{F0493}";
 
     // Navigation
     // ARROW_UP/DOWN/LEFT/RIGHT are inlined at call sites because Rust const rules
@@ -131,8 +141,10 @@ fn render_main_panel(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_too_small(frame: &mut Frame, area: Rect) {
     let msg = format!(
-        "taolk requires at least {MIN_WIDTH}x{MIN_HEIGHT} — current {}x{}",
-        area.width, area.height,
+        "{} taolk requires at least {MIN_WIDTH}x{MIN_HEIGHT} — current {}x{}",
+        icons::ERROR,
+        area.width,
+        area.height,
     );
     let lines = vec![Line::raw(""), Line::raw(msg)];
     frame.render_widget(Paragraph::new(lines).style(palette::dim()), area);

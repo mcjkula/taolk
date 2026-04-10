@@ -14,7 +14,7 @@ fn reconnect_pill(state: ConnState) -> Option<Span<'static>> {
     match state {
         ConnState::Connected => None,
         ConnState::Reconnecting { in_secs } => Some(Span::styled(
-            format!(" reconnecting in {in_secs}s "),
+            format!(" {} reconnecting in {in_secs}s ", icons::SYNC),
             Style::default()
                 .fg(palette::ERROR)
                 .add_modifier(Modifier::REVERSED | Modifier::BOLD),

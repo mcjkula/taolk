@@ -6,16 +6,19 @@ use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
+use crate::ui::icons;
 use crate::ui::palette;
 
 struct Card {
     title: &'static str,
+    glyph: &'static str,
     entries: &'static [(&'static str, &'static str)],
 }
 
 const CARDS: &[Card] = &[
     Card {
         title: "Sidebar",
+        glyph: icons::MENU,
         entries: &[
             ("\u{F005D} / \u{F0045}", "Previous / next conversation"),
             ("Tab / S-Tab", "Previous / next conversation"),
@@ -24,6 +27,7 @@ const CARDS: &[Card] = &[
     },
     Card {
         title: "Page content",
+        glyph: icons::KEYBOARD,
         entries: &[
             ("j / k", "Down / up one line"),
             ("C-d / C-u", "Half-page down / up"),
@@ -34,6 +38,7 @@ const CARDS: &[Card] = &[
     },
     Card {
         title: "Actions",
+        glyph: icons::COG,
         entries: &[
             ("i", "Compose or reply in current"),
             ("n", "New thread"),
@@ -53,6 +58,7 @@ const CARDS: &[Card] = &[
     },
     Card {
         title: "Channel directory",
+        glyph: icons::CHANNELS,
         entries: &[
             ("j / k", "Move channel cursor"),
             ("digits / :", "Type a channel ref"),
@@ -63,6 +69,7 @@ const CARDS: &[Card] = &[
     },
     Card {
         title: "Insert",
+        glyph: icons::DRAFT,
         entries: &[
             ("Enter", "Send (preview fee)"),
             ("C-n", "Insert newline"),
@@ -73,10 +80,12 @@ const CARDS: &[Card] = &[
     },
     Card {
         title: "Confirm",
+        glyph: icons::CHECK,
         entries: &[("Enter", "Submit transaction"), ("Esc", "Back to edit")],
     },
     Card {
         title: "Compose / Message",
+        glyph: icons::OUTBOX,
         entries: &[
             ("type", "Filter or paste SS58"),
             ("\u{F005D} / \u{F0045}", "Pick contact"),
@@ -87,6 +96,7 @@ const CARDS: &[Card] = &[
     },
     Card {
         title: "Sender picker",
+        glyph: icons::ACCOUNT,
         entries: &[
             ("\u{F005D} / \u{F0045}", "Pick sender"),
             ("Enter", "Copy SS58 to clipboard"),
@@ -95,6 +105,7 @@ const CARDS: &[Card] = &[
     },
     Card {
         title: "Group members",
+        glyph: icons::GROUPS,
         entries: &[
             ("type", "Filter or paste SS58"),
             ("\u{F005D} / \u{F0045}", "Pick contact"),
@@ -209,30 +220,36 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
 fn compute_card_width() -> usize {
     let mut max_entry = 0usize;
-    let mut max_title = 0usize;
+    let mut max_header = 0usize;
     for card in CARDS {
-        max_title = max_title.max(UnicodeWidthStr::width(card.title));
+        let header = format!("{} {}", card.glyph, card.title);
+        max_header = max_header.max(UnicodeWidthStr::width(header.as_str()));
         for (key, desc) in card.entries {
             let w = UnicodeWidthStr::width(*key) + UnicodeWidthStr::width(*desc) + CARD_ENTRY_GAP;
             max_entry = max_entry.max(w);
         }
     }
-    (max_entry + CARD_H_PAD * 2).max(max_title + CARD_H_PAD * 2 + 2)
+    (max_entry + CARD_H_PAD * 2).max(max_header + CARD_H_PAD * 2 + 2)
 }
 
 fn render_card(card: &Card, width: usize) -> Vec<Line<'static>> {
     let title_style = Style::default()
         .fg(palette::ACCENT_ALT)
         .add_modifier(Modifier::BOLD);
+    let glyph_style = Style::default()
+        .fg(palette::ACCENT)
+        .add_modifier(Modifier::BOLD);
     let desc_style = Style::default().fg(ratatui::style::Color::Reset);
     let key_style = Style::default().fg(palette::ACCENT);
 
     let mut lines = Vec::with_capacity(card.entries.len() + 3);
-    let title_w = UnicodeWidthStr::width(card.title);
-    let left = (width.saturating_sub(title_w)) / 2;
-    let right = width.saturating_sub(title_w).saturating_sub(left);
+    let header = format!("{} {}", card.glyph, card.title);
+    let header_w = UnicodeWidthStr::width(header.as_str());
+    let left = (width.saturating_sub(header_w)) / 2;
+    let right = width.saturating_sub(header_w).saturating_sub(left);
     lines.push(Line::from(vec![
         Span::raw(" ".repeat(left)),
+        Span::styled(format!("{} ", card.glyph), glyph_style),
         Span::styled(card.title.to_string(), title_style),
         Span::raw(" ".repeat(right)),
     ]));

@@ -1,4 +1,5 @@
 use crate::app::App;
+use crate::ui::icons;
 use crate::ui::modal::centered_line;
 use crate::ui::palette;
 use ratatui::Frame;
@@ -44,24 +45,29 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         dim,
     ));
     lines.push(Line::raw(""));
-    lines.push(centered_line(&format!("you: {ss58}"), area.width, text));
+    lines.push(centered_line(
+        &format!("{} you: {ss58}", icons::ACCOUNT),
+        area.width,
+        text,
+    ));
     lines.push(Line::raw(""));
     lines.push(Line::raw(""));
 
-    let shortcuts: &[(&str, &str)] = &[
-        ("n", "new thread"),
-        ("m", "standalone message"),
-        ("c", "channels"),
-        ("g", "create group"),
-        ("?", "help"),
-        ("q", "quit"),
+    let shortcuts: &[(&str, &str, &str)] = &[
+        ("n", icons::THREADS, "new thread"),
+        ("m", icons::OUTBOX, "standalone message"),
+        ("c", icons::CHANNELS, "channels"),
+        ("g", icons::GROUPS, "create group"),
+        ("?", icons::HELP, "help"),
+        ("q", icons::EXIT, "quit"),
     ];
-    for (k, label) in shortcuts {
-        let row = format!("  {k}   {label}");
+    for (k, glyph, label) in shortcuts {
+        let row = format!("  {k}   {glyph} {label}");
         let pad = usize::from(area.width).saturating_sub(row.chars().count()) / 2;
         let spans = vec![
             Span::raw(" ".repeat(pad)),
             Span::styled(format!("  {k}   "), key),
+            Span::styled(format!("{glyph} "), key),
             Span::styled((*label).to_string(), text),
         ];
         lines.push(Line::from(spans));

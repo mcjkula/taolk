@@ -1,9 +1,11 @@
 use crate::app::{App, Focus, Overlay, View};
+use crate::ui::icons;
 
 pub type CmdResult = Result<(), String>;
 
 pub struct Command {
     pub name: &'static str,
+    pub glyph: &'static str,
     pub summary: &'static str,
     pub run: fn(&mut App, &[&str]) -> CmdResult,
 }
@@ -11,46 +13,55 @@ pub struct Command {
 pub const COMMANDS: &[Command] = &[
     Command {
         name: "help",
+        glyph: icons::HELP,
         summary: "Show the help overlay",
         run: run_help,
     },
     Command {
         name: "quit",
+        glyph: icons::EXIT,
         summary: "Exit taolk",
         run: run_quit,
     },
     Command {
         name: "sidebar",
+        glyph: icons::MENU,
         summary: "Toggle the sidebar",
         run: run_sidebar,
     },
     Command {
         name: "search",
+        glyph: icons::MAGNIFY,
         summary: "Search messages in the current view",
         run: run_search,
     },
     Command {
         name: "new",
+        glyph: icons::THREADS,
         summary: "Start a new thread with a contact",
         run: run_new,
     },
     Command {
         name: "message",
+        glyph: icons::OUTBOX,
         summary: "Send a standalone message",
         run: run_message,
     },
     Command {
         name: "channels",
+        glyph: icons::CHANNELS,
         summary: "Browse the channel directory",
         run: run_channels,
     },
     Command {
         name: "inbox",
+        glyph: icons::INBOX,
         summary: "Jump to the inbox view",
         run: run_inbox,
     },
     Command {
         name: "outbox",
+        glyph: icons::OUTBOX,
         summary: "Jump to the sent view",
         run: run_outbox,
     },
@@ -125,6 +136,7 @@ mod tests {
         for c in COMMANDS {
             assert!(!c.name.is_empty());
             assert!(!c.summary.is_empty());
+            assert!(!c.glyph.is_empty());
         }
     }
 }
