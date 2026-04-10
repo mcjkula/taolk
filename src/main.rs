@@ -2361,9 +2361,11 @@ fn handle_confirm_key(
             app.clear_standalone();
             let view = app.pending_view;
             let text = app.pending_text.take();
+            let msg_type = app.pending_msg_type;
             app.clear_pending();
             app.pending_view = view;
             app.pending_text = text;
+            app.pending_msg_type = msg_type;
             app.clear_draft();
             app.reset_input();
             let focus = app.default_focus_for_view();
