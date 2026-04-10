@@ -1030,7 +1030,7 @@ fn run_session(
                             recipient,
                             ts,
                             body,
-                            kind,
+                            ct,
                             types::BlockRef::from_parts(block_number, ext_index),
                         );
                     }
