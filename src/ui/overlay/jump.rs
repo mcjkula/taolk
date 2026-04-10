@@ -9,7 +9,7 @@ use nucleo_matcher::{Config, Matcher, Utf32Str};
 use ratatui::Frame;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, List, ListItem, Paragraph};
+use ratatui::widgets::{Clear, List, ListItem, ListState, Paragraph};
 
 #[derive(Debug, Clone)]
 pub struct JumpTarget {
@@ -214,7 +214,8 @@ pub fn render(frame: &mut Frame, app: &App) {
             ListItem::new(line)
         })
         .collect();
-    frame.render_widget(List::new(items), rows[1]);
+    let mut list_state = ListState::default().with_selected(Some(state.cursor));
+    frame.render_stateful_widget(List::new(items), rows[1], &mut list_state);
 
     let cursor_x = rows[0].x + 3 + u16::try_from(state.query.cursor()).unwrap_or(u16::MAX);
     let cursor_y = rows[0].y;
