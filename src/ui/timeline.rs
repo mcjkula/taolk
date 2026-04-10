@@ -347,9 +347,11 @@ fn render_standalone(
 
     if let Some(text) = pending {
         let spinner = app.spinner_16();
-        let type_badge: Option<(&str, &str)> = match app.pending_msg_type {
-            Some(samp::ContentType::Public) => Some((super::icons::PUBLIC, "public")),
-            Some(samp::ContentType::Encrypted) => Some((super::icons::ENCRYPTED, "encrypted")),
+        let type_badge: Option<(&str, &str, Color)> = match app.pending_msg_type {
+            Some(samp::ContentType::Public) => Some((super::icons::PUBLIC, "public", Color::Cyan)),
+            Some(samp::ContentType::Encrypted) => {
+                Some((super::icons::ENCRYPTED, "encrypted", Color::Magenta))
+            }
             _ => None,
         };
         let recipient_label = app
@@ -363,11 +365,12 @@ fn render_standalone(
             format!(" {spinner}  "),
             Style::default().fg(palette::MUTED),
         )];
-        if let Some((icon, label)) = type_badge {
+        if let Some((icon, label, badge_bg)) = type_badge {
             spans.push(Span::styled(
                 format!(" {icon} {label} "),
                 Style::default()
-                    .fg(palette::MUTED)
+                    .fg(Color::White)
+                    .bg(badge_bg)
                     .add_modifier(Modifier::BOLD),
             ));
             spans.push(Span::raw(" "));
@@ -377,16 +380,18 @@ fn render_standalone(
             spans.push(Span::styled(
                 truncate(&recipient_label, 20),
                 Style::default()
-                    .fg(palette::MUTED)
+                    .fg(Color::Reset)
                     .add_modifier(Modifier::BOLD),
             ));
         }
         lines.push(Line::from(spans));
 
+        let my_ss58 = app.session.ss58();
         for text_line in text.lines() {
-            lines.push(Line::styled(
-                format!("   {text_line}"),
-                Style::default().fg(palette::MUTED),
+            lines.push(render_body_line(
+                &format!("   {text_line}"),
+                Color::Reset,
+                my_ss58,
             ));
         }
     }
@@ -890,7 +895,8 @@ fn render_pending(lines: &mut Vec<Line<'static>>, app: &App, view: View) {
         let first_line = text.lines().next().unwrap_or("");
         let indent = 7 + 3 + 2;
         lines.push(Line::raw(""));
-        lines.push(Line::from(vec![
+        let my_ss58 = app.session.ss58();
+        let mut first_spans = vec![
             Span::styled(
                 format!(" {} ", app.spinner_5()),
                 Style::default().fg(palette::MUTED),
@@ -898,16 +904,18 @@ fn render_pending(lines: &mut Vec<Line<'static>>, app: &App, view: View) {
             Span::styled(
                 "You  ",
                 Style::default()
-                    .fg(palette::MUTED)
+                    .fg(palette::ACCENT)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(first_line.to_string(), Style::default().fg(palette::MUTED)),
-        ]));
+        ];
+        let body_rendered = render_body_line(first_line, Color::Reset, my_ss58);
+        for span in body_rendered.spans {
+            first_spans.push(span);
+        }
+        lines.push(Line::from(first_spans));
         for body_line in text.lines().skip(1) {
-            lines.push(Line::styled(
-                format!("{:indent$}{body_line}", ""),
-                Style::default().fg(palette::MUTED),
-            ));
+            let prefixed = format!("{:indent$}{body_line}", "");
+            lines.push(render_body_line(&prefixed, Color::Reset, my_ss58));
         }
     }
 }
