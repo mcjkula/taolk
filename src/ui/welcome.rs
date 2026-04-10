@@ -1,57 +1,16 @@
 use crate::app::App;
 use crate::ui::icons;
-use crate::ui::modal::centered_line;
 use crate::ui::palette;
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-const BANNER: &[&str] = &[
-    " ██████╗  █████╗  ██████╗ ██╗     ██╗  ██╗",
-    " ╚══██╔╝ ██╔══██╗██╔═══██╗██║     ██║ ██╔╝",
-    "    ██║  ███████║██║   ██║██║     █████╔╝ ",
-    "    ██║  ██╔══██║██║   ██║██║     ██╔═██╗ ",
-    "    ██║  ██║  ██║╚██████╔╝███████╗██║  ██╗",
-    "    ╚═╝  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝",
-];
-
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    let accent = Style::default()
-        .fg(palette::ACCENT)
-        .add_modifier(Modifier::BOLD);
-    let text = Style::default();
-    let dim = Style::default()
-        .fg(palette::ACCENT_ALT)
-        .add_modifier(Modifier::ITALIC);
+    let _ = app;
     let key = Style::default().fg(palette::ACCENT);
-
-    let ss58 = app.session.my_ss58.clone();
-    let content_h: u16 = u16::try_from(BANNER.len() + 12).unwrap_or(u16::MAX);
-    let top_pad = area.height.saturating_sub(content_h) / 2;
-
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    for _ in 0..top_pad {
-        lines.push(Line::raw(""));
-    }
-    for b in BANNER {
-        lines.push(centered_line(b, area.width, accent));
-    }
-    lines.push(Line::raw(""));
-    lines.push(centered_line(
-        "Substrate Account Messaging Protocol",
-        area.width,
-        dim,
-    ));
-    lines.push(Line::raw(""));
-    lines.push(centered_line(
-        &format!("{} you: {ss58}", icons::ACCOUNT),
-        area.width,
-        text,
-    ));
-    lines.push(Line::raw(""));
-    lines.push(Line::raw(""));
+    let text = Style::default();
 
     let shortcuts: &[(&str, &str, &str)] = &[
         ("n", icons::THREADS, "new thread"),
@@ -61,16 +20,23 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         ("?", icons::HELP, "help"),
         ("q", icons::EXIT, "quit"),
     ];
+
+    let content_h = u16::try_from(shortcuts.len()).unwrap_or(u16::MAX);
+    let top_pad = area.height.saturating_sub(content_h) / 2;
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    for _ in 0..top_pad {
+        lines.push(Line::raw(""));
+    }
     for (k, glyph, label) in shortcuts {
         let row = format!("  {k}   {glyph} {label}");
         let pad = usize::from(area.width).saturating_sub(row.chars().count()) / 2;
-        let spans = vec![
+        lines.push(Line::from(vec![
             Span::raw(" ".repeat(pad)),
             Span::styled(format!("  {k}   "), key),
             Span::styled(format!("{glyph} "), key),
             Span::styled((*label).to_string(), text),
-        ];
-        lines.push(Line::from(spans));
+        ]));
     }
 
     frame.render_widget(Paragraph::new(lines), area);
