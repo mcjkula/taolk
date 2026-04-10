@@ -285,10 +285,14 @@ fn render_standalone(
                 .with_timezone(&chrono::Local)
                 .format(&app.date_format)
                 .to_string();
-            let (type_icon, type_label, badge_bg) = if msg.content_type == 0x00 {
-                (super::icons::PUBLIC, "public", Color::Cyan)
-            } else {
-                (super::icons::ENCRYPTED, "encrypted", Color::Magenta)
+            let (type_icon, type_label, badge_bg) = match msg.content_type {
+                0x00 => (super::icons::PUBLIC, "public", Color::Cyan),
+                0x02 => (super::icons::ENCRYPTED, "encrypted", Color::Magenta),
+                other => (
+                    super::icons::BLOCK,
+                    &*format!("0x{other:02x}"),
+                    Color::DarkGray,
+                ),
             };
 
             lines.push(Line::from(vec![
@@ -340,10 +344,10 @@ fn render_standalone(
 
     if let Some(text) = pending {
         let spinner = app.spinner_16();
-        let (type_icon, type_label) = if app.pending_msg_type == Some(0x01) {
-            (super::icons::PUBLIC, "public")
-        } else {
-            (super::icons::ENCRYPTED, "encrypted")
+        let type_badge: Option<(&str, &str)> = match app.pending_msg_type {
+            Some(0x01) => Some((super::icons::PUBLIC, "public")),
+            Some(0x02) => Some((super::icons::ENCRYPTED, "encrypted")),
+            _ => None,
         };
         let recipient_label = app
             .msg_recipient
@@ -352,23 +356,29 @@ fn render_standalone(
             .unwrap_or_default();
 
         lines.push(Line::raw(""));
-        lines.push(Line::from(vec![
-            Span::styled(format!(" {spinner}  "), Style::default().fg(palette::MUTED)),
-            Span::styled(
-                format!(" {type_icon} {type_label} "),
+        let mut spans = vec![Span::styled(
+            format!(" {spinner}  "),
+            Style::default().fg(palette::MUTED),
+        )];
+        if let Some((icon, label)) = type_badge {
+            spans.push(Span::styled(
+                format!(" {icon} {label} "),
                 Style::default()
                     .fg(palette::MUTED)
                     .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
-            Span::styled("To: ", Style::default().fg(palette::MUTED)),
-            Span::styled(
+            ));
+            spans.push(Span::raw(" "));
+        }
+        if !recipient_label.is_empty() {
+            spans.push(Span::styled("To: ", Style::default().fg(palette::MUTED)));
+            spans.push(Span::styled(
                 truncate(&recipient_label, 20),
                 Style::default()
                     .fg(palette::MUTED)
                     .add_modifier(Modifier::BOLD),
-            ),
-        ]));
+            ));
+        }
+        lines.push(Line::from(spans));
 
         for text_line in text.lines() {
             lines.push(Line::styled(
