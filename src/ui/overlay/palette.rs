@@ -164,7 +164,7 @@ pub fn render(frame: &mut Frame, app: &App) {
                     if selected { selected_style } else { name_style },
                 ),
                 Span::styled(
-                    format!("/{:<12} ", cmd.name),
+                    format!("{:<13} ", cmd.name),
                     if selected { selected_style } else { name_style },
                 ),
                 Span::styled(cmd.summary.to_string(), summary_style),
