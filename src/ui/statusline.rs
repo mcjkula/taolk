@@ -52,17 +52,15 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
     let highlight_frames: u32 = 8;
 
-    let balance_str = match app.session.balance {
-        Some(bal) => format!(
-            " {} ",
-            taolk::util::format_balance_short(
-                bal,
-                app.session.token_decimals,
-                &app.session.token_symbol
-            )
-        ),
-        None => String::new(),
-    };
+    let bal = app.session.balance.unwrap_or(0);
+    let balance_str = format!(
+        " {} ",
+        taolk::util::format_balance_short(
+            bal,
+            app.session.token_decimals,
+            &app.session.token_symbol
+        )
+    );
     let balance_fresh = app.frame.wrapping_sub(app.balance_changed_at) < highlight_frames;
     let balance_style = if balance_fresh {
         if app.balance_decreased {
@@ -119,9 +117,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 .add_modifier(Modifier::REVERSED | Modifier::BOLD),
         ));
     }
-    if !balance_str.is_empty() {
-        right_spans.push(Span::styled(balance_str, balance_style));
-    }
+    right_spans.push(Span::styled(balance_str, balance_style));
     right_spans.push(Span::styled(block_str, block_style));
 
     frame.render_widget(Paragraph::new(Line::from(right_spans)), cols[1]);
