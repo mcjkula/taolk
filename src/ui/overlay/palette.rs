@@ -49,11 +49,11 @@ impl PaletteState {
                 }
                 Action::Close
             }
-            KeyCode::Up => {
+            KeyCode::Up | KeyCode::BackTab => {
                 self.cursor = self.cursor.saturating_sub(1);
                 Action::None
             }
-            KeyCode::Down => {
+            KeyCode::Down | KeyCode::Tab => {
                 if self.cursor + 1 < self.ranking.len() {
                     self.cursor += 1;
                 }
