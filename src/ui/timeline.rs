@@ -607,7 +607,7 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
         header_line(
             super::icons::CHANNELS,
             "Channels",
-            &format!("{count} available"),
+            &format!("{count} channels"),
             usize::from(area.width),
         ),
         separator(area.width),
@@ -684,7 +684,7 @@ fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
         header_line(
             super::icons::ACCOUNT,
             "Contacts",
-            &format!("{total} known"),
+            &format!("{total} contacts"),
             w,
         ),
         separator(area.width),
@@ -751,7 +751,7 @@ fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
         header_line(
             super::icons::ACCOUNT,
             "Copy SS58",
-            &format!("{total} senders"),
+            &format!("{total} senders in view"),
             w,
         ),
         separator(area.width),
@@ -810,7 +810,7 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
         header_line(
             super::icons::GROUPS,
             "Select Members",
-            &format!("{others_selected} selected, {total} known"),
+            &format!("{others_selected} selected, {total} contacts"),
             w,
         ),
         separator(area.width),
