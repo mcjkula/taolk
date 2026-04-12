@@ -526,6 +526,93 @@ fn dispatch_unlock_all(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn dispatch_channel_create(
+    app: &mut App,
+    wallet_name: &str,
+    require_password: bool,
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    events: &TuiEventHandler,
+    send_tx: &std::sync::mpsc::Sender<event::Event>,
+    rt: &tokio::runtime::Runtime,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let name = match app.pending_channel_name.as_deref() {
+        Some(n) => n.to_string(),
+        None => return Ok(()),
+    };
+    let desc = app
+        .pending_channel_desc
+        .as_deref()
+        .unwrap_or("")
+        .to_string();
+    let name_typed = match samp::ChannelName::parse(name) {
+        Ok(n) => n,
+        Err(e) => {
+            app.set_error(format!("Invalid channel name: {e}"));
+            return Ok(());
+        }
+    };
+    let desc_typed = match samp::ChannelDescription::parse(desc) {
+        Ok(d) => d,
+        Err(e) => {
+            app.set_error(format!("Invalid description: {e}"));
+            return Ok(());
+        }
+    };
+    let remark = match app.session.build_channel_create(&name_typed, &desc_typed) {
+        Ok(r) => r,
+        Err(e) => {
+            app.set_error(format!("Cannot create channel: {e}"));
+            return Ok(());
+        }
+    };
+    if require_password {
+        let seed = match acquire_seed(app, wallet_name, true, terminal, events)? {
+            Some(s) => s,
+            None => {
+                app.set_status("Cancelled");
+                return Ok(());
+            }
+        };
+        let signing_key = taolk::secret::Seed::from_bytes(*seed).derive_signing_key();
+        app.ephemeral_signing = Some(std::sync::Arc::new(signing_key));
+    }
+    app.pending_remark = Some(remark.clone());
+    app.pending_text = None;
+    app.pending_fee = None;
+    app.overlay = Some(app::Overlay::Confirm);
+
+    let signing = app
+        .ephemeral_signing
+        .clone()
+        .or_else(|| app.session.signing())
+        .expect("signing key available");
+    let ss58 = app.session.my_ss58.clone();
+    let ci = app.session.chain_info.clone();
+    let url = app.session.node_url.clone();
+    let tx = send_tx.clone();
+    let symbol = app.session.token_symbol.clone();
+    let decimals = app.session.token_decimals;
+    rt.spawn(async move {
+        match extrinsic::estimate_fee(url.as_str(), &remark, &signing, &ss58, &ci).await {
+            Ok(fee) => {
+                let display = util::format_fee(fee, decimals, &symbol);
+                let _ = tx.send(event::Event::FeeEstimated {
+                    fee_display: display,
+                    fee_raw: Some(fee),
+                });
+            }
+            Err(e) => {
+                let _ = tx.send(event::Event::FeeEstimated {
+                    fee_display: format!("error: {e}"),
+                    fee_raw: None,
+                });
+            }
+        }
+    });
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 fn dispatch_pending_send(
     app: &mut App,
     text: String,
@@ -551,6 +638,10 @@ fn dispatch_pending_send(
         }
     };
     let result = build_send_remark(app, &seed, &body);
+    if require_password {
+        let signing_key = taolk::secret::Seed::from_bytes(*seed).derive_signing_key();
+        app.ephemeral_signing = Some(std::sync::Arc::new(signing_key));
+    }
     drop(seed);
     match result {
         Ok(remark) => {
@@ -560,7 +651,11 @@ fn dispatch_pending_send(
             app.reset_input();
             app.overlay = Some(Overlay::Confirm);
 
-            let signing = app.session.signing();
+            let signing = app
+                .ephemeral_signing
+                .clone()
+                .or_else(|| app.session.signing())
+                .expect("signing key available");
             let ss58 = app.session.my_ss58.clone();
             let ci = app.session.chain_info.clone();
             let url = app.session.node_url.clone();
@@ -904,6 +999,18 @@ fn run_session(
                 &rt,
             )?;
         }
+        if app.pending_channel_create {
+            app.pending_channel_create = false;
+            dispatch_channel_create(
+                &mut app,
+                wallet_name,
+                cfg.security.require_password_per_send,
+                terminal,
+                events,
+                &event_tx,
+                &rt,
+            )?;
+        }
         if app.pending_unlock_all {
             app.pending_unlock_all = false;
             dispatch_unlock_all(
@@ -933,7 +1040,7 @@ fn run_session(
                 if key.code == KeyCode::Char('w') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     return Ok(SessionExit::SwitchWallet);
                 }
-                handle_key(&mut app, key, &event_tx, &rt);
+                handle_key(&mut app, key, &event_tx);
                 if app.lock_requested {
                     app.lock_requested = false;
                     return Ok(SessionExit::Lock);
@@ -1161,7 +1268,11 @@ fn run_session(
             }
             TuiEvent::Core(event::Event::SubmitRemark { remark }) => {
                 let url = app.session.node_url.clone();
-                let signing = app.session.signing();
+                let signing = app
+                    .ephemeral_signing
+                    .take()
+                    .or_else(|| app.session.signing())
+                    .expect("signing key available");
                 let ss58 = app.session.my_ss58.clone();
                 let ci = chain_info.clone();
                 let tx = event_tx.clone();
@@ -1249,6 +1360,7 @@ fn run_session(
             }
             TuiEvent::Core(event::Event::MessageSent) => {
                 app.sending = false;
+                app.ephemeral_signing = None;
                 app.pending_text = None;
                 app.pending_view = None;
                 let fee_info = app
@@ -1366,6 +1478,7 @@ fn run_session(
                         app.input.set(text);
                     }
                     app.sending = false;
+                    app.ephemeral_signing = None;
                     app.pending_view = None;
                 }
                 app.set_chain_error(&e);
@@ -1479,7 +1592,6 @@ fn handle_key(
     app: &mut App,
     key: crossterm::event::KeyEvent,
     send_tx: &std::sync::mpsc::Sender<event::Event>,
-    rt: &tokio::runtime::Runtime,
 ) {
     if let Some(overlay) = app.overlay {
         match overlay {
@@ -1488,7 +1600,7 @@ fn handle_key(
             Overlay::Compose => handle_compose_key(app, key),
             Overlay::Message => handle_message_key(app, key),
             Overlay::CreateChannel => handle_create_channel_key(app, key),
-            Overlay::CreateChannelDesc => handle_create_channel_desc_key(app, key, send_tx, rt),
+            Overlay::CreateChannelDesc => handle_create_channel_desc_key(app, key),
             Overlay::CreateGroupMembers => handle_create_group_members_key(app, key, send_tx),
             Overlay::Search => handle_search_key(app, key),
             Overlay::SenderPicker => handle_sender_picker_key(app, key),
@@ -2023,12 +2135,7 @@ fn handle_create_channel_key(app: &mut App, key: crossterm::event::KeyEvent) {
     }
 }
 
-fn handle_create_channel_desc_key(
-    app: &mut App,
-    key: crossterm::event::KeyEvent,
-    send_tx: &std::sync::mpsc::Sender<event::Event>,
-    rt: &tokio::runtime::Runtime,
-) {
+fn handle_create_channel_desc_key(app: &mut App, key: crossterm::event::KeyEvent) {
     match key.code {
         KeyCode::Enter => {
             let desc = app.input.as_str().trim().to_string();
@@ -2039,68 +2146,13 @@ fn handle_create_channel_desc_key(
                 ));
                 return;
             }
-            let name = match &app.pending_channel_name {
-                Some(n) => n.clone(),
-                None => {
-                    app.close_overlay();
-                    return;
-                }
-            };
-            app.pending_channel_desc = Some(desc.clone());
-            let name_typed = match samp::ChannelName::parse(name.clone()) {
-                Ok(n) => n,
-                Err(e) => {
-                    app.set_status(format!("Invalid channel name: {e}"));
-                    app.close_overlay();
-                    return;
-                }
-            };
-            let desc_typed = match samp::ChannelDescription::parse(desc.clone()) {
-                Ok(d) => d,
-                Err(e) => {
-                    app.set_status(format!("Invalid description: {e}"));
-                    app.close_overlay();
-                    return;
-                }
-            };
-            match app.session.build_channel_create(&name_typed, &desc_typed) {
-                Ok(remark) => {
-                    app.pending_remark = Some(remark.clone());
-                    app.pending_text = None;
-                    app.pending_fee = None;
-                    app.overlay = Some(Overlay::Confirm);
-
-                    let signing = app.session.signing();
-                    let ss58 = app.session.my_ss58.clone();
-                    let ci = app.session.chain_info.clone();
-                    let url = app.session.node_url.clone();
-                    let tx = send_tx.clone();
-                    let symbol = app.session.token_symbol.clone();
-                    let decimals = app.session.token_decimals;
-                    rt.spawn(async move {
-                        match extrinsic::estimate_fee(url.as_str(), &remark, &signing, &ss58, &ci)
-                            .await
-                        {
-                            Ok(fee) => {
-                                let display = util::format_fee(fee, decimals, &symbol);
-                                let _ = tx.send(event::Event::FeeEstimated {
-                                    fee_display: display,
-                                    fee_raw: Some(fee),
-                                });
-                            }
-                            Err(e) => {
-                                let _ = tx.send(event::Event::FeeEstimated {
-                                    fee_display: format!("error: {e}"),
-                                    fee_raw: None,
-                                });
-                            }
-                        }
-                    });
-                }
-                Err(reason) => {
-                    app.set_error(format!("Cannot create channel: {reason}"));
-                }
+            if app.pending_channel_name.is_none() {
+                app.close_overlay();
+                return;
             }
+            app.pending_channel_desc = Some(desc);
+            app.pending_channel_create = true;
+            app.close_overlay();
         }
         KeyCode::Esc => {
             app.input
@@ -2384,6 +2436,7 @@ fn handle_confirm_key(
         KeyCode::Esc => {
             app.pending_remark = None;
             app.pending_fee = None;
+            app.ephemeral_signing = None;
             if app.is_pending_group() {
                 if let Some(text) = app.pending_text.take() {
                     app.input.set(text);

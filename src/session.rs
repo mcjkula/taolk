@@ -36,7 +36,7 @@ fn reindex(index: &mut HashMap<BlockRef, usize>, removed: usize) {
 }
 
 pub struct Session {
-    signing: Arc<SigningKey>,
+    signing: Option<Arc<SigningKey>>,
     pubkey: Pubkey,
     pub my_ss58: String,
     seed: Option<Zeroizing<[u8; 32]>>,
@@ -76,9 +76,15 @@ impl Session {
         let view_scalar = Zeroizing::new(
             *samp::sr25519_signing_scalar(&samp::Seed::from_bytes(*seed)).expose_secret(),
         );
+        let signing = if keep_seed {
+            Some(Arc::new(signing))
+        } else {
+            drop(signing);
+            None
+        };
         let seed = if keep_seed { Some(seed) } else { None };
         Self {
-            signing: Arc::new(signing),
+            signing,
             pubkey,
             my_ss58,
             seed,
@@ -201,12 +207,8 @@ impl Session {
         self.pubkey
     }
 
-    pub fn sign(&self, msg: &[u8]) -> [u8; 64] {
-        self.signing.sign(msg)
-    }
-
-    pub fn signing(&self) -> Arc<SigningKey> {
-        Arc::clone(&self.signing)
+    pub fn signing(&self) -> Option<Arc<SigningKey>> {
+        self.signing.as_ref().map(Arc::clone)
     }
 
     pub fn view_scalar(&self) -> samp::ViewScalar {
@@ -920,10 +922,14 @@ impl Session {
     }
 
     pub async fn submit(&self, remark: &samp::RemarkBytes) -> Result<String> {
+        let signing = self
+            .signing
+            .as_ref()
+            .expect("signing key required for submit");
         crate::extrinsic::submit_remark(
             self.node_url.as_str(),
             remark,
-            &self.signing,
+            signing,
             &self.my_ss58,
             &self.chain_info,
         )
@@ -942,10 +948,14 @@ impl Session {
     }
 
     pub async fn estimate_fee(&self, remark: &samp::RemarkBytes) -> Result<u128> {
+        let signing = self
+            .signing
+            .as_ref()
+            .expect("signing key required for fee estimation");
         Ok(crate::extrinsic::estimate_fee(
             self.node_url.as_str(),
             remark,
-            &self.signing,
+            signing,
             &self.my_ss58,
             &self.chain_info,
         )
