@@ -115,8 +115,9 @@ impl Session {
         seed: &[u8; 32],
         node_url: &str,
         wallet_name: &str,
+        keep_seed: bool,
     ) -> Result<(Self, mpsc::Receiver<crate::event::Event>)> {
-        Self::start_with_mirrors(seed, node_url, wallet_name, &[]).await
+        Self::start_with_mirrors(seed, node_url, wallet_name, &[], keep_seed).await
     }
 
     pub async fn start_with_mirrors(
@@ -124,6 +125,7 @@ impl Session {
         node_url: &str,
         wallet_name: &str,
         mirror_urls: &[String],
+        keep_seed: bool,
     ) -> Result<(Self, mpsc::Receiver<crate::event::Event>)> {
         let signing = Seed::from_bytes(*seed).derive_signing_key();
         let my_pubkey = signing.public_key();
@@ -143,7 +145,7 @@ impl Session {
         let mut session = Self::new(
             signing,
             Zeroizing::new(*seed),
-            true,
+            keep_seed,
             crate::types::NodeUrl::parse(node_url).map_err(|e| SdkError::Other(e.to_string()))?,
             chain_info,
             db,
