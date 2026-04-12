@@ -23,7 +23,7 @@
 
 ---
 
-Built on [SAMP](https://github.com/samp-org/samp) (Substrate Account Messaging Protocol). Runs as a terminal UI for humans, a CLI for setup, and an embeddable Rust SDK for agents and scripts.
+Built on [SAMP](https://github.com/samp-org/samp) (Substrate Account Messaging Protocol). Terminal UI, CLI, and embeddable Rust SDK.
 
 ## Install
 
@@ -43,22 +43,37 @@ macOS and Linux supported. Windows is not currently built or tested.
 
 ## Getting started
 
-1. **Create a wallet.** Write down the 12-word recovery phrase — it's the only way to recover funds and message history.
-   ```
-   taolk wallet create --name alice
-   ```
-2. **Fund it.** Your SS58 address is shown on the lock screen. Transfer τ from an exchange or testnet faucet.
-3. **Launch.**
-   ```
-   taolk
-   ```
-4. **Send a self-DM.** Your own SS58 is always a valid recipient. If it round-trips, the setup works end-to-end.
-5. **Message a friend.** Share SS58 addresses out of band, press `n` to start a thread.
-6. **Browse channels.** Press `c` to open the channel directory.
+### 1. Create a wallet
+
+```
+taolk wallet create --name <name>
+```
+
+The name identifies this wallet on the lock screen. Write down the 12-word recovery phrase before confirming.
+
+### 2. Fund your account
+
+taolk prints your address after creation. Each message is an on-chain transaction, so you need a small balance for fees. Transfer τ from an exchange or testnet faucet.
+
+### 3. Launch
+
+```
+taolk --wallet <name> --mirror https://bittensor-finney.samp.ink
+```
+
+`--wallet` selects which wallet to unlock. `--mirror` connects to a SAMP mirror for channel discovery and message history. Both are optional.
+
+### 4. Verify your setup
+
+Press `m`, paste your own address, pick public, type something. If it appears in your inbox, the full pipeline works.
+
+### 5. Start messaging
+
+Press `n` to start a thread with someone. Press `c` to browse public channels.
 
 ## TUI
 
-Press `?` for the in-app keybind reference. Press `/` to open the command palette.
+Press `?` for the keybind reference. Press `/` to open the command palette.
 
 | Context | Keys |
 |---------|------|
@@ -69,16 +84,16 @@ Press `?` for the in-app keybind reference. Press `/` to open the command palett
 
 ### Messaging
 
-- **Threads** — encrypted 1:1 conversations (Ristretto255 ECDH + ChaCha20-Poly1305)
-- **Channels** — public, named, discoverable
-- **Groups** — encrypted multi-party, fixed membership
-- **One-off messages** — public or encrypted, standalone
+- **Threads**: encrypted 1:1 conversations (Ristretto255 ECDH + ChaCha20-Poly1305)
+- **Channels**: public, named, discoverable
+- **Groups**: encrypted multi-party, fixed membership
+- **One-off messages**: public or encrypted, standalone
 
-All messages are signed remarks on-chain. Every message has a verifiable sender.
+All messages are signed remarks on-chain with a verifiable sender.
 
 ### Commands
 
-15 commands available via `/` in the TUI:
+15 commands available via `/`:
 
 | Command | What it does |
 |---------|-------------|
@@ -91,9 +106,9 @@ All messages are signed remarks on-chain. Every message has a verifiable sender.
 | `outbox` | Jump to sent |
 | `sidebar` | Toggle sidebar |
 | `help` | Show help overlay |
-| `get` | Fetch remark(s) at block:index positions |
+| `get` | Get remark(s) at block:index positions |
 | `refresh` | Reload and fill message gaps |
-| `copy` | Copy a sender's SS58 address |
+| `copy` | Copy a sender's address |
 | `unlock` | Unlock locked outbound messages |
 | `lock` | Lock the session |
 | `wallet` | Switch wallet |
@@ -149,9 +164,9 @@ async fn main() -> taolk::error::Result<()> {
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `wallet.default` | — | Wallet to open on launch |
+| `wallet.default` | | Wallet to open on launch |
 | `network.node` | `wss://entrypoint-finney.opentensor.ai:443` | Subtensor node URL |
-| `network.mirrors` | — | SAMP mirror URLs |
+| `network.mirrors` | | SAMP mirror URLs |
 | `security.lock_timeout` | `300` | Auto-lock seconds (0 = disabled) |
 | `security.require_password_per_send` | `false` | Prompt password for every transaction |
 | `ui.sidebar_width` | `28` | Sidebar width |
@@ -161,11 +176,16 @@ async fn main() -> taolk::error::Result<()> {
 
 ## Mirrors
 
-Mirrors index SAMP remarks and serve them via HTTP. Configure:
+Mirrors index SAMP remarks and serve them over HTTP for channel discovery and message history. Mirrors never see decrypted content. taolk verifies all data against the chain.
 
 ```
 taolk config set network.mirrors https://bittensor-finney.samp.ink
 ```
+
+| Network | URL |
+|---------|-----|
+| Mainnet | `https://bittensor-finney.samp.ink` |
+| Testnet | `https://bittensor-testnet.samp.ink` |
 
 Run your own with [mirror-template](https://github.com/samp-org/mirror-template).
 
@@ -173,7 +193,7 @@ Run your own with [mirror-template](https://github.com/samp-org/mirror-template)
 
 Wallet files: Argon2id (64 MB, 3 iterations) + ChaCha20-Poly1305. Stored with `0600` permissions.
 
-Secret types (`Seed`, `Password`, `Phrase`, `SigningKey`): no `Clone`, no `Debug`, no `Display`. All wrap `Zeroizing` and are zeroed on drop. When `require_password_per_send` is enabled, the signing key is never stored — it exists only between password entry and transaction submission, then is dropped.
+Secret types (`Seed`, `Password`, `Phrase`, `SigningKey`): no `Clone`, no `Debug`, no `Display`. All wrap `Zeroizing` and are zeroed on drop. When `require_password_per_send` is enabled, the signing key is not stored in memory. It exists only between password entry and transaction submission.
 
 On the wire: 1:1 and group messages use ECDH on Ristretto255 with ChaCha20-Poly1305 AEAD. Channels are plaintext by design. The private key never leaves the client.
 
@@ -194,4 +214,4 @@ cargo test                                   # 355 tests
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
