@@ -274,3 +274,74 @@ fn different_seeds_different_encryption() {
     assert_eq!(threads_a[0].2[0].body, "same plaintext");
     assert_eq!(threads_b[0].2[0].body, "same plaintext");
 }
+
+#[test]
+fn draft_save_load_delete_round_trip() {
+    let db = test_db();
+    db.save_draft(taolk::db::ConversationKind::Thread, 100, 0, "my draft");
+    let drafts = db.load_drafts();
+    assert_eq!(drafts.len(), 1);
+    assert_eq!(drafts[0].0, taolk::db::ConversationKind::Thread);
+    assert_eq!(drafts[0].1, BlockRef::from_parts(100, 0));
+    assert_eq!(drafts[0].2, "my draft");
+
+    db.delete_draft(taolk::db::ConversationKind::Thread, 100, 0);
+    let drafts = db.load_drafts();
+    assert!(drafts.is_empty());
+}
+
+#[test]
+fn load_channels_round_trip() {
+    let db = test_db();
+    let ch_ref = BlockRef::from_parts(600, 2);
+    db.insert_channel(ch_ref, "roundtrip-ch", "roundtrip desc", "Bob");
+    let msg = make_thread_msg("channel round-trip msg", false, 700, 0);
+    db.insert_threaded_message(taolk::db::ConversationKind::Channel, ch_ref, &msg, 700, 0);
+
+    let channels = db.load_channels();
+    assert_eq!(channels.len(), 1);
+    assert_eq!(channels[0].0, ch_ref);
+    assert_eq!(channels[0].1, "roundtrip-ch");
+    assert_eq!(channels[0].2, "roundtrip desc");
+    assert_eq!(channels[0].3, "Bob");
+    assert_eq!(channels[0].4.len(), 1);
+    assert_eq!(channels[0].4[0].body, "channel round-trip msg");
+}
+
+#[test]
+fn load_groups_round_trip() {
+    let db = test_db();
+    let group_ref = BlockRef::from_parts(800, 1);
+    let creator = Pubkey::from_bytes([0x10; 32]);
+    let members = vec![
+        Pubkey::from_bytes([0x20; 32]),
+        Pubkey::from_bytes([0x30; 32]),
+    ];
+    db.insert_group(group_ref, &creator, &members);
+
+    let msg = make_thread_msg("group round-trip msg", false, 900, 0);
+    db.insert_threaded_message(taolk::db::ConversationKind::Group, group_ref, &msg, 900, 0);
+
+    let groups = db.load_groups();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].0, group_ref);
+    assert_eq!(groups[0].1, creator);
+    assert_eq!(groups[0].2.len(), 2);
+
+    let messages = db.load_group_messages(group_ref);
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].body, "group round-trip msg");
+}
+
+#[test]
+fn update_channel_meta_reload() {
+    let db = test_db();
+    let ch_ref = BlockRef::from_parts(1000, 0);
+    db.insert_channel(ch_ref, "old", "old desc", "Creator");
+    db.update_channel_meta(ch_ref, "new", "new desc", "Creator");
+
+    let channels = db.load_channels();
+    assert_eq!(channels.len(), 1);
+    assert_eq!(channels[0].1, "new");
+    assert_eq!(channels[0].2, "new desc");
+}

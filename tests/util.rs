@@ -223,3 +223,86 @@ fn body_mentions_at_start() {
 fn body_mentions_not_bare() {
     assert!(!util::body_mentions(OTHER_SS58, OTHER_SS58));
 }
+
+// --- format_balance_short ---
+
+#[test]
+fn format_balance_short_large_value() {
+    let result = util::format_balance_short(999_999_000_000_000, 9, "TAO");
+    assert!(result.contains("\u{03C4}"));
+    assert!(result.contains("999,999"));
+}
+
+#[test]
+fn format_balance_short_sub_unit() {
+    let result = util::format_balance_short(100_000, 9, "TAO");
+    assert!(result.starts_with("0."));
+    assert!(result.contains("\u{03C4}"));
+}
+
+// --- ss58_short ---
+
+#[test]
+fn ss58_short_truncates() {
+    let pk = Pubkey::from_bytes([0x11; 32]);
+    let short = util::ss58_short(&pk);
+    let full = util::ss58_from_pubkey(&pk);
+    assert!(short.len() < full.len());
+    assert!(short.contains("..."));
+    assert!(short.starts_with(&full[..6]));
+    assert!(short.ends_with(&full[full.len() - 4..]));
+}
+
+// --- ss58_from_pubkey deterministic ---
+
+#[test]
+fn ss58_from_pubkey_deterministic_repeated() {
+    let pk = Pubkey::from_bytes([0xFF; 32]);
+    let a = util::ss58_from_pubkey(&pk);
+    let b = util::ss58_from_pubkey(&pk);
+    let c = util::ss58_from_pubkey(&pk);
+    assert_eq!(a, b);
+    assert_eq!(b, c);
+}
+
+// --- format_balance_short edge cases ---
+
+#[test]
+fn format_balance_short_one_planck() {
+    let result = util::format_balance_short(1, 9, "TAO");
+    assert!(result.starts_with("0."));
+}
+
+#[test]
+fn format_balance_short_zero_decimals() {
+    let result = util::format_balance_short(42, 0, "TAO");
+    assert_eq!(result, "42 \u{03C4}");
+}
+
+#[test]
+fn format_number_zero() {
+    assert_eq!(util::format_number(0), "0");
+}
+
+#[test]
+fn format_number_small() {
+    assert_eq!(util::format_number(999), "999");
+}
+
+#[test]
+fn format_number_boundary() {
+    assert_eq!(util::format_number(1000), "1,000");
+}
+
+#[test]
+fn format_fee_large_enough_for_balance_format() {
+    let result = util::format_fee(2_000_000_000, 9, "TAO");
+    assert!(result.contains("\u{03C4}"));
+    assert!(result.contains("2"));
+}
+
+#[test]
+fn truncate_exact_boundary() {
+    let s = "abcdefghij";
+    assert_eq!(util::truncate(s, 10), s);
+}

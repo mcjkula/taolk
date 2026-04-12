@@ -223,6 +223,121 @@ fn read_extrinsic_skips_message_for_wrong_recipient() {
     );
 }
 
+#[test]
+fn process_remark_channel_create() {
+    let alice_seed = [0xAA; 32];
+    let alice_sk = signing(&alice_seed);
+    let alice_pubkey = alice_sk.public_key();
+
+    let name = samp::ChannelName::parse("general").unwrap();
+    let desc = samp::ChannelDescription::parse("main channel").unwrap();
+    let remark = samp::encode_channel_create(&name, &desc);
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
+    let hex = ext_to_hex(&ext);
+
+    let (tx, rx) = mpsc::channel();
+    let keys = make_keys(&alice_seed);
+    let ctx = make_ctx(&keys, &alice_pubkey, &tx);
+    reader::read_extrinsic(&hex, &ctx, 500, 0, 1_700_000_000_000);
+
+    match rx.try_recv() {
+        Ok(Event::ChannelDiscovered {
+            name,
+            description,
+            channel_ref,
+            ..
+        }) => {
+            assert_eq!(name, "general");
+            assert_eq!(description, "main channel");
+            assert_eq!(channel_ref, taolk::types::BlockRef::from_parts(500, 0));
+        }
+        other => panic!("expected ChannelDiscovered, got {:?}", event_debug(&other)),
+    }
+}
+
+#[test]
+fn process_remark_channel_message() {
+    let alice_seed = [0xAA; 32];
+    let alice_sk = signing(&alice_seed);
+    let alice_pubkey = alice_sk.public_key();
+
+    let channel_ref = taolk::types::BlockRef::from_parts(300, 1);
+    let remark = samp::encode_channel_msg(
+        channel_ref,
+        taolk::types::BlockRef::ZERO,
+        taolk::types::BlockRef::ZERO,
+        "hello channel",
+    );
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
+    let hex = ext_to_hex(&ext);
+
+    let (tx, rx) = mpsc::channel();
+    let keys = make_keys(&alice_seed);
+    let ctx = make_ctx(&keys, &alice_pubkey, &tx);
+    reader::read_extrinsic(&hex, &ctx, 600, 2, 1_700_000_000_000);
+
+    match rx.try_recv() {
+        Ok(Event::NewChannelMessage {
+            sender,
+            channel_ref: wire_ref,
+            body,
+            block_number,
+            ext_index,
+            ..
+        }) => {
+            assert_eq!(sender, alice_pubkey);
+            assert_eq!(wire_ref, channel_ref);
+            assert_eq!(body, "hello channel");
+            assert_eq!(block_number, 600);
+            assert_eq!(ext_index, 2);
+        }
+        other => panic!("expected NewChannelMessage, got {:?}", event_debug(&other)),
+    }
+}
+
+#[test]
+fn process_remark_locked_outbound() {
+    let alice_seed = [0xAA; 32];
+    let alice_sk = signing(&alice_seed);
+    let alice_pubkey = alice_sk.public_key();
+
+    let bob_seed = [0xBB; 32];
+    let bob_ristretto_pub = samp::public_from_seed(&samp::Seed::from_bytes(bob_seed));
+
+    let plaintext = samp::Plaintext::from_bytes(b"outbound secret".to_vec());
+    let nonce = samp::Nonce::from_bytes([0x05; 12]);
+    let alice_samp_seed = samp::Seed::from_bytes(alice_seed);
+
+    let view_tag = samp::compute_view_tag(&alice_samp_seed, &bob_ristretto_pub, &nonce).unwrap();
+    let encrypted =
+        samp::encrypt(&plaintext, &bob_ristretto_pub, &nonce, &alice_samp_seed).unwrap();
+    let remark = samp::encode_encrypted(samp::ContentType::Encrypted, view_tag, &nonce, &encrypted);
+
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
+    let hex = ext_to_hex(&ext);
+
+    let (tx, rx) = mpsc::channel();
+    let view_scalar =
+        *samp::sr25519_signing_scalar(&samp::Seed::from_bytes(alice_seed)).expose_secret();
+    let keys = DecryptionKeys::new(view_scalar, None);
+    let ctx = make_ctx(&keys, &alice_pubkey, &tx);
+    reader::read_extrinsic(&hex, &ctx, 700, 1, 1_700_000_000_000);
+
+    match rx.try_recv() {
+        Ok(Event::LockedOutbound {
+            sender,
+            block_number,
+            ext_index,
+            ..
+        }) => {
+            assert_eq!(sender, alice_pubkey);
+            assert_eq!(block_number, 700);
+            assert_eq!(ext_index, 1);
+        }
+        other => panic!("expected LockedOutbound, got {:?}", event_debug(&other)),
+    }
+}
+
 fn event_debug(result: &Result<Event, mpsc::TryRecvError>) -> String {
     match result {
         Ok(Event::NewMessage {

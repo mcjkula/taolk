@@ -1,6 +1,6 @@
 mod common;
 
-use common::{bob_pubkey as bob_pub, bob_session, br, charlie_session, dave_pubkey, now};
+use common::{BOB_SEED, bob_pubkey as bob_pub, bob_session, br, charlie_session, dave_pubkey, now};
 use taolk::conversation::NewMessage;
 use taolk::types::{BlockRef, Pubkey};
 use taolk::util;
@@ -441,4 +441,128 @@ fn known_contacts_after_inbox_message() {
     s.add_inbox_message(peer, bob_pub(), now(), "hi".into(), 0x10, br(100, 0));
     let contacts = s.known_contacts();
     assert!(contacts.iter().any(|(_, pk)| *pk == peer));
+}
+
+fn mb(s: &str) -> taolk::types::MessageBody {
+    taolk::types::MessageBody::parse(s.to_string()).unwrap()
+}
+
+#[test]
+fn build_public_message_produces_valid_remark() {
+    let session = bob_session();
+    let recipient = dave_pubkey();
+    let remark = session
+        .build_public_message(&recipient, &mb("pub msg"))
+        .unwrap();
+    let decoded = samp::decode_remark(&remark).unwrap();
+    match decoded {
+        samp::Remark::Public { recipient: r, body } => {
+            assert_eq!(r, recipient);
+            assert_eq!(body.as_str(), "pub msg");
+        }
+        _ => panic!("expected PublicRemark"),
+    }
+}
+
+#[test]
+fn build_encrypted_message_produces_valid_remark() {
+    let session = bob_session();
+    let recipient = dave_pubkey();
+    let remark = session
+        .build_encrypted_message(&BOB_SEED, &recipient, &mb("secret"))
+        .unwrap();
+    let decoded = samp::decode_remark(&remark).unwrap();
+    assert!(matches!(decoded, samp::Remark::Encrypted { .. }));
+}
+
+#[test]
+fn build_thread_reply_produces_valid_remark() {
+    let mut session = bob_session();
+    let peer = dave_pubkey();
+    session.create_thread(peer).unwrap();
+    session.add_thread_message(
+        peer,
+        bob_pub(),
+        br(0, 0),
+        NewMessage {
+            sender_ss58: util::ss58_short(&peer),
+            timestamp: now(),
+            body: "root".into(),
+            reply_to: br(0, 0),
+            continues: br(0, 0),
+            block_number: 100,
+            ext_index: 0,
+        },
+    );
+    let remark = session
+        .build_thread_reply(&BOB_SEED, 0, &mb("reply"))
+        .unwrap();
+    let decoded = samp::decode_remark(&remark).unwrap();
+    assert!(matches!(decoded, samp::Remark::Thread { .. }));
+}
+
+#[test]
+fn build_channel_message_produces_valid_remark() {
+    let mut session = bob_session();
+    session.subscribe_channel(br(100, 0));
+    let remark = session.build_channel_message(0, &mb("chan")).unwrap();
+    let decoded = samp::decode_remark(&remark).unwrap();
+    match decoded {
+        samp::Remark::Channel { channel_ref, .. } => {
+            assert_eq!(channel_ref, br(100, 0));
+        }
+        _ => panic!("expected Channel"),
+    }
+}
+
+#[test]
+fn build_channel_create_produces_valid_remark() {
+    let session = bob_session();
+    let name = samp::ChannelName::parse("mychan").unwrap();
+    let desc = samp::ChannelDescription::parse("my desc").unwrap();
+    let remark = session.build_channel_create(&name, &desc).unwrap();
+    let decoded = samp::decode_remark(&remark).unwrap();
+    match decoded {
+        samp::Remark::ChannelCreate { name, description } => {
+            assert_eq!(name.as_str(), "mychan");
+            assert_eq!(description.as_str(), "my desc");
+        }
+        _ => panic!("expected ChannelCreate"),
+    }
+}
+
+#[test]
+fn save_and_load_draft() {
+    let mut session = bob_session();
+    session.subscribe_channel(br(200, 0));
+    session
+        .db
+        .save_draft(taolk::db::ConversationKind::Channel, 200, 0, "draft text");
+    let drafts = session.db.load_drafts();
+    let found = drafts
+        .iter()
+        .find(|(k, bref, _)| *k == taolk::db::ConversationKind::Channel && *bref == br(200, 0));
+    assert!(found.is_some());
+    assert_eq!(found.unwrap().2, "draft text");
+}
+
+#[test]
+fn current_draft_returns_saved() {
+    let mut session = bob_session();
+    session.subscribe_channel(br(300, 0));
+    session.channels[0].draft = "hello draft".into();
+    assert_eq!(session.channels[0].draft, "hello draft");
+}
+
+#[test]
+fn filtered_contacts_returns_known_peers() {
+    let mut session = bob_session();
+    let peer = dave_pubkey();
+    session.add_inbox_message(peer, bob_pub(), now(), "hi".into(), 0x10, br(100, 0));
+    let all = session.known_contacts();
+    let peer_ss58 = util::ss58_short(&peer);
+    assert!(
+        all.iter()
+            .any(|(ss58, pk)| ss58 == &peer_ss58 && *pk == peer)
+    );
 }
