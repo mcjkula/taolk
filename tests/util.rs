@@ -181,3 +181,45 @@ fn body_mentions_allows_trailing_punctuation() {
 fn body_mentions_empty_body() {
     assert!(!util::body_mentions("", TEST_SS58));
 }
+
+#[test]
+fn format_balance_short_zero() {
+    assert_eq!(util::format_balance_short(0, 9, "TAO"), "0.0 \u{03C4}");
+}
+
+#[test]
+fn format_balance_short_whole() {
+    assert_eq!(
+        util::format_balance_short(1_000_000_000, 9, "TAO"),
+        "1.0 \u{03C4}"
+    );
+}
+
+#[test]
+fn format_balance_short_fractional() {
+    assert_eq!(
+        util::format_balance_short(1_500_000_000, 9, "TAO"),
+        "1.5 \u{03C4}"
+    );
+}
+
+#[test]
+fn format_balance_short_non_tao_symbol() {
+    assert_eq!(
+        util::format_balance_short(2_000_000_000, 9, "DOT"),
+        "2.0 DOT"
+    );
+}
+
+#[test]
+fn body_mentions_at_start() {
+    assert!(util::body_mentions(
+        &format!("@{OTHER_SS58} rest"),
+        OTHER_SS58
+    ));
+}
+
+#[test]
+fn body_mentions_not_bare() {
+    assert!(!util::body_mentions(OTHER_SS58, OTHER_SS58));
+}

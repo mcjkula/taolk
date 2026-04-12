@@ -414,3 +414,31 @@ fn session_cleanup_nothing_pending() {
     let result = session.cleanup_pending();
     assert!(result.is_none());
 }
+
+#[test]
+fn channel_subscribe_and_unsubscribe() {
+    let mut s = bob_session();
+    s.discover_channel(
+        "test-chan".into(),
+        "A channel".into(),
+        "Alice".into(),
+        br(100, 0),
+    );
+    s.subscribe_channel(br(100, 0));
+    assert!(s.is_subscribed(&br(100, 0)));
+    assert_eq!(s.channels.len(), 1);
+
+    let name = s.unsubscribe_channel(0);
+    assert_eq!(name, Some("test-chan".into()));
+    assert!(!s.is_subscribed(&br(100, 0)));
+    assert_eq!(s.channels.len(), 0);
+}
+
+#[test]
+fn known_contacts_after_inbox_message() {
+    let mut s = bob_session();
+    let peer = dave_pubkey();
+    s.add_inbox_message(peer, bob_pub(), now(), "hi".into(), 0x10, br(100, 0));
+    let contacts = s.known_contacts();
+    assert!(contacts.iter().any(|(_, pk)| *pk == peer));
+}
