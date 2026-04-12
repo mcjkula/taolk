@@ -28,18 +28,14 @@ Built on [SAMP](https://github.com/samp-org/samp) (Substrate Account Messaging P
 ## Install
 
 ```
-cargo install --path .
+brew install mcjkula/tap/taolk
 ```
 
-Requires Rust 1.85+. On **Linux**, install ALSA headers for notification sounds:
+Or with Cargo: `cargo install taolk`
 
-```
-sudo apt install libasound2-dev      # Debian / Ubuntu
-sudo pacman -S alsa-lib              # Arch
-sudo dnf install alsa-lib-devel      # Fedora
-```
+Or from source: `git clone https://github.com/mcjkula/taolk.git && cd taolk && cargo install --path .`
 
-macOS and Linux supported. Windows is not currently built or tested.
+> Linux requires `libasound2-dev` (Debian/Ubuntu), `alsa-lib` (Arch), or `alsa-lib-devel` (Fedora).
 
 ## Getting started
 
