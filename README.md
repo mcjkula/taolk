@@ -93,7 +93,7 @@ All messages are signed remarks on-chain with a verifiable sender.
 
 ### Commands
 
-15 commands available via `/`:
+Commands available via `/`:
 
 | Command | What it does |
 |---------|-------------|
@@ -209,7 +209,7 @@ On the wire: 1:1 and group messages use ECDH on Ristretto255 with ChaCha20-Poly1
 ```
 cargo build --release                        # TUI + CLI
 cargo check --no-default-features --lib      # SDK only
-cargo test                                   # 355 tests
+cargo test                                   # 374 tests
 ```
 
 ## License
