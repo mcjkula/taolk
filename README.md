@@ -195,10 +195,9 @@ On the wire: 1:1 and group messages use ECDH on Ristretto255 with ChaCha20-Poly1
 
 ### Trade-offs
 
-- **No forward secrecy.** Seed compromise decrypts all past 1:1/thread messages.
-- **Key reuse.** sr25519 signing and Ristretto255 ECDH share the same scalar. No known attack.
-- **On-chain metadata is public.** Sender, recipient, block height, timestamp are visible.
+- **Key reuse.** sr25519 signing and Ristretto255 ECDH share the same scalar.
 - **No post-quantum resistance.** Ristretto255 is broken by Shor.
+- **No forward secrecy.** Seed compromise decrypts all past 1:1/thread messages.
 
 ## Building
 
