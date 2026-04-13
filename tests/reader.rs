@@ -450,7 +450,7 @@ fn source_from_extrinsic_valid_public() {
 
 #[test]
 fn extract_block_timestamp_non_timestamp_extrinsic() {
-    let hex = format!("0x{}", hex::encode(&[0x10, 0x84, 0x00, 0x00, 0x00, 0x00]));
+    let hex = format!("0x{}", hex::encode([0x10, 0x84, 0x00, 0x00, 0x00, 0x00]));
     let extrinsics = vec![serde_json::Value::String(hex)];
     assert_eq!(reader::extract_block_timestamp(&extrinsics), 0);
 }
@@ -471,7 +471,6 @@ fn extract_block_timestamp_non_string() {
 fn process_remark_public_for_sender_not_recipient() {
     let alice_seed = [0xAA; 32];
     let alice_sk = signing(&alice_seed);
-    let alice_pubkey = alice_sk.public_key();
 
     let charlie_seed = [0xCC; 32];
     let charlie_pubkey = signing(&charlie_seed).public_key();
