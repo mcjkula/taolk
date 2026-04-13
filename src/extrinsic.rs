@@ -429,3 +429,194 @@ fn hex_to_32(hex_str: &str) -> Result<[u8; 32], ChainError> {
     let bytes = hex::decode(hex_str.trim_start_matches("0x"))?;
     bytes.try_into().map_err(|_| ChainError::BadLength)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn twox128_system() {
+        let hash = twox128(b"System");
+        assert_eq!(hex::encode(hash), "26aa394eea5630e07c48ae0c9558cef7");
+    }
+
+    #[test]
+    fn twox128_account() {
+        let hash = twox128(b"Account");
+        assert_eq!(hex::encode(hash), "b99d880ec681799c0cf30e8886371da9");
+    }
+
+    #[test]
+    fn twox128_empty() {
+        let hash = twox128(b"");
+        assert_eq!(hash.len(), 16);
+        let hash2 = twox128(b"");
+        assert_eq!(hash, hash2);
+    }
+
+    #[test]
+    fn twox128_different_inputs_differ() {
+        assert_ne!(twox128(b"System"), twox128(b"Account"));
+    }
+
+    #[test]
+    fn hex_to_32_with_0x_prefix() {
+        let hex_str = format!("0x{}", "aa".repeat(32));
+        let result = hex_to_32(&hex_str).unwrap();
+        assert_eq!(result, [0xAA; 32]);
+    }
+
+    #[test]
+    fn hex_to_32_without_prefix() {
+        let hex_str = "bb".repeat(32);
+        let result = hex_to_32(&hex_str).unwrap();
+        assert_eq!(result, [0xBB; 32]);
+    }
+
+    #[test]
+    fn hex_to_32_wrong_length() {
+        let result = hex_to_32("aabbcc");
+        assert!(matches!(result, Err(ChainError::BadLength)));
+    }
+
+    #[test]
+    fn hex_to_32_invalid_hex() {
+        let result = hex_to_32("zzzz");
+        assert!(matches!(result, Err(ChainError::Hex(_))));
+    }
+
+    #[test]
+    fn hex_to_32_empty() {
+        let result = hex_to_32("");
+        assert!(matches!(result, Err(ChainError::BadLength)));
+    }
+
+    #[test]
+    fn compact_len_single_byte() {
+        let mut buf = Vec::new();
+        samp::scale::encode_compact(10, &mut buf);
+        let len = compact_len(&buf, 0).unwrap();
+        assert_eq!(len, 1);
+    }
+
+    #[test]
+    fn compact_len_two_bytes() {
+        let mut buf = Vec::new();
+        samp::scale::encode_compact(1000, &mut buf);
+        let len = compact_len(&buf, 0).unwrap();
+        assert_eq!(len, 2);
+    }
+
+    #[test]
+    fn compact_len_four_bytes() {
+        let mut buf = Vec::new();
+        samp::scale::encode_compact(1_000_000, &mut buf);
+        let len = compact_len(&buf, 0).unwrap();
+        assert_eq!(len, 4);
+    }
+
+    #[test]
+    fn compact_len_with_offset() {
+        let mut buf = vec![0xFF, 0xFF]; // padding
+        let offset = buf.len();
+        samp::scale::encode_compact(42, &mut buf);
+        let len = compact_len(&buf, offset).unwrap();
+        assert_eq!(len, 1);
+    }
+
+    #[test]
+    fn compact_len_empty_data() {
+        let result = compact_len(&[], 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_remark_call_args_small() {
+        let remark = samp::RemarkBytes::from_bytes(b"hello".to_vec());
+        let args = build_remark_call_args(&remark).unwrap();
+        let data = args.as_bytes();
+        let (decoded_len, consumed) = samp::scale::decode_compact(data).unwrap();
+        assert_eq!(decoded_len as usize, 5);
+        assert_eq!(&data[consumed..], b"hello");
+    }
+
+    #[test]
+    fn build_remark_call_args_empty() {
+        let remark = samp::RemarkBytes::from_bytes(vec![]);
+        let args = build_remark_call_args(&remark).unwrap();
+        let data = args.as_bytes();
+        let (decoded_len, _) = samp::scale::decode_compact(data).unwrap();
+        assert_eq!(decoded_len, 0);
+    }
+
+    #[test]
+    fn build_remark_call_args_large() {
+        let payload = vec![0xAB; 1000];
+        let remark = samp::RemarkBytes::from_bytes(payload.clone());
+        let args = build_remark_call_args(&remark).unwrap();
+        let data = args.as_bytes();
+        let (decoded_len, consumed) = samp::scale::decode_compact(data).unwrap();
+        assert_eq!(decoded_len as usize, 1000);
+        assert_eq!(&data[consumed..], &payload);
+    }
+
+    #[test]
+    fn build_remark_with_event_produces_extrinsic() {
+        let seed = crate::secret::Seed::from_bytes([0xAA; 32]);
+        let signing = seed.derive_signing_key();
+        let remark = samp::RemarkBytes::from_bytes(b"test message".to_vec());
+        let chain_info = ChainInfo {
+            name: crate::types::ChainName::parse("Test").unwrap(),
+            ss58_prefix: samp::Ss58Prefix::SUBSTRATE_GENERIC,
+            chain_params: samp::extrinsic::ChainParams::new(
+                samp::GenesisHash::from_bytes([0; 32]),
+                samp::SpecVersion::new(1),
+                samp::TxVersion::new(1),
+            ),
+            account_storage: samp::metadata::StorageLayout {
+                offset: 16,
+                width: 8,
+            },
+            errors: Default::default(),
+        };
+        let ext = build_remark_with_event(&remark, &signing, 0, &chain_info).unwrap();
+        assert!(!ext.as_bytes().is_empty());
+
+        let signer = samp::extrinsic::extract_signer(&ext).unwrap();
+        assert_eq!(signer, signing.public_key());
+
+        let call = samp::extrinsic::extract_call(&ext).unwrap();
+        assert_eq!(call.pallet().get(), SYSTEM_REMARK_WITH_EVENT.0);
+        assert_eq!(call.call().get(), SYSTEM_REMARK_WITH_EVENT.1);
+    }
+
+    #[test]
+    fn build_remark_with_event_different_nonces() {
+        let seed = crate::secret::Seed::from_bytes([0xAA; 32]);
+        let signing = seed.derive_signing_key();
+        let remark = samp::RemarkBytes::from_bytes(b"msg".to_vec());
+        let chain_info = ChainInfo {
+            name: crate::types::ChainName::parse("Test").unwrap(),
+            ss58_prefix: samp::Ss58Prefix::SUBSTRATE_GENERIC,
+            chain_params: samp::extrinsic::ChainParams::new(
+                samp::GenesisHash::from_bytes([0; 32]),
+                samp::SpecVersion::new(1),
+                samp::TxVersion::new(1),
+            ),
+            account_storage: samp::metadata::StorageLayout {
+                offset: 16,
+                width: 8,
+            },
+            errors: Default::default(),
+        };
+        let ext0 = build_remark_with_event(&remark, &signing, 0, &chain_info).unwrap();
+        let ext1 = build_remark_with_event(&remark, &signing, 1, &chain_info).unwrap();
+        assert_ne!(ext0.as_bytes(), ext1.as_bytes());
+    }
+
+    #[test]
+    fn system_remark_constants() {
+        assert_eq!(SYSTEM_REMARK, (0, 9));
+        assert_eq!(SYSTEM_REMARK_WITH_EVENT, (0, 7));
+    }
+}

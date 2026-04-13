@@ -234,3 +234,68 @@ fn b64_encode(data: &[u8]) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn b64_encode_empty() {
+        assert_eq!(b64_encode(b""), "");
+    }
+
+    #[test]
+    fn b64_encode_single_byte() {
+        assert_eq!(b64_encode(b"f"), "Zg==");
+    }
+
+    #[test]
+    fn b64_encode_two_bytes() {
+        assert_eq!(b64_encode(b"fo"), "Zm8=");
+    }
+
+    #[test]
+    fn b64_encode_three_bytes() {
+        assert_eq!(b64_encode(b"foo"), "Zm9v");
+    }
+
+    #[test]
+    fn b64_encode_rfc4648_vectors() {
+        assert_eq!(b64_encode(b"foobar"), "Zm9vYmFy");
+        assert_eq!(b64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(b64_encode(b"foob"), "Zm9vYg==");
+    }
+
+    #[test]
+    fn b64_encode_binary() {
+        assert_eq!(b64_encode(&[0xFF, 0x00, 0xAA]), "/wCq");
+    }
+
+    #[test]
+    fn is_base58_byte_accepts_valid() {
+        for b in b'1'..=b'9' {
+            assert!(is_base58_byte(b));
+        }
+        for b in b'A'..=b'H' {
+            assert!(is_base58_byte(b));
+        }
+        assert!(is_base58_byte(b'a'));
+        assert!(is_base58_byte(b'z'));
+    }
+
+    #[test]
+    fn is_base58_byte_rejects_invalid() {
+        assert!(!is_base58_byte(b'0'));
+        assert!(!is_base58_byte(b'I'));
+        assert!(!is_base58_byte(b'O'));
+        assert!(!is_base58_byte(b'l'));
+        assert!(!is_base58_byte(b' '));
+        assert!(!is_base58_byte(b'@'));
+    }
+
+    #[test]
+    fn copy_to_clipboard_returns_bool() {
+        // Just verify it doesn't panic; result depends on environment
+        let _ = copy_to_clipboard("test clipboard content");
+    }
+}

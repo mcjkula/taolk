@@ -205,36 +205,126 @@ fn key_defs_have_non_empty_fields() {
     }
 }
 
-// --- save/reload round-trip (uses real config_path, runs only if we can safely write) ---
+// --- set_key + unset_key filesystem round-trip (single test to avoid parallelism issues) ---
 
 #[test]
-fn save_and_reload_round_trip() {
+fn set_key_and_unset_key_filesystem_round_trip() {
     let path = config::config_path();
     let existed = path.exists();
-    let original_content = if existed {
+    let original = if existed {
         std::fs::read_to_string(&path).ok()
     } else {
         None
     };
 
+    // String fields
+    if config::set_key("wallet.default", &["my-wallet".into()]).is_err() {
+        restore(&path, &original);
+        return; // read-only FS
+    }
+    assert_eq!(
+        config::get_value(&config::load(), "wallet.default"),
+        "my-wallet"
+    );
+
+    assert!(config::set_key("network.node", &["wss://custom.example.com".into()]).is_ok());
+    assert!(config::set_key("ui.timestamp_format", &["%H:%M:%S".into()]).is_ok());
+    assert!(config::set_key("ui.date_format", &["%d/%m/%Y".into()]).is_ok());
+
+    // Array field
+    assert!(
+        config::set_key(
+            "network.mirrors",
+            &[
+                "https://a.example.com".into(),
+                "https://b.example.com".into()
+            ]
+        )
+        .is_ok()
+    );
+    let mirrors = config::get_value(&config::load(), "network.mirrors");
+    assert!(mirrors.contains("https://a.example.com"));
+
+    // Numeric fields
+    assert_eq!(
+        config::set_key("security.lock_timeout", &["600".into()]).unwrap(),
+        "600"
+    );
+    assert_eq!(
+        config::set_key("ui.sidebar_width", &["40".into()]).unwrap(),
+        "40"
+    );
+    assert_eq!(
+        config::set_key("notifications.volume", &["80".into()]).unwrap(),
+        "80"
+    );
+
+    // Bool fields
+    for (key, val, expected) in [
+        ("ui.mouse", "false", "false"),
+        ("security.require_password_per_send", "true", "true"),
+        ("notifications.enabled", "false", "false"),
+        ("notifications.dm", "true", "true"),
+        ("notifications.ambient", "false", "false"),
+        ("notifications.mention", "true", "true"),
+    ] {
+        assert_eq!(
+            config::set_key(key, &[val.into()]).unwrap(),
+            expected,
+            "key={key}"
+        );
+    }
+
+    // is_user_set
+    assert!(config::is_user_set("ui.mouse"));
+
+    // unset_key
+    let default_val = config::unset_key("ui.sidebar_width").unwrap();
+    assert_eq!(default_val, "28");
+
+    // save/load round-trip
     let mut cfg = Config::default();
     cfg.ui.sidebar_width = 42;
     cfg.security.lock_timeout = 999;
     cfg.wallet.default = Some("roundtrip-test".into());
-
-    let save_result = config::save(&cfg);
-    if save_result.is_err() {
-        return; // CI or read-only filesystem, skip
-    }
-
+    config::save(&cfg).unwrap();
     let loaded = config::load();
     assert_eq!(loaded.ui.sidebar_width, 42);
     assert_eq!(loaded.security.lock_timeout, 999);
     assert_eq!(loaded.wallet.default.as_deref(), Some("roundtrip-test"));
 
-    // restore original state
-    match original_content {
-        Some(content) => std::fs::write(&path, content).ok(),
-        None => std::fs::remove_file(&path).ok(),
-    };
+    restore(&path, &original);
 }
+
+fn restore(path: &std::path::Path, original: &Option<String>) {
+    match original {
+        Some(c) => {
+            std::fs::write(path, c).ok();
+        }
+        None => {
+            std::fs::remove_file(path).ok();
+        }
+    }
+}
+
+#[test]
+fn is_user_set_returns_false_for_unknown() {
+    assert!(!config::is_user_set("nonexistent.key"));
+}
+
+// --- levenshtein ---
+
+#[test]
+fn suggest_key_various_typos() {
+    assert_eq!(config::suggest_key("ui.moues").unwrap().key, "ui.mouse");
+    assert_eq!(
+        config::suggest_key("network.nod").unwrap().key,
+        "network.node"
+    );
+    assert_eq!(
+        config::suggest_key("notifications.volum").unwrap().key,
+        "notifications.volume"
+    );
+}
+
+// save/reload round-trip is tested inside set_key_and_unset_key_filesystem_round_trip

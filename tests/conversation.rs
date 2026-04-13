@@ -163,3 +163,117 @@ fn group_last_ref_uses_messages() {
     assert_eq!(group.last_ref(), BlockRef::from_parts(20, 5));
     assert_eq!(group.my_last_ref(), BlockRef::from_parts(20, 5));
 }
+
+// --- gap_refs with continues ---
+
+fn msg_with_continues(block: u32, continues: BlockRef) -> ThreadMessage {
+    ThreadMessage {
+        sender_ss58: "X".into(),
+        timestamp: Utc::now(),
+        body: String::new(),
+        is_mine: false,
+        reply_to: BlockRef::ZERO,
+        continues,
+        block_number: block,
+        ext_index: 0,
+        has_gap: true,
+    }
+}
+
+#[test]
+fn gap_refs_includes_continues() {
+    let messages = vec![msg_with_continues(200, BlockRef::from_parts(100, 0))];
+    let refs = gap_refs(&messages);
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0], BlockRef::from_parts(100, 0));
+}
+
+fn msg_with_both(block: u32, reply_to: BlockRef, continues: BlockRef) -> ThreadMessage {
+    ThreadMessage {
+        sender_ss58: "X".into(),
+        timestamp: Utc::now(),
+        body: String::new(),
+        is_mine: false,
+        reply_to,
+        continues,
+        block_number: block,
+        ext_index: 0,
+        has_gap: true,
+    }
+}
+
+#[test]
+fn gap_refs_both_reply_and_continues() {
+    let messages = vec![msg_with_both(
+        300,
+        BlockRef::from_parts(50, 0),
+        BlockRef::from_parts(100, 0),
+    )];
+    let refs = gap_refs(&messages);
+    assert_eq!(refs.len(), 2);
+    assert_eq!(refs[0], BlockRef::from_parts(50, 0));
+    assert_eq!(refs[1], BlockRef::from_parts(100, 0));
+}
+
+// --- Conversation trait method gap_refs ---
+
+#[test]
+fn thread_gap_refs_via_trait() {
+    let thread = Thread {
+        thread_ref: BlockRef::ZERO,
+        peer_ss58: "peer".into(),
+        peer_pubkey: Pubkey::ZERO,
+        messages: vec![msg_with_gap(200, BlockRef::from_parts(50, 0))],
+        draft: String::new(),
+        last_read: 0,
+    };
+    let refs = thread.gap_refs();
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0], BlockRef::from_parts(50, 0));
+}
+
+// --- Channel gap_refs ---
+
+#[test]
+fn channel_gap_refs() {
+    let channel = Channel {
+        name: "n".into(),
+        description: "d".into(),
+        creator_ss58: "c".into(),
+        channel_ref: BlockRef::ZERO,
+        messages: vec![msg_with_gap(200, BlockRef::from_parts(80, 1))],
+        draft: String::new(),
+        last_read: 0,
+    };
+    let refs = channel.gap_refs();
+    assert_eq!(refs.len(), 1);
+}
+
+// --- Group my_last_ref ---
+
+#[test]
+fn group_unread() {
+    let group = Group {
+        creator_pubkey: Pubkey::ZERO,
+        group_ref: BlockRef::ZERO,
+        members: vec![],
+        messages: vec![msg(1, 0, false), msg(2, 0, false), msg(3, 0, false)],
+        draft: String::new(),
+        last_read: 1,
+    };
+    assert_eq!(group.unread(), 2);
+    assert_eq!(group.last_read(), 1);
+}
+
+#[test]
+fn group_my_last_ref_empty() {
+    let group = Group {
+        creator_pubkey: Pubkey::ZERO,
+        group_ref: BlockRef::ZERO,
+        members: vec![],
+        messages: vec![],
+        draft: String::new(),
+        last_read: 0,
+    };
+    assert_eq!(group.my_last_ref(), BlockRef::ZERO);
+}

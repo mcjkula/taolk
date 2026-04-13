@@ -255,3 +255,80 @@ fn chain_id_from_bytes_round_trip() {
     let id = ChainId::from_bytes([0xDE, 0xAD, 0xBE, 0xEF]);
     assert_eq!(id.as_bytes(), &[0xDE, 0xAD, 0xBE, 0xEF]);
 }
+
+#[test]
+fn chain_id_from_genesis() {
+    let mut genesis_bytes = [0u8; 32];
+    genesis_bytes[0] = 0x11;
+    genesis_bytes[1] = 0x22;
+    genesis_bytes[2] = 0x33;
+    genesis_bytes[3] = 0x44;
+    let gh = samp::GenesisHash::from_bytes(genesis_bytes);
+    let id = ChainId::from_genesis(&gh);
+    assert_eq!(id.as_bytes(), &[0x11, 0x22, 0x33, 0x44]);
+}
+
+// --- MessageBody Debug ---
+
+#[test]
+fn message_body_debug_shows_length() {
+    let body = MessageBody::parse("hello").unwrap();
+    let debug = format!("{:?}", body);
+    assert_eq!(debug, "MessageBody(5 bytes)");
+}
+
+// --- ChainName Debug ---
+
+#[test]
+fn chain_name_debug() {
+    let cn = ChainName::parse("Polkadot").unwrap();
+    let debug = format!("{:?}", cn);
+    assert!(debug.contains("Polkadot"));
+}
+
+// --- MirrorUrl ---
+
+#[test]
+fn mirror_url_into_string() {
+    let mu = MirrorUrl::parse("https://mirror.example.com").unwrap();
+    assert_eq!(mu.into_string(), "https://mirror.example.com");
+}
+
+#[test]
+fn mirror_url_parse_http() {
+    let mu = MirrorUrl::parse("http://localhost:8080").unwrap();
+    assert_eq!(mu.as_str(), "http://localhost:8080");
+}
+
+// --- DbKey ---
+
+use taolk::types::DbKey;
+
+#[test]
+fn db_key_from_bytes_expose() {
+    let bytes = [0x42; 32];
+    let key = DbKey::from_bytes(bytes);
+    assert_eq!(key.expose_secret(), &bytes);
+}
+
+// --- WalletName too long ---
+
+#[test]
+fn wallet_name_too_long() {
+    let s = "a".repeat(65);
+    assert!(WalletName::parse(s).is_err());
+}
+
+// --- NodeUrl ---
+
+#[test]
+fn node_url_parse_ftp_rejected() {
+    assert!(NodeUrl::parse("ftp://example.com").is_err());
+}
+
+// --- MirrorUrl rejected schemes ---
+
+#[test]
+fn mirror_url_parse_ftp_rejected() {
+    assert!(MirrorUrl::parse("ftp://example.com").is_err());
+}

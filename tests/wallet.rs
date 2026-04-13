@@ -141,6 +141,54 @@ fn open_nonexistent_file() {
     assert!(result.is_err());
 }
 
+// --- wallet_path / wallet_exists / list_wallets ---
+
+#[test]
+fn wallet_path_uses_name() {
+    let path = wallet::wallet_path("mytest");
+    assert!(path.to_string_lossy().contains("mytest.key"));
+    assert!(path.to_string_lossy().contains(".samp"));
+}
+
+#[test]
+fn wallet_exists_false_for_missing() {
+    assert!(!wallet::wallet_exists("nonexistent_wallet_name_zzz"));
+}
+
+#[test]
+fn list_wallets_returns_sorted_names() {
+    // This exercises the real wallet_dir. It may or may not have wallets.
+    let names = wallet::list_wallets();
+    let mut sorted = names.clone();
+    sorted.sort();
+    assert_eq!(names, sorted);
+}
+
+#[test]
+fn create_and_open_via_name() {
+    let name = "taolk_test_wallet_temp";
+    let path = wallet::wallet_path(name);
+    let existed = path.exists();
+
+    let result = wallet::create(name, &pw("testpass"), &fixed_seed(0xEE));
+    if result.is_err() {
+        // Can't write to wallet dir; skip
+        return;
+    }
+
+    assert!(wallet::wallet_exists(name));
+    let names = wallet::list_wallets();
+    assert!(names.contains(&name.to_string()));
+
+    let opened = wallet::open(name, &pw("testpass")).unwrap();
+    assert!(fixed_seed(0xEE).ct_eq(&opened));
+
+    // Cleanup
+    if !existed {
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
 #[test]
 fn create_overwrites_existing() {
     let dir = TempDir::new().unwrap();
