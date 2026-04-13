@@ -1,35 +1,33 @@
-// Binary-only modules
 mod app;
 mod cli_fmt;
+mod cmd;
 mod ui;
 
-// Shared modules from the library
+use taolk::conversation::Conversation;
 use taolk::{
-    audio, chain, config, conversation, db, error, event, extrinsic, mirror, session, types, util,
-    wallet,
+    audio, chain, chain_cache, config, conversation, db, error, event, extrinsic, mirror, reader,
+    session, types, util, wallet,
 };
 
-use app::{App, Mode};
+use app::{App, Focus, Overlay};
 use chrono::{DateTime, Utc};
-use clap::{ArgGroup, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use crossterm::ExecutableCommand;
 use crossterm::event::{
     self as term_event, Event as TermEvent, KeyCode, KeyEvent, KeyModifiers, MouseEvent,
 };
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use crossterm::event::{
+    DisableMouseCapture, EnableMouseCapture, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
+};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use schnorrkel::keys::{ExpansionMode, MiniSecretKey};
 use std::io::stdout;
 use std::sync::mpsc;
 use std::time::Duration;
-
-// ---------------------------------------------------------------------------
-// TUI event types (will move to tui/event.rs in Phase 4)
-// ---------------------------------------------------------------------------
 
 enum TuiEvent {
     Key(KeyEvent),
@@ -48,7 +46,6 @@ impl TuiEventHandler {
         let (tui_tx, rx) = mpsc::channel();
         let (core_tx, core_rx) = mpsc::channel::<event::Event>();
 
-        // Terminal polling thread
         let poll_tx = tui_tx.clone();
         std::thread::spawn(move || {
             loop {
@@ -73,7 +70,6 @@ impl TuiEventHandler {
             }
         });
 
-        // Core event forwarding thread
         std::thread::spawn(move || {
             while let Ok(event) = core_rx.recv() {
                 if tui_tx.send(TuiEvent::Core(event)).is_err() {
@@ -93,10 +89,6 @@ impl TuiEventHandler {
         self.core_tx.clone()
     }
 }
-
-// ---------------------------------------------------------------------------
-// CLI
-// ---------------------------------------------------------------------------
 
 #[derive(Parser)]
 #[command(
@@ -119,75 +111,18 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Manage wallets
     Wallet {
         #[command(subcommand)]
-        action: WalletAction,
+        action: cmd::wallet::WalletAction,
     },
-    /// View and modify configuration
     Config {
         #[command(subcommand)]
-        action: ConfigAction,
+        action: cmd::config::ConfigAction,
     },
-}
-
-#[derive(Subcommand)]
-enum ConfigAction {
-    /// Show all configuration values
-    List,
-    /// Get configuration values (all if no key given)
-    Get {
-        /// Key in dot-notation (e.g., network.node)
-        key: Option<String>,
+    Db {
+        #[command(subcommand)]
+        action: cmd::db::DbAction,
     },
-    /// Set a configuration value
-    Set {
-        /// Key in dot-notation (e.g., network.node)
-        key: String,
-        /// Value(s) -- multiple values for list fields like network.mirrors
-        #[arg(num_args = 1..)]
-        value: Vec<String>,
-    },
-    /// Remove a key (revert to default)
-    Unset {
-        /// Key in dot-notation
-        key: String,
-    },
-    /// Open config file in $EDITOR
-    Edit,
-    /// Show config file path
-    Path,
-}
-
-#[derive(Subcommand)]
-enum WalletAction {
-    /// Create a new wallet with a fresh recovery phrase
-    Create {
-        /// Wallet name
-        #[arg(long)]
-        name: String,
-        /// Password (skips interactive prompt)
-        #[arg(long)]
-        password: Option<String>,
-    },
-    /// Import a wallet from an existing recovery phrase or seed
-    #[command(group = ArgGroup::new("source").required(true))]
-    Import {
-        /// Wallet name
-        #[arg(long)]
-        name: String,
-        /// BIP39 recovery phrase (12 or 24 words)
-        #[arg(long, group = "source")]
-        mnemonic: Option<String>,
-        /// Raw seed (64 hex characters)
-        #[arg(long, group = "source")]
-        seed: Option<String>,
-        /// Password (skips interactive prompt)
-        #[arg(long)]
-        password: Option<String>,
-    },
-    /// List available wallets
-    List,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -195,8 +130,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = config::load();
 
     match cli.command {
-        Some(Commands::Wallet { action }) => run_wallet_command(action),
-        Some(Commands::Config { action }) => run_config_command(action),
+        Some(Commands::Wallet { action }) => cmd::wallet::run(action),
+        Some(Commands::Config { action }) => cmd::config::run(action),
+        Some(Commands::Db { action }) => cmd::db::run(action),
         None => {
             let node = if cli.node != "wss://entrypoint-finney.opentensor.ai:443" {
                 cli.node
@@ -209,7 +145,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 cfg.network.mirrors.clone()
             };
 
-            // Resolve wallet: CLI flag > config > auto-discover
             let wallet = cli.wallet.or_else(|| cfg.wallet.default.clone());
             if let Some(ref name) = wallet
                 && !wallet::wallet_exists(name)
@@ -231,324 +166,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Wallet management (plain terminal)
-// ---------------------------------------------------------------------------
-
-fn run_wallet_command(action: WalletAction) -> Result<(), Box<dyn std::error::Error>> {
-    match action {
-        WalletAction::Create { name, password } => cmd_wallet_create(&name, password),
-        WalletAction::Import {
-            name,
-            mnemonic,
-            seed,
-            password,
-        } => cmd_wallet_import(&name, mnemonic, seed, password),
-        WalletAction::List => cmd_wallet_list(),
-    }
-}
-
-fn cmd_wallet_create(
-    wallet_name: &str,
-    cli_password: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use cli_fmt::*;
-
-    if wallet::wallet_exists(wallet_name) {
-        error(&format!("Wallet '{}' already exists", wallet_name));
-        hint("  Use --wallet <other-name> to create a different wallet");
-        std::process::exit(1);
-    }
-
-    header(&format!(
-        "\u{03C4}alk \u{2014} Create wallet '{wallet_name}'"
-    ));
-    blank();
-
-    let password = match cli_password {
-        Some(p) => zeroize::Zeroizing::new(p),
-        None => prompt_new_password()?,
-    };
-
-    let mnemonic = wallet::generate_mnemonic();
-    let mut seed = wallet::seed_from_mnemonic(&mnemonic);
-    let words: Vec<&str> = mnemonic.words().collect();
-
-    wallet::create(wallet_name, &password, &seed)?;
-
-    let msk = MiniSecretKey::from_bytes(&seed).unwrap();
-    let kp = msk.expand_to_keypair(ExpansionMode::Ed25519);
-    let address = util::ss58_from_pubkey(&types::Pubkey(kp.public.to_bytes()));
-    zeroize::Zeroize::zeroize(&mut seed);
-
-    blank();
-    success("Wallet created");
-    blank();
-    label("Wallet", &format!("{BOLD}{wallet_name}{RESET}"));
-    label_magenta("Address", &address);
-    blank();
-    header("Recovery phrase");
-    hint("  Write this down. It is the ONLY way to recover your wallet.");
-    blank();
-    for (i, word) in words.iter().enumerate() {
-        eprint!(
-            "  {DIM}{:>2}.{RESET} {CYAN}{BOLD}{:<14}{RESET}",
-            i + 1,
-            word
-        );
-        if (i + 1) % 3 == 0 {
-            eprintln!();
-        }
-    }
-    if !words.len().is_multiple_of(3) {
-        eprintln!();
-    }
-    blank();
-
-    Ok(())
-}
-
-fn cmd_wallet_import(
-    wallet_name: &str,
-    mnemonic: Option<String>,
-    seed_hex: Option<String>,
-    cli_password: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use cli_fmt::*;
-
-    if wallet::wallet_exists(wallet_name) {
-        error(&format!("Wallet '{}' already exists", wallet_name));
-        hint("  Use --wallet <other-name> to import under a different name");
-        std::process::exit(1);
-    }
-
-    header(&format!(
-        "\u{03C4}alk \u{2014} Import wallet '{wallet_name}'"
-    ));
-    blank();
-
-    let mut seed = if let Some(phrase) = mnemonic {
-        let m = wallet::parse_mnemonic(&phrase)?;
-        wallet::seed_from_mnemonic(&m)
-    } else if let Some(hex) = seed_hex {
-        wallet::seed_from_hex(&hex)?
-    } else {
-        error("Provide --mnemonic or --seed");
-        std::process::exit(1);
-    };
-
-    let password = match cli_password {
-        Some(p) => zeroize::Zeroizing::new(p),
-        None => prompt_new_password()?,
-    };
-    wallet::create(wallet_name, &password, &seed)?;
-
-    let msk = MiniSecretKey::from_bytes(&seed).unwrap();
-    let kp = msk.expand_to_keypair(ExpansionMode::Ed25519);
-    let address = util::ss58_from_pubkey(&types::Pubkey(kp.public.to_bytes()));
-    zeroize::Zeroize::zeroize(&mut seed);
-
-    blank();
-    success("Wallet imported");
-    blank();
-    label("Wallet", &format!("{BOLD}{wallet_name}{RESET}"));
-    label_magenta("Address", &address);
-    blank();
-
-    Ok(())
-}
-
-fn cmd_wallet_list() -> Result<(), Box<dyn std::error::Error>> {
-    use cli_fmt::*;
-
-    let wallets = wallet::list_wallets();
-    if wallets.is_empty() {
-        hint("No wallets found");
-        hint("  Run `taolk wallet create` to create one");
-    } else {
-        header("\u{03C4}alk wallets");
-        blank();
-        for name in &wallets {
-            let path = wallet::wallet_path(name);
-            eprintln!(
-                "  {CYAN}{BOLD}{name}{RESET}  {DIM}{}{RESET}",
-                path.display()
-            );
-        }
-        blank();
-    }
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Password prompts (plain terminal, rpassword)
-// ---------------------------------------------------------------------------
-
-fn prompt_new_password() -> Result<zeroize::Zeroizing<String>, Box<dyn std::error::Error>> {
-    use cli_fmt::*;
-    use zeroize::Zeroize;
-    let password = rpassword::prompt_password(format!("  {YELLOW}Password:{RESET} "))?;
-    if password.is_empty() {
-        error("Password cannot be empty");
-        std::process::exit(1);
-    }
-    let mut confirm = rpassword::prompt_password(format!("  {YELLOW}Confirm:{RESET}  "))?;
-    if password != confirm {
-        confirm.zeroize();
-        error("Passwords do not match");
-        std::process::exit(1);
-    }
-    confirm.zeroize();
-    Ok(zeroize::Zeroizing::new(password))
-}
-
-// ---------------------------------------------------------------------------
-// Configuration management (plain terminal)
-// ---------------------------------------------------------------------------
-
-fn run_config_command(action: ConfigAction) -> Result<(), Box<dyn std::error::Error>> {
-    match action {
-        ConfigAction::List => cmd_config_list(),
-        ConfigAction::Get { key: Some(key) } => cmd_config_get(&key),
-        ConfigAction::Get { key: None } => cmd_config_list(),
-        ConfigAction::Set { key, value } => cmd_config_set(&key, &value),
-        ConfigAction::Unset { key } => cmd_config_unset(&key),
-        ConfigAction::Edit => cmd_config_edit(),
-        ConfigAction::Path => cmd_config_path(),
-    }
-}
-
-fn cmd_config_list() -> Result<(), Box<dyn std::error::Error>> {
-    use cli_fmt::*;
-
-    let cfg = config::load();
-
-    header("\u{03C4}alk configuration");
-    blank();
-
-    let mut current_section = "";
-    for def in config::KEYS {
-        if def.section != current_section {
-            if !current_section.is_empty() {
-                blank();
-            }
-            current_section = def.section;
-            eprintln!("  {BOLD}{WHITE}[{current_section}]{RESET}");
-        }
-
-        let value = config::get_value(&cfg, def.key);
-        let user_set = config::is_user_set(def.key);
-        let padded_field = format!("{:<19}", def.field);
-
-        if user_set {
-            label_cyan(&padded_field, &value);
-        } else {
-            label_dim(&padded_field, &format!("{value}  (default)"));
-        }
-    }
-
-    blank();
-    hint(&format!("  {}", config::config_path().display()));
-    blank();
-    Ok(())
-}
-
-fn cmd_config_get(key: &str) -> Result<(), Box<dyn std::error::Error>> {
-    if config::lookup_key(key).is_none() {
-        unknown_key_error(key);
-    }
-    let cfg = config::load();
-    println!("{}", config::get_value(&cfg, key));
-    Ok(())
-}
-
-fn cmd_config_set(key: &str, values: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    use cli_fmt::*;
-
-    if config::lookup_key(key).is_none() {
-        unknown_key_error(key);
-    }
-
-    match config::set_key(key, values) {
-        Ok(display_val) => {
-            success(&format!("{key} = {display_val}"));
-            hint(&format!("  {}", config::config_path().display()));
-        }
-        Err(msg) => {
-            error(&msg);
-            std::process::exit(1);
-        }
-    }
-    Ok(())
-}
-
-fn cmd_config_unset(key: &str) -> Result<(), Box<dyn std::error::Error>> {
-    use cli_fmt::*;
-
-    if config::lookup_key(key).is_none() {
-        unknown_key_error(key);
-    }
-
-    match config::unset_key(key) {
-        Ok(default_val) => {
-            success(&format!("{key} reset to default ({default_val})"));
-            hint(&format!("  {}", config::config_path().display()));
-        }
-        Err(msg) => {
-            error(&msg);
-            std::process::exit(1);
-        }
-    }
-    Ok(())
-}
-
-fn cmd_config_edit() -> Result<(), Box<dyn std::error::Error>> {
-    use cli_fmt::*;
-
-    let path = config::config_path();
-    if !path.exists() {
-        config::save(&config::Config::default())
-            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-    }
-
-    let editor = std::env::var("VISUAL")
-        .or_else(|_| std::env::var("EDITOR"))
-        .unwrap_or_else(|_| {
-            error("$EDITOR is not set");
-            hint("  Set EDITOR or VISUAL environment variable");
-            std::process::exit(1);
-        });
-
-    let status = std::process::Command::new(&editor).arg(&path).status()?;
-    if !status.success() {
-        error(&format!("{editor} exited with {status}"));
-        std::process::exit(1);
-    }
-    Ok(())
-}
-
-fn cmd_config_path() -> Result<(), Box<dyn std::error::Error>> {
-    println!("{}", config::config_path().display());
-    Ok(())
-}
-
-fn unknown_key_error(key: &str) -> ! {
-    use cli_fmt::*;
-    error(&format!("Unknown key: {key}"));
-    if let Some(def) = config::suggest_key(key) {
-        hint(&format!(
-            "  Did you mean '{}'? ({})",
-            def.key, def.description
-        ));
-    }
-    hint("  Run 'taolk config list' to see all keys");
-    std::process::exit(1);
-}
-
-// ---------------------------------------------------------------------------
-// TUI client
-// ---------------------------------------------------------------------------
-
 fn run_tui(
     preselected: Option<&str>,
     wallets: &[String],
@@ -561,6 +178,9 @@ fn run_tui(
     if cfg.ui.mouse {
         stdout().execute(EnableMouseCapture)?;
     }
+    let _ = stdout().execute(PushKeyboardEnhancementFlags(
+        KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
+    ));
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
@@ -569,9 +189,10 @@ fn run_tui(
 
     let mut first_login = true;
     let mut current_wallet = preselected.unwrap_or("").to_string();
+    let mut force_picker = false;
 
     loop {
-        let result = if first_login {
+        let result = if first_login || force_picker {
             run_lock_screen(&mut terminal, &events, wallets, preselected)?
         } else {
             run_lock_screen(&mut terminal, &events, &[], Some(&current_wallet))?
@@ -583,23 +204,29 @@ fn run_tui(
         };
 
         first_login = false;
+        force_picker = false;
         current_wallet = wallet_name.clone();
 
-        let quit = run_session(
+        let exit = run_session(
             &mut terminal,
             &events,
-            &seed,
+            seed.as_bytes(),
             &wallet_name,
             node_url,
             mirror_urls,
             cfg,
         )?;
         drop(seed);
-        if quit {
-            break;
+        match exit {
+            SessionExit::Quit => break,
+            SessionExit::Lock => {}
+            SessionExit::SwitchWallet => {
+                force_picker = true;
+            }
         }
     }
 
+    let _ = stdout().execute(PopKeyboardEnhancementFlags);
     if cfg.ui.mouse {
         stdout().execute(DisableMouseCapture)?;
     }
@@ -608,7 +235,13 @@ fn run_tui(
     Ok(())
 }
 
-type UnlockResult = Option<(String, zeroize::Zeroizing<[u8; 32]>)>;
+enum SessionExit {
+    Quit,
+    Lock,
+    SwitchWallet,
+}
+
+type UnlockResult = Option<(String, taolk::secret::Seed)>;
 
 fn run_lock_screen(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
@@ -616,9 +249,20 @@ fn run_lock_screen(
     wallets: &[String],
     preselected: Option<&str>,
 ) -> Result<UnlockResult, Box<dyn std::error::Error>> {
-    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::style::{Modifier, Style};
     use ratatui::text::{Line, Span};
     use ratatui::widgets::Paragraph;
+    use ui::palette;
+
+    let logo_style = Style::default()
+        .fg(palette::ACCENT)
+        .add_modifier(Modifier::BOLD);
+    let subtitle_style = Style::default().fg(palette::MUTED);
+    let dim_style = Style::default().fg(palette::MUTED);
+    let active_style = Style::default().add_modifier(Modifier::BOLD);
+    let prompt_active_style = Style::default();
+    let prompt_idle_style = Style::default().fg(palette::MUTED);
+    let error_style = Style::default().fg(palette::ERROR);
 
     const LOGO: &[&str] = &[
         "   \u{2591}\u{2588}\u{2588}                                     \u{2591}\u{2588}\u{2588} \u{2591}\u{2588}\u{2588}",
@@ -637,7 +281,6 @@ fn run_lock_screen(
     let mut password = zeroize::Zeroizing::new(String::new());
     let mut error_msg: Option<String> = None;
 
-    // For single wallet or preselected: determine the wallet name
     let fixed_wallet = preselected.map(String::from).or_else(|| {
         if wallets.len() == 1 {
             Some(wallets[0].clone())
@@ -652,151 +295,108 @@ fn run_lock_screen(
             .unwrap_or_else(|| wallets.get(wallet_idx).cloned().unwrap_or_default());
 
         terminal.draw(|frame| {
-            let area = frame.area();
-            let w = area.width as usize;
-            let h = area.height as usize;
+            use crate::ui::modal::{centered_line, centered_spans, horizontal_pad, vertical_pad};
 
+            let area = frame.area();
+            let w = area.width;
             let content_height = 18;
-            let top_pad = h.saturating_sub(content_height) / 2;
-            let logo_display_width = 55;
+            let top_pad = vertical_pad(content_height, area.height);
 
             let mut lines: Vec<Line> = Vec::new();
             for _ in 0..top_pad {
                 lines.push(Line::raw(""));
             }
 
-            // Logo
-            let logo_pad = " ".repeat(w.saturating_sub(logo_display_width) / 2);
+            let logo_pad = horizontal_pad(55, w);
             for logo_line in LOGO {
-                lines.push(Line::styled(
-                    format!("{logo_pad}{logo_line}"),
-                    Style::default().fg(Color::Cyan),
-                ));
+                lines.push(Line::styled(format!("{logo_pad}{logo_line}"), logo_style));
             }
 
             lines.push(Line::raw(""));
-
-            // Subtitle
-            let sub_chars = SUBTITLE.chars().count();
-            let sub_pad = " ".repeat(w.saturating_sub(sub_chars) / 2);
-            lines.push(Line::styled(
-                format!("{sub_pad}{SUBTITLE}"),
-                Style::default().fg(Color::DarkGray),
-            ));
-
+            lines.push(centered_line(SUBTITLE, w, subtitle_style));
             lines.push(Line::raw(""));
             lines.push(Line::raw(""));
 
-            // Wallet display: carousel or static name
             if show_carousel && !inserting {
-                // Horizontal carousel: 3-slot window
                 let win_start = wallet_idx
                     .saturating_sub(1)
                     .min(wallets.len().saturating_sub(3));
                 let win_end = (win_start + 3).min(wallets.len());
 
-                let mut spans: Vec<Span> = Vec::new();
+                let mut spans: Vec<Span<'static>> = Vec::new();
                 if win_start > 0 {
-                    spans.push(Span::styled(
-                        "\u{2039}  ",
-                        Style::default().fg(Color::DarkGray),
-                    ));
+                    spans.push(Span::styled(ui::icons::CHEVRON_LEFT, dim_style));
+                    spans.push(Span::raw("  "));
                 } else {
                     spans.push(Span::raw("   "));
                 }
                 for (i, name) in wallets[win_start..win_end].iter().enumerate() {
                     if i > 0 {
-                        spans.push(Span::styled(
-                            "  \u{2014}  ",
-                            Style::default().fg(Color::DarkGray),
-                        ));
+                        spans.push(Span::styled("  \u{2014}  ", dim_style));
                     }
                     if win_start + i == wallet_idx {
-                        spans.push(Span::styled(
-                            name.clone(),
-                            Style::default()
-                                .fg(Color::White)
-                                .add_modifier(Modifier::BOLD),
-                        ));
+                        spans.push(Span::styled(name.clone(), active_style));
                     } else {
-                        spans.push(Span::styled(
-                            name.clone(),
-                            Style::default().fg(Color::DarkGray),
-                        ));
+                        spans.push(Span::styled(name.clone(), dim_style));
                     }
                 }
                 if win_end < wallets.len() {
-                    spans.push(Span::styled(
-                        "  \u{203A}",
-                        Style::default().fg(Color::DarkGray),
-                    ));
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(ui::icons::CHEVRON_RIGHT, dim_style));
                 } else {
                     spans.push(Span::raw("  "));
                 }
 
-                // Center the carousel line
-                let carousel_width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
-                let carousel_pad = " ".repeat(w.saturating_sub(carousel_width) / 2);
-                let mut centered = vec![Span::raw(carousel_pad)];
-                centered.extend(spans);
-                lines.push(Line::from(centered));
+                lines.push(centered_spans(spans, w));
             } else {
-                // Static wallet name
-                let wp = " ".repeat(w.saturating_sub(current_wallet.len()) / 2);
-                lines.push(Line::styled(
-                    format!("{wp}{current_wallet}"),
-                    Style::default().fg(Color::White),
+                lines.push(centered_line(
+                    &format!("{} Wallet: {}", ui::icons::WALLET, current_wallet),
+                    w,
+                    active_style,
                 ));
             }
 
             lines.push(Line::raw(""));
 
-            // Password prompt
-            let prompt = "Password: ";
-            let prompt_color = if inserting {
-                Color::White
+            let prompt = format!("{} Password: ", ui::icons::KEY);
+            let prompt_cols = prompt.chars().count();
+            let prompt_style = if inserting {
+                prompt_active_style
             } else {
-                Color::DarkGray
+                prompt_idle_style
             };
-            let pp = w.saturating_sub(prompt.len()) / 2;
-            let pp_str = " ".repeat(pp);
+            let pp_str = horizontal_pad(prompt_cols, w);
+            let prompt_x_offset = pp_str.len();
             lines.push(Line::from(vec![
                 Span::raw(pp_str),
-                Span::styled(prompt, Style::default().fg(prompt_color)),
+                Span::styled(prompt.clone(), prompt_style),
             ]));
 
-            // Error
             if let Some(err) = &error_msg {
                 lines.push(Line::raw(""));
-                let ep = " ".repeat(w.saturating_sub(err.len()) / 2);
-                lines.push(Line::styled(
-                    format!("{ep}{err}"),
-                    Style::default().fg(Color::Red),
-                ));
+                lines.push(centered_line(err, w, error_style));
             } else {
                 lines.push(Line::raw(""));
                 lines.push(Line::raw(""));
             }
 
-            // Hints
             let hints = if inserting {
                 "Enter unlock \u{00B7} Esc back"
             } else if show_carousel {
-                "\u{2190}/\u{2192} select \u{00B7} i unlock \u{00B7} q quit"
+                "\u{F004D}/\u{F0054} select \u{00B7} i unlock \u{00B7} q quit"
             } else {
                 "i unlock \u{00B7} q quit"
             };
-            let hp = " ".repeat(w.saturating_sub(hints.chars().count()) / 2);
-            lines.push(Line::styled(
-                format!("{hp}{hints}"),
-                Style::default().fg(Color::DarkGray),
-            ));
+            lines.push(centered_line(hints, w, dim_style));
 
             frame.render_widget(Paragraph::new(lines), area);
 
             if inserting {
-                let cursor_y = area.y + top_pad as u16 + 7 + 1 + 1 + 2 + 1 + 1;
-                let cursor_x = area.x + pp as u16 + prompt.len() as u16;
+                let cursor_y =
+                    area.y + u16::try_from(top_pad).unwrap_or(u16::MAX) + 7 + 1 + 1 + 2 + 1 + 1;
+                let cursor_x = area.x
+                    + u16::try_from(prompt_x_offset).unwrap_or(u16::MAX)
+                    + u16::try_from(prompt_cols).unwrap_or(u16::MAX);
                 if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
                     frame.set_cursor_position((cursor_x, cursor_y));
                 }
@@ -805,7 +405,10 @@ fn run_lock_screen(
 
         match events.next()? {
             TuiEvent::Key(key) if inserting => match key.code {
-                KeyCode::Enter => match wallet::open(&current_wallet, &password) {
+                KeyCode::Enter => match wallet::open(
+                    &current_wallet,
+                    &taolk::secret::Password::new((*password).clone()),
+                ) {
                     Ok(new_seed) => {
                         password.clear();
                         return Ok(Some((current_wallet, new_seed)));
@@ -866,7 +469,390 @@ fn run_lock_screen(
     }
 }
 
-/// Session: takes seed, builds app, runs event loop. Returns true=quit, false=lock.
+fn acquire_seed(
+    app: &App,
+    wallet_name: &str,
+    require_password: bool,
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    events: &TuiEventHandler,
+) -> Result<Option<zeroize::Zeroizing<[u8; 32]>>, Box<dyn std::error::Error>> {
+    if !require_password {
+        return Ok(app
+            .session
+            .cached_seed()
+            .map(|s| zeroize::Zeroizing::new(*s)));
+    }
+    Ok(prompt_password_modal(terminal, events, wallet_name)?
+        .map(|seed| zeroize::Zeroizing::new(*seed.as_bytes())))
+}
+
+fn dispatch_unlock_all(
+    app: &mut App,
+    wallet_name: &str,
+    require_password: bool,
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    events: &TuiEventHandler,
+    send_tx: &std::sync::mpsc::Sender<event::Event>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let seed = match acquire_seed(app, wallet_name, require_password, terminal, events)? {
+        Some(s) => s,
+        None => {
+            app.set_status("Cancelled");
+            return Ok(());
+        }
+    };
+    let my_pubkey = app.session.pubkey();
+    let view_scalar = app.session.view_scalar();
+    let keys = taolk::secret::DecryptionKeys::new(*view_scalar.expose_secret(), Some(*seed));
+    let pending: Vec<app::LockedOutbound> = std::mem::take(&mut app.locked_outbound);
+    let mut unlocked = 0usize;
+    for entry in pending {
+        let Ok(remark) = samp::decode_remark(&entry.remark_bytes) else {
+            continue;
+        };
+        let source = reader::RemarkSource {
+            sender: entry.sender,
+            remark,
+            remark_bytes: entry.remark_bytes,
+            at: types::BlockRef::from_parts(entry.block_number, entry.ext_index),
+            timestamp_secs: entry.timestamp.as_unix_secs(),
+        };
+        reader::process_remark(&source, &my_pubkey, &keys, send_tx);
+        unlocked += 1;
+    }
+    drop(seed);
+    app.set_status(format!("Unlocked {unlocked} message(s)"));
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dispatch_channel_create(
+    app: &mut App,
+    wallet_name: &str,
+    require_password: bool,
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    events: &TuiEventHandler,
+    send_tx: &std::sync::mpsc::Sender<event::Event>,
+    rt: &tokio::runtime::Runtime,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let name = match app.pending_channel_name.as_deref() {
+        Some(n) => n.to_string(),
+        None => return Ok(()),
+    };
+    let desc = app
+        .pending_channel_desc
+        .as_deref()
+        .unwrap_or("")
+        .to_string();
+    let name_typed = match samp::ChannelName::parse(name) {
+        Ok(n) => n,
+        Err(e) => {
+            app.set_error(format!("Invalid channel name: {e}"));
+            return Ok(());
+        }
+    };
+    let desc_typed = match samp::ChannelDescription::parse(desc) {
+        Ok(d) => d,
+        Err(e) => {
+            app.set_error(format!("Invalid description: {e}"));
+            return Ok(());
+        }
+    };
+    let remark = match app.session.build_channel_create(&name_typed, &desc_typed) {
+        Ok(r) => r,
+        Err(e) => {
+            app.set_error(format!("Cannot create channel: {e}"));
+            return Ok(());
+        }
+    };
+    if require_password {
+        let seed = match acquire_seed(app, wallet_name, true, terminal, events)? {
+            Some(s) => s,
+            None => {
+                app.set_status("Cancelled");
+                return Ok(());
+            }
+        };
+        let signing_key = taolk::secret::Seed::from_bytes(*seed).derive_signing_key();
+        app.ephemeral_signing = Some(std::sync::Arc::new(signing_key));
+    }
+    app.pending_remark = Some(remark.clone());
+    app.pending_text = None;
+    app.pending_fee = None;
+    app.overlay = Some(app::Overlay::Confirm);
+
+    let signing = app
+        .ephemeral_signing
+        .clone()
+        .or_else(|| app.session.signing())
+        .expect("signing key available");
+    let ss58 = app.session.my_ss58.clone();
+    let ci = app.session.chain_info.clone();
+    let url = app.session.node_url.clone();
+    let tx = send_tx.clone();
+    let symbol = app.session.token_symbol.clone();
+    let decimals = app.session.token_decimals;
+    rt.spawn(async move {
+        match extrinsic::estimate_fee(url.as_str(), &remark, &signing, &ss58, &ci).await {
+            Ok(fee) => {
+                let display = util::format_fee(fee, decimals, &symbol);
+                let _ = tx.send(event::Event::FeeEstimated {
+                    fee_display: display,
+                    fee_raw: Some(fee),
+                });
+            }
+            Err(e) => {
+                let _ = tx.send(event::Event::FeeEstimated {
+                    fee_display: format!("error: {e}"),
+                    fee_raw: None,
+                });
+            }
+        }
+    });
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dispatch_pending_send(
+    app: &mut App,
+    text: String,
+    wallet_name: &str,
+    require_password: bool,
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    events: &TuiEventHandler,
+    send_tx: &std::sync::mpsc::Sender<event::Event>,
+    rt: &tokio::runtime::Runtime,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let seed = match acquire_seed(app, wallet_name, require_password, terminal, events)? {
+        Some(s) => s,
+        None => {
+            app.set_status("Cancelled");
+            return Ok(());
+        }
+    };
+    let body = match crate::types::MessageBody::parse(text.clone()) {
+        Ok(b) => b,
+        Err(e) => {
+            app.set_status(format!("Invalid message: {e}"));
+            return Ok(());
+        }
+    };
+    let result = build_send_remark(app, &seed, &body);
+    if require_password {
+        let signing_key = taolk::secret::Seed::from_bytes(*seed).derive_signing_key();
+        app.ephemeral_signing = Some(std::sync::Arc::new(signing_key));
+    }
+    drop(seed);
+    match result {
+        Ok(remark) => {
+            app.pending_remark = Some(remark.clone());
+            app.pending_text = Some(text);
+            app.pending_fee = None;
+            app.reset_input();
+            app.overlay = Some(Overlay::Confirm);
+
+            let signing = app
+                .ephemeral_signing
+                .clone()
+                .or_else(|| app.session.signing())
+                .expect("signing key available");
+            let ss58 = app.session.my_ss58.clone();
+            let ci = app.session.chain_info.clone();
+            let url = app.session.node_url.clone();
+            let tx = send_tx.clone();
+            let symbol = app.session.token_symbol.clone();
+            let decimals = app.session.token_decimals;
+            rt.spawn(async move {
+                match extrinsic::estimate_fee(url.as_str(), &remark, &signing, &ss58, &ci).await {
+                    Ok(fee) => {
+                        let display = util::format_fee(fee, decimals, &symbol);
+                        let _ = tx.send(event::Event::FeeEstimated {
+                            fee_display: display,
+                            fee_raw: Some(fee),
+                        });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(event::Event::FeeEstimated {
+                            fee_display: format!("error: {e}"),
+                            fee_raw: None,
+                        });
+                    }
+                }
+            });
+        }
+        Err(reason) => {
+            app.set_error(format!("Cannot send: {reason}"));
+        }
+    }
+    Ok(())
+}
+
+fn prompt_password_modal(
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    events: &TuiEventHandler,
+    wallet_name: &str,
+) -> Result<Option<taolk::secret::Seed>, Box<dyn std::error::Error>> {
+    use ratatui::layout::Rect;
+    use ratatui::style::{Modifier, Style};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::{Block, Clear, Paragraph};
+    use ui::palette;
+
+    let title_style = Style::default()
+        .fg(palette::ACCENT)
+        .add_modifier(Modifier::BOLD);
+    let border_style = Style::default()
+        .fg(palette::ACCENT)
+        .add_modifier(Modifier::BOLD);
+    let prompt_style = Style::default();
+    let error_style = Style::default().fg(palette::ERROR);
+    let hint_style = Style::default().fg(palette::MUTED);
+
+    let mut password = zeroize::Zeroizing::new(String::new());
+    let mut error_msg: Option<String> = None;
+
+    loop {
+        terminal.draw(|frame| {
+            let area = frame.area();
+            let want_w = 48.min(area.width);
+            let want_h = 7u16.min(area.height);
+            let rect = crate::ui::modal::centered_rect(area, want_w, want_h);
+
+            frame.render_widget(Clear, rect);
+            let block = Block::bordered()
+                .title(Span::styled(
+                    format!(" Confirm password — {wallet_name} "),
+                    title_style,
+                ))
+                .border_type(crate::ui::symbols::PANEL_BORDER)
+                .border_style(border_style);
+            let inner = block.inner(rect);
+            frame.render_widget(block, rect);
+
+            let prompt_text = format!("{} Password: ", ui::icons::KEY);
+            let prompt_cols = u16::try_from(prompt_text.chars().count()).unwrap_or(u16::MAX);
+            let mut lines: Vec<Line> = Vec::new();
+            lines.push(Line::raw(""));
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(prompt_text, prompt_style),
+            ]));
+            if let Some(err) = &error_msg {
+                lines.push(Line::raw(""));
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(err.clone(), error_style),
+                ]));
+            } else {
+                lines.push(Line::raw(""));
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled("Enter sign \u{00B7} Esc cancel", hint_style),
+                ]));
+            }
+            frame.render_widget(Paragraph::new(lines), inner);
+
+            let cursor_x = inner.x + 2 + prompt_cols;
+            let cursor_y = inner.y + 1;
+            if cursor_x < inner.x + inner.width && cursor_y < inner.y + inner.height {
+                frame.set_cursor_position(Rect {
+                    x: cursor_x,
+                    y: cursor_y,
+                    width: 1,
+                    height: 1,
+                });
+            }
+        })?;
+
+        match events.next()? {
+            TuiEvent::Key(key) => match key.code {
+                KeyCode::Enter => match wallet::open(
+                    wallet_name,
+                    &taolk::secret::Password::new((*password).clone()),
+                ) {
+                    Ok(seed) => {
+                        password.clear();
+                        return Ok(Some(seed));
+                    }
+                    Err(wallet::WalletError::WrongPassword) => {
+                        password.clear();
+                        error_msg = Some("Wrong password".into());
+                    }
+                    Err(e) => {
+                        password.clear();
+                        error_msg = Some(format!("{e}"));
+                    }
+                },
+                KeyCode::Esc => {
+                    password.clear();
+                    return Ok(None);
+                }
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    password.clear();
+                    return Ok(None);
+                }
+                KeyCode::Char(c) => {
+                    error_msg = None;
+                    password.push(c);
+                }
+                KeyCode::Backspace => {
+                    error_msg = None;
+                    password.pop();
+                }
+                _ => {}
+            },
+            TuiEvent::Tick | TuiEvent::Core(_) | TuiEvent::Mouse(_) => {}
+        }
+    }
+}
+
+fn draw_connecting(
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    node_url: &str,
+) -> Result<(), std::io::Error> {
+    use ratatui::layout::Alignment;
+    use ratatui::style::Style;
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::Paragraph;
+    use ui::palette;
+
+    let dim = Style::default().fg(palette::MUTED);
+    let accent = Style::default().fg(palette::ACCENT);
+
+    terminal.draw(|frame| {
+        let area = frame.area();
+        let mut lines: Vec<Line> = Vec::new();
+        for _ in 0..(area.height / 2).saturating_sub(1) {
+            lines.push(Line::raw(""));
+        }
+        lines.push(Line::from(vec![
+            Span::styled("Connecting to ", dim),
+            Span::styled(node_url.to_string(), accent),
+            Span::styled("\u{2026}", dim),
+        ]));
+        frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
+    })?;
+    Ok(())
+}
+
+fn fetch_fresh_blocking(
+    rt: &tokio::runtime::Runtime,
+    node_url: &str,
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    _cfg: &config::Config,
+) -> Result<(extrinsic::ChainInfo, String, u32), Box<dyn std::error::Error>> {
+    draw_connecting(terminal, node_url)?;
+    let info = rt
+        .block_on(extrinsic::fetch_chain_info(node_url))
+        .map_err(|e| format!("Failed to fetch chain info: {e}"))?;
+    let (sym, dec) = rt
+        .block_on(extrinsic::fetch_token_info(node_url))
+        .unwrap_or_else(|_| ("UNIT".into(), 0));
+    let snap = chain_cache::ChainSnapshot::from_chain_info(&info, &sym, dec);
+    let _ = chain_cache::save(node_url, &snap);
+    Ok((info, sym, dec))
+}
+
 fn run_session(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     events: &TuiEventHandler,
@@ -875,93 +861,172 @@ fn run_session(
     node_url: &str,
     mirror_urls: &[String],
     cfg: &config::Config,
-) -> Result<bool, Box<dyn std::error::Error>> {
-    let msk = MiniSecretKey::from_bytes(seed).map_err(|e| format!("Invalid seed: {e}"))?;
-    let keypair = msk.expand_to_keypair(ExpansionMode::Ed25519);
-    let my_pubkey = types::Pubkey(keypair.public.to_bytes());
+) -> Result<SessionExit, Box<dyn std::error::Error>> {
+    let signing = taolk::secret::Seed::from_bytes(*seed).derive_signing_key();
+    let my_pubkey = signing.public_key();
 
     let rt = tokio::runtime::Runtime::new()?;
 
-    let chain_info = rt
-        .block_on(extrinsic::fetch_chain_info(node_url))
-        .map_err(|e| format!("Failed to fetch chain info: {e}"))?;
+    let (chain_info, token_symbol, token_decimals, used_cache) =
+        match chain_cache::load(node_url).and_then(|s| s.into_chain_info().ok()) {
+            Some((info, sym, dec)) => (info, sym, dec, true),
+            None => {
+                let (info, sym, dec) = fetch_fresh_blocking(&rt, node_url, terminal, cfg)?;
+                (info, sym, dec, false)
+            }
+        };
 
-    let (token_symbol, token_decimals) = match rt.block_on(extrinsic::fetch_token_info(node_url)) {
-        Ok(info) => info,
-        Err(e) => {
-            eprintln!("Warning: Could not fetch token info: {e}. Defaulting to TAO/9.");
-            ("TAO".into(), 9)
-        }
-    };
-
-    let db = db::Db::open(wallet_name, seed, &chain_info.genesis_hash)?;
+    let db = db::Db::open(
+        wallet_name,
+        seed,
+        chain_info.chain_params.genesis_hash().as_bytes(),
+    )?;
+    let keep_seed = !cfg.security.require_password_per_send;
+    let node_url_typed = taolk::types::NodeUrl::parse(node_url)
+        .map_err(|e| -> Box<dyn std::error::Error> { format!("invalid node url: {e}").into() })?;
     let session = session::Session::new(
-        keypair,
+        signing,
         zeroize::Zeroizing::new(*seed),
-        node_url.to_string(),
+        keep_seed,
+        node_url_typed,
         chain_info.clone(),
         db,
     );
     let audio = audio::Audio::from_config(&cfg.notifications);
-    let mut app = App::new(session, audio);
+    let config = app::AppConfig {
+        sidebar_width: cfg.ui.sidebar_width,
+        timestamp_format: cfg.ui.timestamp_format.clone(),
+        date_format: cfg.ui.date_format.clone(),
+        audio,
+    };
+    let mut app = App::new(session, config);
     app.session.token_symbol = token_symbol;
     app.session.token_decimals = token_decimals;
-    app.sidebar_width = cfg.ui.sidebar_width;
-    app.timestamp_format = cfg.ui.timestamp_format.clone();
-    app.date_format = cfg.ui.date_format.clone();
     app.session.load_from_db();
-
-    if let Ok(bal) = rt.block_on(extrinsic::fetch_balance(
-        node_url,
-        &my_pubkey,
-        &chain_info.account_info_layout,
-    )) {
-        app.session.balance = Some(bal);
-    }
 
     let event_tx = events.core_sender();
     let lock_timeout = std::time::Duration::from_secs(cfg.security.lock_timeout);
     let mut last_activity = std::time::Instant::now();
 
-    // Spawn chain subscription
     {
         let url = node_url.to_string();
         let tx = event_tx.clone();
-        let sc = zeroize::Zeroizing::new(*seed);
+        let layout = chain_info.account_storage.clone();
         rt.spawn(async move {
-            let _ = tx.send(event::Event::Status("Connected".into()));
-            chain::subscribe_blocks(&url, my_pubkey, sc, tx).await;
+            if let Ok(bal) = extrinsic::fetch_balance(url.as_str(), &my_pubkey, &layout).await {
+                let _ = tx.send(event::Event::BalanceUpdated(bal));
+            }
         });
     }
 
-    // Mirror sync
+    if used_cache {
+        let url = node_url.to_string();
+        let tx = event_tx.clone();
+        let expected = *chain_info.chain_params.genesis_hash().as_bytes();
+        rt.spawn(async move {
+            let fresh = match extrinsic::fetch_chain_info(url.as_str()).await {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+            if fresh.chain_params.genesis_hash().as_bytes() != &expected {
+                let _ = tx.send(event::Event::GenesisMismatch);
+                return;
+            }
+            let (sym, dec) = extrinsic::fetch_token_info(url.as_str())
+                .await
+                .unwrap_or_else(|_| ("UNIT".into(), 0));
+            let snap = chain_cache::ChainSnapshot::from_chain_info(&fresh, &sym, dec);
+            let _ = chain_cache::save(&url, &snap);
+            let _ = tx.send(event::Event::ChainSnapshotRefreshed {
+                info: fresh,
+                token_symbol: sym,
+                token_decimals: dec,
+            });
+        });
+    }
+
+    {
+        let url = node_url.to_string();
+        let tx = event_tx.clone();
+        let keys = app.session.decryption_keys();
+        rt.spawn(async move {
+            let _ = tx.send(event::Event::Status("Connected".into()));
+            chain::subscribe_blocks(url.as_str(), my_pubkey, keys, tx).await;
+        });
+    }
+
     app.session.has_mirror = !mirror_urls.is_empty();
     if app.session.has_mirror {
         let subscribed: Vec<types::BlockRef> =
             app.session.channels.iter().map(|c| c.channel_ref).collect();
-        for mirror_url in mirror_urls {
-            let url = mirror_url.clone();
-            let sc = zeroize::Zeroizing::new(*seed);
-            let pubkey = my_pubkey;
-            let channels = subscribed.clone();
-            let tx = event_tx.clone();
-            rt.spawn(async move {
-                mirror::sync(&url, 42, &sc, &pubkey, channels, 0, tx).await;
-            });
-        }
+        let urls: Vec<String> = mirror_urls.iter().map(|u| u.to_string()).collect();
+        let node = node_url.to_string();
+        let keys = app.session.decryption_keys();
+        let pubkey = my_pubkey;
+        let tx = event_tx.clone();
+        let chain_name = chain_info.name.clone();
+        let ss58_prefix = chain_info.ss58_prefix;
+        rt.spawn(async move {
+            mirror::sync(
+                urls,
+                &node,
+                &chain_name,
+                ss58_prefix,
+                &keys,
+                &pubkey,
+                subscribed,
+                0,
+                tx,
+            )
+            .await;
+        });
     } else {
         app.sound_armed = true;
     }
 
-    app.set_status("Connected");
+    app.set_status(if used_cache { "Ready" } else { "Connected" });
 
-    // Event loop -- runs until quit or lock
     while app.running {
-        terminal.draw(|frame| ui::render(frame, &app))?;
+        if let Some(text) = app.pending_send_text.take() {
+            dispatch_pending_send(
+                &mut app,
+                text,
+                wallet_name,
+                cfg.security.require_password_per_send,
+                terminal,
+                events,
+                &event_tx,
+                &rt,
+            )?;
+        }
+        if app.pending_channel_create {
+            app.pending_channel_create = false;
+            dispatch_channel_create(
+                &mut app,
+                wallet_name,
+                cfg.security.require_password_per_send,
+                terminal,
+                events,
+                &event_tx,
+                &rt,
+            )?;
+        }
+        if app.pending_unlock_all {
+            app.pending_unlock_all = false;
+            dispatch_unlock_all(
+                &mut app,
+                wallet_name,
+                cfg.security.require_password_per_send,
+                terminal,
+                events,
+                &event_tx,
+            )?;
+        }
 
-        // Check lock timeout (0 = disabled)
+        terminal.draw(|frame| ui::render(frame, &mut app))?;
+
         if cfg.security.lock_timeout > 0 && last_activity.elapsed() > lock_timeout {
-            return Ok(false); // lock
+            return Ok(SessionExit::Lock);
         }
 
         match events.next()? {
@@ -970,9 +1035,49 @@ fn run_session(
                 if (key.code == KeyCode::Char('l') && key.modifiers.contains(KeyModifiers::CONTROL))
                     || key.code == KeyCode::Char('\x0c')
                 {
-                    return Ok(false); // Ctrl+L: lock
+                    return Ok(SessionExit::Lock);
                 }
-                handle_key(&mut app, key, &event_tx, &rt);
+                if key.code == KeyCode::Char('w') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    return Ok(SessionExit::SwitchWallet);
+                }
+                handle_key(&mut app, key, &event_tx);
+                if app.lock_requested {
+                    app.lock_requested = false;
+                    return Ok(SessionExit::Lock);
+                }
+                if app.wallet_switch_requested {
+                    app.wallet_switch_requested = false;
+                    return Ok(SessionExit::SwitchWallet);
+                }
+                if app.refresh_requested {
+                    app.refresh_requested = false;
+                    let refs = match app.view {
+                        app::View::Thread(idx) => {
+                            app.session.threads.get(idx).map(|c| c.gap_refs())
+                        }
+                        app::View::Channel(idx) => {
+                            app.session.channels.get(idx).map(|c| c.gap_refs())
+                        }
+                        app::View::Group(idx) => app.session.groups.get(idx).map(|g| g.gap_refs()),
+                        _ => None,
+                    };
+                    if let Some(refs) = refs {
+                        for block_ref in refs {
+                            let _ = event_tx.send(event::Event::FetchBlock { block_ref });
+                        }
+                    }
+                    if app.session.has_mirror
+                        && let app::View::Channel(idx) = app.view
+                        && let Some(ch) = app.session.channels.get(idx)
+                    {
+                        let _ = event_tx.send(event::Event::FetchChannelMirror {
+                            channel_ref: ch.channel_ref,
+                        });
+                    }
+                }
+                for block_ref in app.pending_fetches.drain(..) {
+                    let _ = event_tx.send(event::Event::FetchBlock { block_ref });
+                }
             }
             TuiEvent::Mouse(mouse) => {
                 last_activity = std::time::Instant::now();
@@ -990,10 +1095,11 @@ fn run_session(
                 if new_block {
                     let url = node_url.to_string();
                     let pk = my_pubkey;
-                    let layout = app.session.chain_info.account_info_layout.clone();
+                    let layout = app.session.chain_info.account_storage.clone();
                     let tx = event_tx.clone();
                     rt.spawn(async move {
-                        if let Ok(bal) = extrinsic::fetch_balance(&url, &pk, &layout).await {
+                        if let Ok(bal) = extrinsic::fetch_balance(url.as_str(), &pk, &layout).await
+                        {
                             let _ = tx.send(event::Event::BalanceUpdated(bal));
                         }
                     });
@@ -1015,28 +1121,27 @@ fn run_session(
                     Some(text) => text,
                     None => continue,
                 };
-                let ts = DateTime::<Utc>::from_timestamp(timestamp as i64, 0).unwrap_or_default();
+                let ts = DateTime::<Utc>::from_timestamp(
+                    i64::try_from(timestamp.as_unix_secs()).unwrap_or(0),
+                    0,
+                )
+                .unwrap_or_default();
                 let sender_ss58 = util::ss58_short(&sender);
                 let is_mine = sender == app.session.pubkey();
                 let kind = ct & 0x0F;
 
                 match kind {
                     0x00 | 0x01 => {
-                        // Public or encrypted
                         app.session.add_inbox_message(
                             sender,
                             recipient,
                             ts,
                             body,
-                            kind,
-                            types::BlockRef {
-                                block: block_number,
-                                index: ext_index,
-                            },
+                            ct,
+                            types::BlockRef::from_parts(block_number, ext_index),
                         );
                     }
                     0x02 => {
-                        // Thread
                         app.session.add_thread_message(
                             sender,
                             recipient,
@@ -1056,7 +1161,7 @@ fn run_session(
                 }
 
                 if app.sound_armed && !is_mine {
-                    app.audio.play(audio::Sound::Dm);
+                    app.config.audio.play(audio::Sound::Dm);
                 }
             }
             TuiEvent::Core(event::Event::NewChannelMessage {
@@ -1070,7 +1175,11 @@ fn run_session(
                 ext_index,
                 timestamp,
             }) => {
-                let ts = DateTime::<Utc>::from_timestamp(timestamp as i64, 0).unwrap_or_default();
+                let ts = DateTime::<Utc>::from_timestamp(
+                    i64::try_from(timestamp.as_unix_secs()).unwrap_or(0),
+                    0,
+                )
+                .unwrap_or_default();
                 let is_mine = sender_ss58 == util::ss58_short(&app.session.pubkey());
                 let mentioned = util::body_mentions(&body, app.session.ss58());
                 app.session.peer_pubkeys.insert(sender_ss58.clone(), sender);
@@ -1093,7 +1202,7 @@ fn run_session(
                     } else {
                         audio::Sound::Ambient
                     };
-                    app.audio.play(sound);
+                    app.config.audio.play(sound);
                 }
             }
             TuiEvent::Core(event::Event::ChannelDiscovered {
@@ -1127,7 +1236,11 @@ fn run_session(
                 ext_index,
                 timestamp,
             }) => {
-                let ts = DateTime::<Utc>::from_timestamp(timestamp as i64, 0).unwrap_or_default();
+                let ts = DateTime::<Utc>::from_timestamp(
+                    i64::try_from(timestamp.as_unix_secs()).unwrap_or(0),
+                    0,
+                )
+                .unwrap_or_default();
                 let is_mine = sender_ss58 == util::ss58_short(&app.session.pubkey());
                 let mentioned = util::body_mentions(&body, app.session.ss58());
                 app.session.peer_pubkeys.insert(sender_ss58.clone(), sender);
@@ -1150,17 +1263,23 @@ fn run_session(
                     } else {
                         audio::Sound::Ambient
                     };
-                    app.audio.play(sound);
+                    app.config.audio.play(sound);
                 }
             }
             TuiEvent::Core(event::Event::SubmitRemark { remark }) => {
                 let url = app.session.node_url.clone();
-                let kp = app.session.keypair.clone();
+                let signing = app
+                    .ephemeral_signing
+                    .take()
+                    .or_else(|| app.session.signing())
+                    .expect("signing key available");
                 let ss58 = app.session.my_ss58.clone();
                 let ci = chain_info.clone();
                 let tx = event_tx.clone();
                 rt.spawn(async move {
-                    match extrinsic::submit_remark(&url, &remark, &kp, &ss58, &ci).await {
+                    match extrinsic::submit_remark(url.as_str(), &remark, &signing, &ss58, &ci)
+                        .await
+                    {
                         Ok(_) => {
                             let _ = tx.send(event::Event::MessageSent);
                         }
@@ -1171,12 +1290,27 @@ fn run_session(
                 });
             }
             TuiEvent::Core(event::Event::FetchChannelMirror { channel_ref }) => {
-                if let Some(mirror_url) = mirror_urls.first() {
+                if !mirror_urls.is_empty() {
                     app.set_status("Loading...");
-                    let url = mirror_url.clone();
+                    let urls: Vec<String> = mirror_urls.iter().map(|u| u.to_string()).collect();
+                    let node = node_url.to_string();
                     let tx = event_tx.clone();
+                    let pk = my_pubkey;
+                    let keys = app.session.decryption_keys();
+                    let chain_name = chain_info.name.clone();
+                    let ss58_prefix = chain_info.ss58_prefix;
                     rt.spawn(async move {
-                        mirror::fetch_channel(&url, channel_ref, tx).await;
+                        mirror::fetch_channel(
+                            urls,
+                            &node,
+                            &chain_name,
+                            ss58_prefix,
+                            channel_ref,
+                            &pk,
+                            &keys,
+                            tx,
+                        )
+                        .await;
                     });
                 }
             }
@@ -1184,14 +1318,14 @@ fn run_session(
                 app.set_status("Loading...");
                 let url = node_url.to_string();
                 let tx = event_tx.clone();
-                let sc = zeroize::Zeroizing::new(*seed);
+                let keys = app.session.decryption_keys();
                 rt.spawn(async move {
                     chain::fetch_and_process_extrinsic(
                         &url,
-                        block_ref.block,
-                        block_ref.index,
+                        block_ref.block().get(),
+                        block_ref.index().get(),
                         my_pubkey,
-                        sc,
+                        keys,
                         tx.clone(),
                     )
                     .await;
@@ -1200,13 +1334,16 @@ fn run_session(
             }
             TuiEvent::Core(event::Event::GapsRefreshed) => {
                 for i in 0..app.session.threads.len() {
-                    app.session.refresh_gaps(i);
+                    app.session
+                        .refresh_gaps(taolk::db::ConversationKind::Thread, i);
                 }
                 for i in 0..app.session.channels.len() {
-                    app.session.refresh_channel_gaps(i);
+                    app.session
+                        .refresh_gaps(taolk::db::ConversationKind::Channel, i);
                 }
                 for i in 0..app.session.groups.len() {
-                    app.session.refresh_group_gaps(i);
+                    app.session
+                        .refresh_gaps(taolk::db::ConversationKind::Group, i);
                 }
                 app.set_status("Loaded");
             }
@@ -1214,7 +1351,7 @@ fn run_session(
                 fee_display,
                 fee_raw,
             }) => {
-                if app.mode == Mode::Confirm {
+                if app.is_overlay(Overlay::Confirm) {
                     app.pending_fee = Some(fee_display);
                 }
                 if let Some(raw) = fee_raw {
@@ -1223,6 +1360,7 @@ fn run_session(
             }
             TuiEvent::Core(event::Event::MessageSent) => {
                 app.sending = false;
+                app.ephemeral_signing = None;
                 app.pending_text = None;
                 app.pending_view = None;
                 let fee_info = app
@@ -1240,13 +1378,12 @@ fn run_session(
                     .unwrap_or_default();
                 app.set_status(format!("Confirmed{fee_info}"));
                 app.last_fee = None;
-                // Refresh balance after send
                 let url = node_url.to_string();
                 let pk = my_pubkey;
                 let tx = event_tx.clone();
-                let layout = app.session.chain_info.account_info_layout.clone();
+                let layout = app.session.chain_info.account_storage.clone();
                 rt.spawn(async move {
-                    if let Ok(bal) = extrinsic::fetch_balance(&url, &pk, &layout).await {
+                    if let Ok(bal) = extrinsic::fetch_balance(url.as_str(), &pk, &layout).await {
                         let _ = tx.send(event::Event::BalanceUpdated(bal));
                     }
                 });
@@ -1258,11 +1395,69 @@ fn run_session(
                 }
                 app.session.balance = Some(bal);
             }
+            TuiEvent::Core(event::Event::ChainSnapshotRefreshed {
+                info,
+                token_symbol,
+                token_decimals,
+            }) => {
+                app.session.chain_info = info;
+                app.session.token_symbol = token_symbol;
+                app.session.token_decimals = token_decimals;
+            }
+            TuiEvent::Core(event::Event::GenesisMismatch) => {
+                app.set_status("\u{26A0} chain genesis changed; restart taolk to re-cache");
+            }
+            TuiEvent::Core(event::Event::ConnectionStatus(state)) => {
+                app.connection = state;
+            }
             TuiEvent::Core(event::Event::Status(msg)) => {
                 app.set_status(msg);
             }
             TuiEvent::Core(event::Event::CatchupComplete) => {
                 app.sound_armed = true;
+                for i in 0..app.session.threads.len() {
+                    app.session
+                        .refresh_gaps(taolk::db::ConversationKind::Thread, i);
+                }
+                for i in 0..app.session.channels.len() {
+                    app.session
+                        .refresh_gaps(taolk::db::ConversationKind::Channel, i);
+                }
+                for i in 0..app.session.groups.len() {
+                    app.session
+                        .refresh_gaps(taolk::db::ConversationKind::Group, i);
+                }
+            }
+            TuiEvent::Core(event::Event::LockedOutbound {
+                sender,
+                block_number,
+                ext_index,
+                timestamp,
+                remark_bytes,
+            }) => {
+                let block_ref = types::BlockRef::from_parts(block_number, ext_index);
+                let already_in_db = app
+                    .session
+                    .db
+                    .has_message_at(db::ConversationKind::Inbox, block_ref)
+                    || app
+                        .session
+                        .db
+                        .has_message_at(db::ConversationKind::Thread, block_ref);
+                if !already_in_db
+                    && !app
+                        .locked_outbound
+                        .iter()
+                        .any(|m| m.block_number == block_number && m.ext_index == ext_index)
+                {
+                    app.locked_outbound.push(app::LockedOutbound {
+                        sender,
+                        block_number,
+                        ext_index,
+                        timestamp,
+                        remark_bytes,
+                    });
+                }
             }
             TuiEvent::Core(event::Event::Error(e)) => {
                 if app.sending {
@@ -1280,42 +1475,40 @@ fn run_session(
                         app.view = app::View::Inbox;
                     }
                     if let Some(text) = app.pending_text.take() {
-                        app.input = text;
-                        app.cursor_pos = app.input.len();
+                        app.input.set(text);
                     }
                     app.sending = false;
+                    app.ephemeral_signing = None;
                     app.pending_view = None;
                 }
-                app.set_error(e);
+                app.set_chain_error(&e);
             }
         }
     }
 
-    Ok(true) // quit
+    Ok(SessionExit::Quit)
 }
 
-// ---------------------------------------------------------------------------
-// SAMP remark builder
-// ---------------------------------------------------------------------------
-
-fn build_send_remark(app: &App, text: &str) -> error::Result<Vec<u8>> {
-    // Standalone public/encrypted message
+fn build_send_remark(
+    app: &App,
+    seed: &[u8; 32],
+    body: &crate::types::MessageBody,
+) -> error::Result<samp::RemarkBytes> {
     if let (Some((pubkey, _)), Some(ct)) = (&app.msg_recipient, app.msg_type) {
         return match ct {
-            0x01 => app.session.build_public_message(pubkey, text),
-            0x02 => app.session.build_encrypted_message(pubkey, text),
+            samp::ContentType::Public => app.session.build_public_message(pubkey, body),
+            samp::ContentType::Encrypted => app.session.build_encrypted_message(seed, pubkey, body),
             _ => Err(error::SdkError::Other("Invalid message type".into())),
         };
     }
 
-    // New thread (msg_recipient set, no msg_type)
     if let (Some((pubkey, _)), None) = (&app.msg_recipient, app.msg_type) {
-        return app.session.build_thread_root(pubkey, text);
+        return app.session.build_thread_root(seed, pubkey, body);
     }
 
     match app.view {
-        app::View::Thread(idx) => app.session.build_thread_reply(idx, text),
-        app::View::Channel(idx) => app.session.build_channel_message(idx, text),
+        app::View::Thread(idx) => app.session.build_thread_reply(seed, idx, body),
+        app::View::Channel(idx) => app.session.build_channel_message(idx, body),
         app::View::Group(idx) => {
             let group = app
                 .session
@@ -1323,63 +1516,24 @@ fn build_send_remark(app: &App, text: &str) -> error::Result<Vec<u8>> {
                 .get(idx)
                 .ok_or_else(|| error::SdkError::NotFound("No group selected".into()))?;
             if group.group_ref.is_zero() {
-                app.session.build_group_create(&group.members.clone(), text)
+                app.session
+                    .build_group_create(seed, &group.members.clone(), body)
             } else {
-                app.session.build_group_message(idx, text)
+                app.session.build_group_message(seed, idx, body)
             }
         }
         _ => Err(error::SdkError::Other("Cannot send from this view".into())),
     }
 }
 
-/// Shared text editing for all input modes. Returns true if the key was handled.
 fn handle_text_input(app: &mut App, key: crossterm::event::KeyEvent) -> bool {
-    match key.code {
-        KeyCode::Char(c) => {
-            app.input.insert(app.cursor_pos, c);
-            app.cursor_pos += 1;
-        }
-        KeyCode::Backspace => {
-            if app.cursor_pos > 0 {
-                app.cursor_pos -= 1;
-                app.input.remove(app.cursor_pos);
-            }
-        }
-        KeyCode::Delete => {
-            if app.cursor_pos < app.input.len() {
-                app.input.remove(app.cursor_pos);
-            }
-        }
-        KeyCode::Left => {
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                // Ctrl+Left: jump to previous word boundary
-                app.cursor_pos = app.input[..app.cursor_pos].rfind(' ').unwrap_or(0);
-            } else {
-                app.cursor_pos = app.cursor_pos.saturating_sub(1);
-            }
-        }
-        KeyCode::Right => {
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                // Ctrl+Right: jump to next word boundary
-                app.cursor_pos = app.input[app.cursor_pos..]
-                    .find(' ')
-                    .map(|p| app.cursor_pos + p + 1)
-                    .unwrap_or(app.input.len());
-            } else if app.cursor_pos < app.input.len() {
-                app.cursor_pos += 1;
-            }
-        }
-        KeyCode::Home => app.cursor_pos = 0,
-        KeyCode::End => app.cursor_pos = app.input.len(),
-        _ => return false,
+    if app.input.handle_edit_key(key) {
+        app.contact_idx = 0;
+        true
+    } else {
+        false
     }
-    app.contact_idx = 0;
-    true
 }
-
-// ---------------------------------------------------------------------------
-// Input handlers
-// ---------------------------------------------------------------------------
 
 fn handle_mouse(
     app: &mut App,
@@ -1390,35 +1544,47 @@ fn handle_mouse(
 
     let term_size = terminal.size().unwrap_or_default();
     let sidebar_width: u16 = if app.show_sidebar {
-        app.sidebar_width
+        app.config.sidebar_width
     } else {
         0
     };
     let input_area_y = term_size.height.saturating_sub(4);
+    let x = mouse.column;
+    let y = mouse.row;
 
-    if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-        let x = mouse.column;
-        let y = mouse.row;
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            let hit = app
+                .sender_click_regions
+                .iter()
+                .find(|(row, c0, c1, _)| *row == y && x >= *c0 && x < *c1)
+                .map(|(_, _, _, ss58)| ss58.clone());
+            if let Some(short) = hit {
+                let pk = app.session.peer_pubkeys.get(&short).copied();
+                copy_sender(app, &short, pk.as_ref());
+                return;
+            }
 
-        let hit = app
-            .sender_click_regions
-            .borrow()
-            .iter()
-            .find(|(row, c0, c1, _)| *row == y && x >= *c0 && x < *c1)
-            .map(|(_, _, _, ss58)| ss58.clone());
-        if let Some(short) = hit {
-            let pk = app.session.peer_pubkeys.get(&short).copied();
-            copy_sender(app, &short, pk.as_ref());
-            return;
+            if app.show_sidebar && x < sidebar_width {
+                let row = usize::from(y.saturating_sub(1));
+                app.select_sidebar_row(row);
+            } else if y >= input_area_y && !app.sending && app.overlay.is_none() {
+                app.load_draft();
+                app.focus_composer();
+            } else if app.overlay.is_none() && y < input_area_y {
+                if app.is_composing() {
+                    app.save_draft();
+                }
+                app.focus_timeline();
+            }
         }
-
-        if app.show_sidebar && x < sidebar_width {
-            let row = y.saturating_sub(1) as usize;
-            app.select_sidebar_row(row);
-        } else if y >= input_area_y && !app.sending {
-            app.load_draft();
-            app.mode = Mode::Insert;
+        MouseEventKind::ScrollDown if app.overlay.is_none() => {
+            app.scroll_offset = app.scroll_offset.saturating_sub(3);
         }
+        MouseEventKind::ScrollUp if app.overlay.is_none() => {
+            app.scroll_offset = app.scroll_offset.saturating_add(3);
+        }
+        _ => {}
     }
 }
 
@@ -1426,80 +1592,159 @@ fn handle_key(
     app: &mut App,
     key: crossterm::event::KeyEvent,
     send_tx: &std::sync::mpsc::Sender<event::Event>,
-    rt: &tokio::runtime::Runtime,
 ) {
-    match app.mode {
-        Mode::Normal => handle_normal_key(app, key, send_tx),
-        Mode::Insert => handle_insert_key(app, key, send_tx, rt),
-        Mode::Confirm => handle_confirm_key(app, key, send_tx),
-        Mode::Compose => handle_compose_key(app, key),
-        Mode::Message => handle_message_key(app, key),
-        Mode::CreateChannel => handle_create_channel_key(app, key),
-        Mode::CreateChannelDesc => handle_create_channel_desc_key(app, key, send_tx, rt),
-        Mode::CreateGroupMembers => handle_create_group_members_key(app, key, send_tx),
-        Mode::Search => handle_search_key(app, key),
-        Mode::SenderPicker => handle_sender_picker_key(app, key),
+    if let Some(overlay) = app.overlay {
+        match overlay {
+            Overlay::Help => handle_help_key(app, key),
+            Overlay::Confirm => handle_confirm_key(app, key, send_tx),
+            Overlay::Compose => handle_compose_key(app, key),
+            Overlay::Message => handle_message_key(app, key),
+            Overlay::CreateChannel => handle_create_channel_key(app, key),
+            Overlay::CreateChannelDesc => handle_create_channel_desc_key(app, key),
+            Overlay::CreateGroupMembers => handle_create_group_members_key(app, key, send_tx),
+            Overlay::Search => handle_search_key(app, key),
+            Overlay::SenderPicker => handle_sender_picker_key(app, key),
+            Overlay::CommandPalette => handle_palette_key(app, key),
+            Overlay::FuzzyJump => handle_jump_key(app, key),
+        }
+        return;
+    }
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('j') => {
+                app.open_jump();
+                return;
+            }
+            KeyCode::Char('f') => {
+                app.search_query.clear();
+                app.enter_overlay(Overlay::Search);
+                return;
+            }
+            _ => {}
+        }
+    }
+    match app.focus {
+        Focus::Composer => handle_composer_key(app, key),
+        Focus::Timeline => handle_timeline_key(app, key, send_tx),
     }
 }
 
-fn handle_normal_key(
+fn handle_palette_key(app: &mut App, key: crossterm::event::KeyEvent) {
+    use ui::overlay::palette::Action;
+    let action = match app.palette.as_mut() {
+        Some(state) => state.handle_key(key),
+        None => {
+            app.close_overlay();
+            return;
+        }
+    };
+    match action {
+        Action::None => {}
+        Action::Close => app.close_palette(),
+        Action::Run(cmd, args) => {
+            let args_vec: Vec<&str> = args.split_whitespace().collect();
+            let run = cmd.run;
+            app.close_palette();
+            if let Err(e) = run(app, &args_vec) {
+                app.set_error(e);
+            }
+        }
+    }
+}
+
+fn handle_jump_key(app: &mut App, key: crossterm::event::KeyEvent) {
+    use ui::overlay::jump::Action;
+    let action = match app.jump.as_mut() {
+        Some(state) => state.handle_key(key),
+        None => {
+            app.close_overlay();
+            return;
+        }
+    };
+    match action {
+        Action::None => {}
+        Action::Close => app.close_jump(),
+        Action::Jump(view) => {
+            app.view = view;
+            app.focus = app.default_focus_for_view();
+            app.scroll_offset = 0;
+            if app.focus == Focus::Composer {
+                app.load_draft();
+            }
+            app.close_jump();
+        }
+    }
+}
+
+fn handle_help_key(app: &mut App, key: crossterm::event::KeyEvent) {
+    match key.code {
+        KeyCode::Char('j') | KeyCode::Down => {
+            app.help_scroll = app.help_scroll.saturating_add(1);
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            app.help_scroll = app.help_scroll.saturating_sub(1);
+        }
+        KeyCode::PageDown => {
+            app.help_scroll = app.help_scroll.saturating_add(10);
+        }
+        KeyCode::PageUp => {
+            app.help_scroll = app.help_scroll.saturating_sub(10);
+        }
+        KeyCode::Home => {
+            app.help_scroll = 0;
+        }
+        KeyCode::End | KeyCode::Char('G') => {
+            app.help_scroll = u16::MAX;
+        }
+        _ => {
+            app.help_scroll = 0;
+            app.close_overlay();
+        }
+    }
+}
+
+fn handle_timeline_key(
     app: &mut App,
     key: crossterm::event::KeyEvent,
     send_tx: &std::sync::mpsc::Sender<event::Event>,
 ) {
-    // Channel directory: browse discovered channels or type a channel ID
-    if app.view == app::View::ChannelDir {
-        match key.code {
-            KeyCode::Down if app.channel_dir_input.is_empty() => {
-                if !app.session.known_channels.is_empty() {
-                    app.channel_dir_cursor =
-                        (app.channel_dir_cursor + 1).min(app.session.known_channels.len() - 1);
-                }
-            }
-            KeyCode::Up if app.channel_dir_input.is_empty() => {
-                app.channel_dir_cursor = app.channel_dir_cursor.saturating_sub(1);
-            }
-            KeyCode::Enter => {
-                if !app.channel_dir_input.is_empty() {
-                    // Manual ref input: subscribe
-                    match parse_channel_ref(&app.channel_dir_input) {
-                        Ok(channel_ref) => {
-                            let idx = app.session.subscribe_channel(channel_ref);
-                            app.view = app::View::Channel(idx);
-                            app.set_status(format!(
-                                "Subscribed to #{}",
-                                app.session.channels[idx].name
-                            ));
-                            app.channel_dir_input.clear();
-                            let _ = send_tx.send(event::Event::FetchBlock {
-                                block_ref: channel_ref,
-                            });
-                            if app.session.has_mirror {
-                                let _ =
-                                    send_tx.send(event::Event::FetchChannelMirror { channel_ref });
-                            }
-                        }
-                        Err(e) => {
-                            app.set_error(format!("Invalid channel ref: {e}"));
-                        }
-                    }
-                } else if let Some(info) = app.session.known_channels.get(app.channel_dir_cursor) {
-                    // Toggle subscribe/unsubscribe
-                    let channel_ref = info.channel_ref;
-                    if app.session.is_subscribed(&channel_ref) {
-                        // Unsubscribe
-                        if let Some(idx) = app.session.channel_idx(&channel_ref)
-                            && let Some(name) = app.session.unsubscribe_channel(idx)
-                        {
-                            app.set_status(format!("Left #{name}"));
-                        }
-                    } else {
-                        // Subscribe
+    if key.code != KeyCode::Char('q') {
+        app.quit_confirm = false;
+    }
+    if app.view == app::View::ChannelDir && handle_channel_dir_key(app, key, send_tx) {
+        return;
+    }
+    handle_global_timeline_key(app, key, send_tx);
+}
+
+fn handle_channel_dir_key(
+    app: &mut App,
+    key: crossterm::event::KeyEvent,
+    send_tx: &std::sync::mpsc::Sender<event::Event>,
+) -> bool {
+    let typing = !app.channel_dir_input.is_empty();
+    let has_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+    match key.code {
+        KeyCode::Backspace => {
+            app.channel_dir_input.pop();
+            return true;
+        }
+        KeyCode::Char(c) if !has_ctrl && (c.is_ascii_digit() || c == ':') => {
+            app.channel_dir_input.push(c);
+            return true;
+        }
+        KeyCode::Enter => {
+            if typing {
+                match parse_channel_ref(&app.channel_dir_input) {
+                    Ok(channel_ref) => {
                         let idx = app.session.subscribe_channel(channel_ref);
+                        app.view = app::View::Channel(idx);
                         app.set_status(format!(
                             "Subscribed to #{}",
                             app.session.channels[idx].name
                         ));
+                        app.channel_dir_input.clear();
                         let _ = send_tx.send(event::Event::FetchBlock {
                             block_ref: channel_ref,
                         });
@@ -1507,46 +1752,78 @@ fn handle_normal_key(
                             let _ = send_tx.send(event::Event::FetchChannelMirror { channel_ref });
                         }
                     }
+                    Err(e) => {
+                        app.set_error(format!("Invalid channel ref: {e}"));
+                    }
                 }
-            }
-            KeyCode::Char('c') if app.channel_dir_input.is_empty() => {
-                // Create new channel (from inside directory)
-                if app.sending {
-                    app.set_error("Still sending previous message");
-                    return;
-                }
-                app.input.clear();
-                app.cursor_pos = 0;
-                app.mode = Mode::CreateChannel;
-            }
-            KeyCode::Esc => {
-                if app.channel_dir_input.is_empty() {
-                    app.view = app::View::Inbox;
+            } else if let Some(info) = app.session.known_channels.get(app.channel_dir_cursor) {
+                let channel_ref = info.channel_ref;
+                if app.session.is_subscribed(&channel_ref) {
+                    if let Some(idx) = app.session.channel_idx(&channel_ref)
+                        && let Some(name) = app.session.unsubscribe_channel(idx)
+                    {
+                        app.set_status(format!("Left #{name}"));
+                    }
                 } else {
-                    app.channel_dir_input.clear();
+                    let idx = app.session.subscribe_channel(channel_ref);
+                    app.set_status(format!("Subscribed to #{}", app.session.channels[idx].name));
+                    let _ = send_tx.send(event::Event::FetchBlock {
+                        block_ref: channel_ref,
+                    });
+                    if app.session.has_mirror {
+                        let _ = send_tx.send(event::Event::FetchChannelMirror { channel_ref });
+                    }
                 }
             }
-            KeyCode::Backspace => {
-                app.channel_dir_input.pop();
-            }
-            KeyCode::Char('q') if app.channel_dir_input.is_empty() => {
-                app.running = false;
-            }
-            KeyCode::Char(c) if c.is_ascii_digit() || c == ':' => {
-                app.channel_dir_input.push(c);
-            }
-            // j/k/Tab/BackTab fall through to sidebar navigation below
-            KeyCode::Char('j') | KeyCode::Char('k') | KeyCode::Tab | KeyCode::BackTab => {}
-            _ => {
-                return;
-            }
+            return true;
         }
+        KeyCode::Esc => {
+            if typing {
+                app.channel_dir_input.clear();
+            } else {
+                app.view = app::View::Inbox;
+            }
+            return true;
+        }
+        _ => {}
     }
 
-    if key.code != KeyCode::Char('q') {
-        app.quit_confirm = false;
+    if typing && !has_ctrl {
+        return true;
     }
+
     match key.code {
+        KeyCode::Char('k') if !has_ctrl && !typing => {
+            app.channel_dir_cursor = app.channel_dir_cursor.saturating_sub(1);
+            true
+        }
+        KeyCode::Char('j') if !has_ctrl && !typing => {
+            if !app.session.known_channels.is_empty() {
+                app.channel_dir_cursor =
+                    (app.channel_dir_cursor + 1).min(app.session.known_channels.len() - 1);
+            }
+            true
+        }
+        KeyCode::Char('+') if !has_ctrl && !typing => {
+            if !app.check_not_sending() {
+                return true;
+            }
+            app.enter_overlay(Overlay::CreateChannel);
+            true
+        }
+        _ => false,
+    }
+}
+
+fn handle_global_timeline_key(
+    app: &mut App,
+    key: crossterm::event::KeyEvent,
+    send_tx: &std::sync::mpsc::Sender<event::Event>,
+) {
+    match key.code {
+        KeyCode::Char('?') => {
+            app.enter_overlay(Overlay::Help);
+        }
         KeyCode::Char('q') => {
             let has_drafts = app.session.threads.iter().any(|c| !c.draft.is_empty())
                 || app.session.channels.iter().any(|c| !c.draft.is_empty());
@@ -1558,29 +1835,22 @@ fn handle_normal_key(
             }
         }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => app.running = false,
-        KeyCode::Char('i')
+        KeyCode::Char('i') | KeyCode::Enter
             if matches!(
                 app.view,
                 app::View::Thread(_) | app::View::Channel(_) | app::View::Group(_)
             ) =>
         {
-            app.load_draft();
-            app.scroll_offset = 0;
-            app.mode = Mode::Insert;
+            app.enter_composer_for_current_view();
         }
         KeyCode::Char('m') => {
-            if app.sending {
-                app.set_error("Still sending previous message");
+            if !app.check_not_sending() {
                 return;
             }
-            app.input.clear();
-            app.cursor_pos = 0;
-            app.mode = Mode::Message;
+            app.enter_overlay(Overlay::Message);
         }
         KeyCode::Char('n') => {
-            app.input.clear();
-            app.cursor_pos = 0;
-            app.mode = Mode::Compose;
+            app.enter_overlay(Overlay::Compose);
         }
         KeyCode::Char('c') => {
             app.channel_dir_cursor = 0;
@@ -1589,22 +1859,18 @@ fn handle_normal_key(
             app.view = app::View::ChannelDir;
         }
         KeyCode::Char('g') => {
-            if app.sending {
-                app.set_error("Still sending previous message");
+            if !app.check_not_sending() {
                 return;
             }
-            app.input.clear();
-            app.cursor_pos = 0;
+            app.reset_input();
             app.contact_idx = 0;
             app.pending_group_members.clear();
-            // Always include self
             let my_pk = app.session.pubkey();
             let my_ss58 = app.session.my_ss58.clone();
             app.pending_group_members.push((my_pk, my_ss58));
-            app.mode = Mode::CreateGroupMembers;
+            app.enter_overlay(Overlay::CreateGroupMembers);
         }
         KeyCode::Char('r') => {
-            // Fetch DAG gaps from chain
             let refs = match app.view {
                 app::View::Thread(idx) => app.session.threads.get(idx).map(|c| c.gap_refs()),
                 app::View::Channel(idx) => app.session.channels.get(idx).map(|c| c.gap_refs()),
@@ -1616,7 +1882,6 @@ fn handle_normal_key(
                     let _ = send_tx.send(event::Event::FetchBlock { block_ref });
                 }
             }
-            // Also fetch from mirror if viewing a channel and mirror is configured
             if app.session.has_mirror
                 && let app::View::Channel(idx) = app.view
                 && let Some(ch) = app.session.channels.get(idx)
@@ -1627,21 +1892,25 @@ fn handle_normal_key(
             }
         }
         KeyCode::Char('/') => {
-            app.search_query.clear();
-            app.input.clear();
-            app.cursor_pos = 0;
-            app.mode = Mode::Search;
+            app.open_palette();
         }
         KeyCode::Char('y') if app.view != app::View::ChannelDir => {
             let senders = app.build_picker_senders();
             if !senders.is_empty() {
                 app.picker_senders = senders;
                 app.contact_idx = 0;
-                app.mode = Mode::SenderPicker;
+                app.enter_overlay(Overlay::SenderPicker);
             }
         }
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.scroll_offset = app.scroll_offset.saturating_add(10);
+        }
+        KeyCode::Char('U') => {
+            if app.locked_outbound.is_empty() {
+                app.set_status("No locked messages");
+            } else {
+                app.pending_unlock_all = true;
+            }
         }
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.scroll_offset = app.scroll_offset.saturating_sub(10);
@@ -1652,108 +1921,43 @@ fn handle_normal_key(
         KeyCode::PageDown => {
             app.scroll_offset = app.scroll_offset.saturating_sub(20);
         }
-        KeyCode::Home => app.scroll_offset = usize::MAX, // scroll to top
-        KeyCode::Char('G') | KeyCode::End => app.scroll_offset = 0, // scroll to bottom
+        KeyCode::Home => app.scroll_offset = usize::MAX,
+        KeyCode::Char('G') | KeyCode::End => app.scroll_offset = 0,
         KeyCode::Char(' ') => app.show_sidebar = !app.show_sidebar,
-        KeyCode::Char('j') | KeyCode::Tab | KeyCode::Down => app.next_sidebar(),
-        KeyCode::Char('k') | KeyCode::BackTab | KeyCode::Up => app.prev_sidebar(),
+        KeyCode::Tab | KeyCode::Down => app.next_sidebar(),
+        KeyCode::BackTab | KeyCode::Up => app.prev_sidebar(),
+        KeyCode::Char('j') => app.scroll_offset = app.scroll_offset.saturating_sub(1),
+        KeyCode::Char('k') => app.scroll_offset = app.scroll_offset.saturating_add(1),
         _ => {}
     }
 }
 
-fn handle_insert_key(
-    app: &mut App,
-    key: crossterm::event::KeyEvent,
-    send_tx: &std::sync::mpsc::Sender<event::Event>,
-    rt: &tokio::runtime::Runtime,
-) {
+fn handle_composer_key(app: &mut App, key: crossterm::event::KeyEvent) {
     match key.code {
-        KeyCode::Esc => {
+        KeyCode::Esc | KeyCode::Tab => {
             if app.msg_recipient.is_some() {
                 app.clear_standalone();
-                app.input.clear();
-                app.cursor_pos = 0;
+                app.reset_input();
                 app.set_status("Cancelled");
             } else if !app.input.is_empty() {
                 app.save_draft();
                 app.set_status("Draft saved");
             }
-            app.mode = Mode::Normal;
+            app.focus_timeline();
         }
-        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            if !app.input.is_empty() {
-                app.input.insert(app.cursor_pos, '\n');
-                app.cursor_pos += 1;
-            }
+        KeyCode::Char('/') if app.input.is_empty() => {
+            app.open_palette();
         }
-        KeyCode::Up => {
-            // Move cursor to same column on previous line
-            let before = &app.input[..app.cursor_pos];
-            if let Some(nl) = before.rfind('\n') {
-                let col = app.cursor_pos - nl - 1;
-                let prev_start = before[..nl].rfind('\n').map_or(0, |p| p + 1);
-                let prev_len = nl - prev_start;
-                app.cursor_pos = prev_start + col.min(prev_len);
-            }
-        }
-        KeyCode::Down => {
-            // Move cursor to same column on next line
-            let before = &app.input[..app.cursor_pos];
-            let line_start = before.rfind('\n').map_or(0, |p| p + 1);
-            let col = app.cursor_pos - line_start;
-            if let Some(nl) = app.input[app.cursor_pos..].find('\n') {
-                let next_start = app.cursor_pos + nl + 1;
-                let next_end = app.input[next_start..]
-                    .find('\n')
-                    .map_or(app.input.len(), |p| next_start + p);
-                let next_len = next_end - next_start;
-                app.cursor_pos = next_start + col.min(next_len);
-            }
+        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            app.input.insert_newline();
         }
         KeyCode::Enter => {
-            if app.sending {
-                app.set_error("Still sending previous message");
+            if !app.check_not_sending() {
                 return;
             }
-            {
-                let text = app.input.clone();
-                match build_send_remark(app, &text) {
-                    Ok(remark) => {
-                        app.pending_remark = Some(remark.clone());
-                        app.pending_text = Some(text);
-                        app.pending_fee = None;
-                        app.mode = Mode::Confirm;
-
-                        let kp = app.session.keypair.clone();
-                        let ss58 = app.session.my_ss58.clone();
-                        let ci = app.session.chain_info.clone();
-                        let url = app.session.node_url.clone();
-                        let tx = send_tx.clone();
-                        let symbol = app.session.token_symbol.clone();
-                        let decimals = app.session.token_decimals;
-                        rt.spawn(async move {
-                            match extrinsic::estimate_fee(&url, &remark, &kp, &ss58, &ci).await {
-                                Ok(fee) => {
-                                    let display = util::format_fee(fee, decimals, &symbol);
-                                    let _ = tx.send(event::Event::FeeEstimated {
-                                        fee_display: display,
-                                        fee_raw: Some(fee),
-                                    });
-                                }
-                                Err(e) => {
-                                    let _ = tx.send(event::Event::FeeEstimated {
-                                        fee_display: format!("error: {e}"),
-                                        fee_raw: None,
-                                    });
-                                }
-                            }
-                        });
-                    }
-                    Err(reason) => {
-                        app.set_error(format!("Cannot send: {reason}"));
-                    }
-                }
-            }
+            // Defer encryption + remark build to the main loop, which has access to the
+            // terminal/events needed for the password prompt in ephemeral mode.
+            app.pending_send_text = Some(app.input.as_str().to_string());
         }
         _ => {
             handle_text_input(app, key);
@@ -1761,18 +1965,14 @@ fn handle_insert_key(
     }
 }
 
-/// Handle Tab/BackTab for contact cycling in address input modes.
-/// Returns true if the key was handled.
-/// Get the selected contact's full SS58 address, or the raw input if no contact selected.
 fn resolve_address_input(app: &App) -> String {
     let contacts = app.filtered_contacts();
-    if !contacts.is_empty() && !app.input.is_empty() {
+    if !contacts.is_empty() {
         let idx = app.contact_idx % contacts.len();
-        let (ss58_short, pubkey) = &contacts[idx];
-        let _ = ss58_short; // use the full address
+        let (_, pubkey) = &contacts[idx];
         util::ss58_from_pubkey(pubkey)
     } else {
-        app.input.trim().to_string()
+        app.input.as_str().trim().to_string()
     }
 }
 
@@ -1796,14 +1996,16 @@ fn handle_compose_key(app: &mut App, key: crossterm::event::KeyEvent) {
             match util::ss58_decode(&input) {
                 Ok(pubkey) => {
                     if pubkey == app.session.pubkey() {
-                        app.set_error("Cannot message yourself");
+                        let short = util::ss58_short(&pubkey);
+                        app.set_error(format!("Cannot message yourself ({short})"));
                         return;
                     }
                     let ss58 = util::ss58_short(&pubkey);
                     app.msg_recipient = Some((pubkey, ss58));
-                    app.input.clear();
-                    app.cursor_pos = 0;
-                    app.mode = Mode::Insert;
+                    app.view = app::View::Inbox;
+                    app.scroll_offset = 0;
+                    app.close_overlay_to(Focus::Composer);
+                    app.reset_input();
                 }
                 Err(e) => {
                     app.set_error(format!("Invalid address: {e}"));
@@ -1813,19 +2015,16 @@ fn handle_compose_key(app: &mut App, key: crossterm::event::KeyEvent) {
         KeyCode::Esc => {
             if app.input.is_empty() {
                 app.contact_idx = 0;
-                app.mode = Mode::Normal;
+                app.close_overlay();
             } else {
-                app.input.clear();
-                app.cursor_pos = 0;
+                app.reset_input();
             }
         }
         KeyCode::Backspace => {
-            app.input.pop();
-            app.cursor_pos = app.input.len();
+            app.input.delete_before();
         }
         KeyCode::Char(c) => {
-            app.input.push(c);
-            app.cursor_pos = app.input.len();
+            app.input.insert_char(c);
             app.contact_idx = 0;
         }
         _ => {}
@@ -1834,7 +2033,6 @@ fn handle_compose_key(app: &mut App, key: crossterm::event::KeyEvent) {
 
 fn handle_message_key(app: &mut App, key: crossterm::event::KeyEvent) {
     if app.msg_recipient.is_none() {
-        // Phase 1: address input (same UX as compose)
         match key.code {
             KeyCode::Char('j') | KeyCode::Down if app.input.is_empty() => {
                 let count = app.filtered_contacts().len();
@@ -1854,13 +2052,13 @@ fn handle_message_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 match util::ss58_decode(&input) {
                     Ok(pubkey) => {
                         if pubkey == app.session.pubkey() {
-                            app.set_error("Cannot message yourself");
+                            let short = util::ss58_short(&pubkey);
+                            app.set_error(format!("Cannot message yourself ({short})"));
                             return;
                         }
                         let ss58 = util::ss58_short(&pubkey);
                         app.msg_recipient = Some((pubkey, ss58));
-                        app.input.clear();
-                        app.cursor_pos = 0;
+                        app.reset_input();
                     }
                     Err(e) => {
                         app.set_error(format!("Invalid address: {e}"));
@@ -1871,39 +2069,36 @@ fn handle_message_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 if app.input.is_empty() {
                     app.clear_standalone();
                     app.contact_idx = 0;
-                    app.mode = Mode::Normal;
+                    app.close_overlay();
                 } else {
-                    app.input.clear();
-                    app.cursor_pos = 0;
+                    app.reset_input();
                 }
             }
             KeyCode::Backspace => {
-                app.input.pop();
-                app.cursor_pos = app.input.len();
+                app.input.delete_before();
             }
             KeyCode::Char(c) => {
-                app.input.push(c);
-                app.cursor_pos = app.input.len();
+                app.input.insert_char(c);
                 app.contact_idx = 0;
             }
             _ => {}
         }
     } else {
-        // Phase 2: type selector
         match key.code {
             KeyCode::Char('p') => {
-                app.msg_type = Some(0x01);
-                app.mode = Mode::Insert;
+                app.msg_type = Some(samp::ContentType::Public);
+                app.close_overlay_to(Focus::Composer);
+                app.reset_input();
             }
             KeyCode::Char('e') => {
-                app.msg_type = Some(0x02);
-                app.mode = Mode::Insert;
+                app.msg_type = Some(samp::ContentType::Encrypted);
+                app.close_overlay_to(Focus::Composer);
+                app.reset_input();
             }
             KeyCode::Esc => {
                 app.clear_standalone();
-                app.input.clear();
-                app.cursor_pos = 0;
-                app.mode = Mode::Normal;
+                app.reset_input();
+                app.close_overlay();
             }
             _ => {}
         }
@@ -1913,7 +2108,7 @@ fn handle_message_key(app: &mut App, key: crossterm::event::KeyEvent) {
 fn handle_create_channel_key(app: &mut App, key: crossterm::event::KeyEvent) {
     match key.code {
         KeyCode::Enter => {
-            let name = app.input.trim().to_string();
+            let name = app.input.as_str().trim().to_string();
             if name.is_empty() {
                 app.set_error("Channel name required");
                 return;
@@ -1926,15 +2121,13 @@ fn handle_create_channel_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 return;
             }
             app.pending_channel_name = Some(name);
-            app.input.clear();
-            app.cursor_pos = 0;
-            app.mode = Mode::CreateChannelDesc;
+            app.reset_input();
+            app.overlay = Some(Overlay::CreateChannelDesc);
         }
         KeyCode::Esc => {
-            app.input.clear();
-            app.cursor_pos = 0;
+            app.reset_input();
             app.pending_channel_name = None;
-            app.mode = Mode::Normal;
+            app.close_overlay();
         }
         _ => {
             handle_text_input(app, key);
@@ -1942,15 +2135,10 @@ fn handle_create_channel_key(app: &mut App, key: crossterm::event::KeyEvent) {
     }
 }
 
-fn handle_create_channel_desc_key(
-    app: &mut App,
-    key: crossterm::event::KeyEvent,
-    send_tx: &std::sync::mpsc::Sender<event::Event>,
-    rt: &tokio::runtime::Runtime,
-) {
+fn handle_create_channel_desc_key(app: &mut App, key: crossterm::event::KeyEvent) {
     match key.code {
         KeyCode::Enter => {
-            let desc = app.input.trim().to_string();
+            let desc = app.input.as_str().trim().to_string();
             if desc.len() > samp::CHANNEL_DESC_MAX {
                 app.set_error(format!(
                     "Description too long (max {} characters)",
@@ -1958,56 +2146,18 @@ fn handle_create_channel_desc_key(
                 ));
                 return;
             }
-            let name = match &app.pending_channel_name {
-                Some(n) => n.clone(),
-                None => {
-                    app.mode = Mode::Normal;
-                    return;
-                }
-            };
-            app.pending_channel_desc = Some(desc.clone());
-            match app.session.build_channel_create(&name, &desc) {
-                Ok(remark) => {
-                    app.pending_remark = Some(remark.clone());
-                    app.pending_text = None;
-                    app.pending_fee = None;
-                    app.mode = Mode::Confirm;
-
-                    let kp = app.session.keypair.clone();
-                    let ss58 = app.session.my_ss58.clone();
-                    let ci = app.session.chain_info.clone();
-                    let url = app.session.node_url.clone();
-                    let tx = send_tx.clone();
-                    let symbol = app.session.token_symbol.clone();
-                    let decimals = app.session.token_decimals;
-                    rt.spawn(async move {
-                        match extrinsic::estimate_fee(&url, &remark, &kp, &ss58, &ci).await {
-                            Ok(fee) => {
-                                let display = util::format_fee(fee, decimals, &symbol);
-                                let _ = tx.send(event::Event::FeeEstimated {
-                                    fee_display: display,
-                                    fee_raw: Some(fee),
-                                });
-                            }
-                            Err(e) => {
-                                let _ = tx.send(event::Event::FeeEstimated {
-                                    fee_display: format!("error: {e}"),
-                                    fee_raw: None,
-                                });
-                            }
-                        }
-                    });
-                }
-                Err(reason) => {
-                    app.set_error(format!("Cannot create channel: {reason}"));
-                }
+            if app.pending_channel_name.is_none() {
+                app.close_overlay();
+                return;
             }
+            app.pending_channel_desc = Some(desc);
+            app.pending_channel_create = true;
+            app.close_overlay();
         }
         KeyCode::Esc => {
-            // Step back to name input
-            app.input = app.pending_channel_name.take().unwrap_or_default();
-            app.cursor_pos = app.input.len();
-            app.mode = Mode::CreateChannel;
+            app.input
+                .set(app.pending_channel_name.take().unwrap_or_default());
+            app.overlay = Some(Overlay::CreateChannel);
         }
         _ => {
             handle_text_input(app, key);
@@ -2023,7 +2173,6 @@ fn handle_create_group_members_key(
     match key.code {
         KeyCode::Enter => {
             if app.input.is_empty() {
-                // Toggle contact under cursor
                 let contacts = app.filtered_contacts();
                 if let Some((ss58, pk)) = contacts.get(app.contact_idx % contacts.len().max(1)) {
                     let pk = *pk;
@@ -2033,22 +2182,31 @@ fn handle_create_group_members_key(
                         if pk != app.session.pubkey() {
                             app.pending_group_members.remove(pos);
                         }
+                    } else if app.pending_group_members.len() >= session::MAX_GROUP_MEMBERS {
+                        app.set_error(format!(
+                            "Max {} members per group",
+                            session::MAX_GROUP_MEMBERS
+                        ));
                     } else {
                         app.pending_group_members.push((pk, ss58));
                     }
                 }
             } else {
-                // Add matched contact or parse SS58 address
-                let input = app.input.trim().to_string();
+                let input = app.input.as_str().trim().to_string();
                 let contacts = app.filtered_contacts();
                 if let Some((ss58, pk)) = contacts.get(app.contact_idx % contacts.len().max(1)) {
                     let pk = *pk;
                     let ss58 = ss58.clone();
-                    if !app.pending_group_members.iter().any(|(k, _)| *k == pk) {
+                    if app.pending_group_members.iter().any(|(k, _)| *k == pk) {
+                    } else if app.pending_group_members.len() >= session::MAX_GROUP_MEMBERS {
+                        app.set_error(format!(
+                            "Max {} members per group",
+                            session::MAX_GROUP_MEMBERS
+                        ));
+                    } else {
                         app.pending_group_members.push((pk, ss58));
                     }
-                    app.input.clear();
-                    app.cursor_pos = 0;
+                    app.reset_input();
                     app.contact_idx = 0;
                 } else if input.len() >= 46 {
                     if let Some(pk) = util::pubkey_from_ss58(&input) {
@@ -2056,14 +2214,16 @@ fn handle_create_group_members_key(
                             app.set_error("Already included (you)");
                         } else if app.pending_group_members.iter().any(|(k, _)| *k == pk) {
                             app.set_error("Already added");
+                        } else if app.pending_group_members.len() >= session::MAX_GROUP_MEMBERS {
+                            app.set_error(format!(
+                                "Max {} members per group",
+                                session::MAX_GROUP_MEMBERS
+                            ));
                         } else {
                             let short = util::ss58_short(&pk);
-                            app.pending_group_members.push((pk, short.clone()));
-                            app.session.peer_pubkeys.insert(short.clone(), pk);
-                            app.session.db.upsert_peer(&short, &pk);
+                            app.pending_group_members.push((pk, short));
                         }
-                        app.input.clear();
-                        app.cursor_pos = 0;
+                        app.reset_input();
                         app.contact_idx = 0;
                     } else {
                         app.set_error("Invalid address");
@@ -2086,10 +2246,9 @@ fn handle_create_group_members_key(
                 .collect();
             let idx = app.session.create_pending_group(creator_pubkey, members);
             app.view = app::View::Group(idx);
-            app.input.clear();
-            app.cursor_pos = 0;
+            app.reset_input();
             app.scroll_offset = 0;
-            app.mode = Mode::Insert;
+            app.close_overlay_to(Focus::Composer);
         }
         KeyCode::Down => {
             let len = app.filtered_contacts().len();
@@ -2109,12 +2268,11 @@ fn handle_create_group_members_key(
         }
         KeyCode::Esc => {
             if !app.input.is_empty() {
-                app.input.clear();
-                app.cursor_pos = 0;
+                app.reset_input();
                 app.contact_idx = 0;
             } else {
                 app.pending_group_members.clear();
-                app.mode = Mode::Normal;
+                app.close_overlay();
             }
         }
         _ => {
@@ -2129,16 +2287,15 @@ fn handle_search_key(app: &mut App, key: crossterm::event::KeyEvent) {
     match key.code {
         KeyCode::Esc => {
             app.search_query.clear();
-            app.mode = Mode::Normal;
+            app.close_overlay();
         }
         KeyCode::Enter => {
-            // Keep search active, go back to Normal with results highlighted
-            app.search_query = app.input.clone();
-            app.mode = Mode::Normal;
+            app.search_query = app.input.as_str().to_string();
+            app.close_overlay();
         }
         _ => {
             if handle_text_input(app, key) {
-                app.search_query = app.input.clone();
+                app.search_query = app.input.as_str().to_string();
             }
         }
     }
@@ -2149,7 +2306,7 @@ fn handle_sender_picker_key(app: &mut App, key: crossterm::event::KeyEvent) {
     match key.code {
         KeyCode::Esc => {
             app.picker_senders.clear();
-            app.mode = Mode::Normal;
+            app.close_overlay();
         }
         KeyCode::Up | KeyCode::Char('k') => {
             if len > 0 {
@@ -2170,7 +2327,7 @@ fn handle_sender_picker_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 copy_sender(app, &short, pk.as_ref());
             }
             app.picker_senders.clear();
-            app.mode = Mode::Normal;
+            app.close_overlay();
         }
         _ => {}
     }
@@ -2180,8 +2337,13 @@ fn copy_sender(app: &mut App, short_ss58: &str, pubkey: Option<&types::Pubkey>) 
     match pubkey {
         Some(pk) => {
             let full = util::ss58_from_pubkey(pk);
-            util::copy_to_clipboard(&full);
-            app.set_status(format!("Copied {short_ss58} to clipboard"));
+            if util::copy_to_clipboard(&full) {
+                app.set_status(format!("Copied {short_ss58} to clipboard"));
+            } else {
+                app.set_error(
+                    "Clipboard unavailable — install xclip / wl-copy, or use a terminal that supports OSC 52",
+                );
+            }
         }
         None => {
             app.set_error(format!("{short_ss58}: full SS58 unavailable"));
@@ -2189,14 +2351,14 @@ fn copy_sender(app: &mut App, short_ss58: &str, pubkey: Option<&types::Pubkey>) 
     }
 }
 
-fn parse_channel_ref(input: &str) -> Result<types::BlockRef, String> {
+fn parse_channel_ref(input: &str) -> Result<types::BlockRef, &'static str> {
     let parts: Vec<&str> = input.split(':').collect();
     if parts.len() != 2 {
-        return Err("expected block:index format".into());
+        return Err("expected block:index format");
     }
     let block: u32 = parts[0].parse().map_err(|_| "invalid block number")?;
     let index: u16 = parts[1].parse().map_err(|_| "invalid index")?;
-    Ok(types::BlockRef { block, index })
+    Ok(types::BlockRef::from_parts(block, index))
 }
 
 fn handle_confirm_key(
@@ -2206,11 +2368,23 @@ fn handle_confirm_key(
 ) {
     match key.code {
         KeyCode::Enter => {
+            if let (Some(balance), Some(fee)) = (app.session.balance, app.last_fee)
+                && balance < fee
+            {
+                let symbol = app.session.token_symbol.clone();
+                let decimals = app.session.token_decimals;
+                app.set_error(format!(
+                    "Insufficient balance: have {}, need {} for fee",
+                    util::format_balance_short(balance, decimals, &symbol),
+                    util::format_fee(fee, decimals, &symbol),
+                ));
+                app.close_overlay_to(Focus::Composer);
+                return;
+            }
             if let Some(remark) = app.pending_remark.take() {
                 let _ = send_tx.send(event::Event::SubmitRemark { remark });
                 app.sending = true;
                 if let (Some((pubkey, _)), None) = (&app.msg_recipient, app.msg_type) {
-                    // New thread: create the thread object NOW (on submit)
                     let pubkey = *pubkey;
                     match app.session.create_thread(pubkey) {
                         Ok(idx) => {
@@ -2222,7 +2396,6 @@ fn handle_confirm_key(
                         }
                     }
                 } else if app.msg_recipient.is_some() && app.msg_type.is_some() {
-                    // Standalone message → pending shows in Outbox
                     app.pending_view = Some(app::View::Outbox);
                     app.view = app::View::Outbox;
                 } else {
@@ -2237,7 +2410,6 @@ fn handle_confirm_key(
                                 app.pending_view = Some(app::View::Channel(idx));
                                 app.view = app::View::Channel(idx);
                             } else if app.is_pending_group() {
-                                // Group was already created as pending when entering Insert mode
                                 app.pending_view = Some(app.view);
                             } else {
                                 app.pending_view = None;
@@ -2247,43 +2419,102 @@ fn handle_confirm_key(
                     }
                 }
             }
+            app.pending_msg_type = app.msg_type;
             app.clear_standalone();
-            // pending_view and pending_text are kept for the send-in-progress UI
             let view = app.pending_view;
             let text = app.pending_text.take();
+            let msg_type = app.pending_msg_type;
             app.clear_pending();
             app.pending_view = view;
             app.pending_text = text;
+            app.pending_msg_type = msg_type;
             app.clear_draft();
-            app.input.clear();
-            app.cursor_pos = 0;
-            app.mode = Mode::Normal;
+            app.reset_input();
+            let focus = app.default_focus_for_view();
+            app.close_overlay_to(focus);
         }
         KeyCode::Esc => {
             app.pending_remark = None;
             app.pending_fee = None;
+            app.ephemeral_signing = None;
             if app.is_pending_group() {
-                // Group creation: step back to Insert mode
                 if let Some(text) = app.pending_text.take() {
-                    app.input = text;
-                    app.cursor_pos = app.input.len();
+                    app.input.set(text);
                 }
-                app.mode = Mode::Insert;
+                app.close_overlay_to(Focus::Composer);
             } else if app.is_pending_channel() {
-                // Channel creation: step back to description
-                app.input = app.pending_channel_desc.take().unwrap_or_default();
-                app.cursor_pos = app.input.len();
+                app.input
+                    .set(app.pending_channel_desc.take().unwrap_or_default());
                 app.pending_text = None;
-                app.mode = Mode::CreateChannelDesc;
+                app.overlay = Some(Overlay::CreateChannelDesc);
+            } else if let Some(text) = app.pending_text.take() {
+                app.input.set(text);
+                app.close_overlay_to(Focus::Composer);
             } else {
-                // Message: step back to editing
-                if let Some(text) = app.pending_text.take() {
-                    app.input = text;
-                    app.cursor_pos = app.input.len();
-                }
-                app.mode = Mode::Insert;
+                app.close_overlay_to(Focus::Composer);
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_clap_derive_is_well_formed() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn parse_channel_ref_valid() {
+        let r = parse_channel_ref("12345:7").unwrap();
+        assert_eq!(r.block().get(), 12345);
+        assert_eq!(r.index().get(), 7);
+    }
+
+    #[test]
+    fn parse_channel_ref_zero() {
+        let r = parse_channel_ref("0:0").unwrap();
+        assert_eq!(r.block().get(), 0);
+        assert_eq!(r.index().get(), 0);
+    }
+
+    #[test]
+    fn parse_channel_ref_missing_colon() {
+        assert!(parse_channel_ref("12345").is_err());
+    }
+
+    #[test]
+    fn parse_channel_ref_too_many_colons() {
+        assert!(parse_channel_ref("1:2:3").is_err());
+    }
+
+    #[test]
+    fn parse_channel_ref_empty() {
+        assert!(parse_channel_ref("").is_err());
+    }
+
+    #[test]
+    fn parse_channel_ref_non_numeric_block() {
+        assert!(parse_channel_ref("foo:0").is_err());
+    }
+
+    #[test]
+    fn parse_channel_ref_non_numeric_index() {
+        assert!(parse_channel_ref("0:bar").is_err());
+    }
+
+    #[test]
+    fn parse_channel_ref_block_overflow() {
+        let s = format!("{}:0", u64::MAX);
+        assert!(parse_channel_ref(&s).is_err());
+    }
+
+    #[test]
+    fn parse_channel_ref_index_overflow() {
+        assert!(parse_channel_ref("100:99999").is_err());
     }
 }

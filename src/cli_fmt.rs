@@ -1,14 +1,12 @@
-// ANSI terminal formatting for CLI output.
-
 pub const RESET: &str = "\x1b[0m";
 pub const BOLD: &str = "\x1b[1m";
 pub const DIM: &str = "\x1b[2m";
-pub const CYAN: &str = "\x1b[96m"; // values, fees, amounts
-pub const GREEN: &str = "\x1b[92m"; // success
-pub const RED: &str = "\x1b[91m"; // errors
-pub const YELLOW: &str = "\x1b[93m"; // labels
-pub const WHITE: &str = "\x1b[97m"; // headers, emphasis
-pub const MAGENTA: &str = "\x1b[95m"; // addresses
+pub const CYAN: &str = "\x1b[96m";
+pub const GREEN: &str = "\x1b[92m";
+pub const RED: &str = "\x1b[91m";
+pub const YELLOW: &str = "\x1b[93m";
+pub const WHITE: &str = "\x1b[97m";
+pub const MAGENTA: &str = "\x1b[95m";
 
 pub fn success(msg: &str) {
     eprintln!("{GREEN}{BOLD}\u{2714}{RESET} {GREEN}{msg}{RESET}");

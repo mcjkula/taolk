@@ -7,6 +7,7 @@ use sha2::Sha256;
 use std::path::PathBuf;
 
 use crate::conversation::{InboxMessage, ThreadMessage};
+use crate::error::SdkError;
 use crate::types::{BlockRef, Pubkey};
 
 type ThreadRow = (BlockRef, String, ThreadMessage, Vec<u8>);
@@ -14,10 +15,59 @@ type GroupRow = (BlockRef, Pubkey, Vec<Pubkey>);
 type ChannelRow = (BlockRef, String, String, String, Vec<ThreadMessage>);
 type ChannelMeta = (BlockRef, String, String, String);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConversationKind {
+    Inbox,
+    Thread,
+    Channel,
+    Group,
+}
+
+impl ConversationKind {
+    pub const fn to_byte(self) -> u8 {
+        match self {
+            Self::Thread => 0,
+            Self::Channel => 1,
+            Self::Group => 2,
+            Self::Inbox => 3,
+        }
+    }
+
+    pub const fn from_byte(b: u8) -> Option<Self> {
+        match b {
+            0 => Some(Self::Thread),
+            1 => Some(Self::Channel),
+            2 => Some(Self::Group),
+            3 => Some(Self::Inbox),
+            _ => None,
+        }
+    }
+
+    fn table(self) -> &'static str {
+        match self {
+            Self::Thread => "thread_messages",
+            Self::Channel => "channel_messages",
+            Self::Group => "group_messages",
+            Self::Inbox => "inbox",
+        }
+    }
+
+    fn ref_cols(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Thread => ("thread_block", "thread_index"),
+            Self::Channel => ("channel_block", "channel_index"),
+            Self::Group => ("group_block", "group_index"),
+            Self::Inbox => ("peer_block", "peer_index"),
+        }
+    }
+}
+
 const DB_KEY_INFO: &[u8] = b"taolk-db-v1";
 
 fn ts(secs: i64) -> chrono::DateTime<Utc> {
-    Utc.timestamp_opt(secs, 0).single().unwrap_or_default()
+    Utc.timestamp_opt(secs, 0)
+        .single()
+        .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_default())
 }
 
 pub struct Db {
@@ -26,9 +76,8 @@ pub struct Db {
 }
 
 impl Db {
-    #[allow(dead_code)]
-    pub fn open_in_memory(seed: &[u8; 32]) -> Result<Self, Box<dyn std::error::Error>> {
-        let conn = Connection::open_in_memory()?;
+    pub fn open_in_memory(seed: &[u8; 32]) -> Result<Self, SdkError> {
+        let conn = Connection::open_in_memory().map_err(|e| SdkError::Database(e.to_string()))?;
         Self::init(conn, seed)
     }
 
@@ -36,7 +85,7 @@ impl Db {
         wallet_name: &str,
         seed: &[u8; 32],
         genesis_hash: &[u8; 32],
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> Result<Self, SdkError> {
         let wallet_dir = dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("taolk")
@@ -45,14 +94,14 @@ impl Db {
         let chain_id = hex::encode(&genesis_hash[..4]);
         crate::migrations::run_all(&wallet_dir, &chain_id);
         let chain_dir = wallet_dir.join(&chain_id);
-        std::fs::create_dir_all(&chain_dir)?;
+        std::fs::create_dir_all(&chain_dir).map_err(|e| SdkError::Database(e.to_string()))?;
 
         let path = chain_dir.join("messages.db");
-        let conn = Connection::open(path)?;
+        let conn = Connection::open(path).map_err(|e| SdkError::Database(e.to_string()))?;
         Self::init(conn, seed)
     }
 
-    fn init(conn: Connection, seed: &[u8; 32]) -> Result<Self, Box<dyn std::error::Error>> {
+    fn init(conn: Connection, seed: &[u8; 32]) -> Result<Self, SdkError> {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS inbox (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -140,6 +189,14 @@ impl Db {
                 block_number INTEGER NOT NULL,
                 ext_index INTEGER NOT NULL,
                 UNIQUE(block_number, ext_index)
+            );
+            CREATE TABLE IF NOT EXISTS drafts (
+                kind INTEGER NOT NULL,
+                ref_block INTEGER NOT NULL,
+                ref_index INTEGER NOT NULL,
+                body BLOB NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (kind, ref_block, ref_index)
             );",
         )?;
 
@@ -182,6 +239,98 @@ impl Db {
             .unwrap_or_default()
     }
 
+    fn encrypt_draft(
+        &self,
+        plaintext: &str,
+        kind: ConversationKind,
+        block: u32,
+        index: u16,
+    ) -> Vec<u8> {
+        let nonce = draft_nonce(kind.to_byte(), block, index);
+        self.cipher
+            .encrypt(Nonce::from_slice(&nonce), plaintext.as_bytes())
+            .unwrap_or_default()
+    }
+
+    fn decrypt_draft(
+        &self,
+        ciphertext: &[u8],
+        kind: ConversationKind,
+        block: u32,
+        index: u16,
+    ) -> String {
+        let nonce = draft_nonce(kind.to_byte(), block, index);
+        self.cipher
+            .decrypt(Nonce::from_slice(&nonce), ciphertext)
+            .ok()
+            .and_then(|pt| String::from_utf8(pt).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save_draft(&self, kind: ConversationKind, block: u32, index: u16, body: &str) {
+        if body.is_empty() {
+            self.delete_draft(kind, block, index);
+            return;
+        }
+        let encrypted = self.encrypt_draft(body, kind, block, index);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .and_then(|d| i64::try_from(d.as_secs()).ok())
+            .unwrap_or(0);
+        let _ = self.conn.execute(
+            "INSERT INTO drafts (kind, ref_block, ref_index, body, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(kind, ref_block, ref_index)
+             DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at",
+            params![kind.to_byte(), block, index, encrypted, now],
+        );
+    }
+
+    pub fn delete_draft(&self, kind: ConversationKind, block: u32, index: u16) {
+        let _ = self.conn.execute(
+            "DELETE FROM drafts WHERE kind = ?1 AND ref_block = ?2 AND ref_index = ?3",
+            params![kind.to_byte(), block, index],
+        );
+    }
+
+    pub fn load_drafts(&self) -> Vec<(ConversationKind, BlockRef, String)> {
+        let inner = || -> Option<Vec<(ConversationKind, BlockRef, Vec<u8>)>> {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT kind, ref_block, ref_index, body FROM drafts")
+                .ok()?;
+            let rows = stmt
+                .query_map([], |row| {
+                    let kind_byte: u8 = row.get(0)?;
+                    let block: u32 = row.get(1)?;
+                    let index: u16 = row.get(2)?;
+                    let body: Vec<u8> = row.get(3)?;
+                    let kind = ConversationKind::from_byte(kind_byte).ok_or_else(|| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Integer,
+                            Box::new(std::io::Error::other(format!("invalid kind {kind_byte}"))),
+                        )
+                    })?;
+                    Ok((kind, BlockRef::from_parts(block, index), body))
+                })
+                .ok()?
+                .filter_map(|r| r.ok())
+                .collect();
+            Some(rows)
+        };
+        inner()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(kind, bref, encrypted)| {
+                let body =
+                    self.decrypt_draft(&encrypted, kind, bref.block().get(), bref.index().get());
+                (kind, bref, body)
+            })
+            .collect()
+    }
+
     pub fn insert_inbox(&self, msg: &InboxMessage) {
         let next_id: i64 = self
             .conn
@@ -193,7 +342,7 @@ impl Db {
         let _ = self.conn.execute(
             "INSERT OR IGNORE INTO inbox (peer_ss58, timestamp, body, content_type, is_mine, block_number, ext_index)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![msg.peer_ss58, msg.timestamp.timestamp(), encrypted, msg.content_type, msg.is_mine as i32, msg.block_number, msg.ext_index],
+            params![msg.peer_ss58, msg.timestamp.timestamp(), encrypted, msg.content_type, i32::from(msg.is_mine), msg.block_number, msg.ext_index],
         );
     }
 
@@ -211,16 +360,16 @@ impl Db {
              (thread_block, thread_index, peer_ss58, sender_ss58, timestamp, body, is_mine,
               reply_to_block, reply_to_index, continues_block, continues_index, block_number, ext_index)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-            params![thread_ref.block, thread_ref.index, peer_ss58, msg.sender_ss58, msg.timestamp.timestamp(),
-                    encrypted, msg.is_mine as i32, msg.reply_to.block, msg.reply_to.index,
-                    msg.continues.block, msg.continues.index, block_number, ext_index],
+            params![thread_ref.block().get(), thread_ref.index().get(), peer_ss58, msg.sender_ss58, msg.timestamp.timestamp(),
+                    encrypted, i32::from(msg.is_mine), msg.reply_to.block().get(), msg.reply_to.index().get(),
+                    msg.continues.block().get(), msg.continues.index().get(), block_number, ext_index],
         );
     }
 
     pub fn upsert_peer(&self, ss58_short: &str, pubkey: &Pubkey) {
         let _ = self.conn.execute(
             "INSERT OR REPLACE INTO peers (ss58_short, pubkey) VALUES (?1, ?2)",
-            params![ss58_short, &pubkey.0[..]],
+            params![ss58_short, &pubkey.as_bytes()[..]],
         );
     }
 
@@ -233,7 +382,7 @@ impl Db {
                     let blob: Vec<u8> = row.get(0)?;
                     let mut key = [0u8; 32];
                     key.copy_from_slice(&blob);
-                    Ok(Pubkey(key))
+                    Ok(Pubkey::from_bytes(key))
                 },
             )
             .ok()
@@ -251,7 +400,7 @@ impl Db {
             if blob.len() == 32 {
                 key.copy_from_slice(&blob);
             }
-            Ok((ss58, Pubkey(key)))
+            Ok((ss58, Pubkey::from_bytes(key)))
         });
         if let Ok(rows) = rows {
             for entry in rows.flatten() {
@@ -261,14 +410,23 @@ impl Db {
         out
     }
 
-    pub fn has_message_at(&self, block_ref: BlockRef) -> bool {
+    pub fn has_message_at(&self, kind: ConversationKind, block_ref: BlockRef) -> bool {
+        let sql = format!(
+            "SELECT 1 FROM {} WHERE block_number = ?1 AND ext_index = ?2",
+            kind.table()
+        );
         self.conn
             .query_row(
-                "SELECT 1 FROM thread_messages WHERE block_number = ?1 AND ext_index = ?2",
-                params![block_ref.block, block_ref.index],
+                &sql,
+                params![block_ref.block().get(), block_ref.index().get()],
                 |_| Ok(()),
             )
             .is_ok()
+    }
+
+    pub fn has_gap(&self, kind: ConversationKind, reply_to: BlockRef, continues: BlockRef) -> bool {
+        (reply_to != BlockRef::ZERO && !self.has_message_at(kind, reply_to))
+            || (continues != BlockRef::ZERO && !self.has_message_at(kind, continues))
     }
 
     pub fn load_inbox(&self) -> (Vec<InboxMessage>, Vec<InboxMessage>) {
@@ -323,24 +481,15 @@ impl Db {
                     let bn: u32 = row.get(11)?;
                     let ei: u16 = row.get(12)?;
                     Ok((
-                        BlockRef {
-                            block: row.get::<_, u32>(0)?,
-                            index: row.get::<_, u16>(1)?,
-                        },
+                        BlockRef::from_parts(row.get::<_, u32>(0)?, row.get::<_, u16>(1)?),
                         row.get::<_, String>(2)?,
                         ThreadMessage {
                             sender_ss58: row.get(3)?,
                             timestamp: ts(t),
                             body: String::new(),
                             is_mine: row.get::<_, i32>(6)? != 0,
-                            reply_to: BlockRef {
-                                block: row.get(7)?,
-                                index: row.get(8)?,
-                            },
-                            continues: BlockRef {
-                                block: row.get(9)?,
-                                index: row.get(10)?,
-                            },
+                            reply_to: BlockRef::from_parts(row.get(7)?, row.get(8)?),
+                            continues: BlockRef::from_parts(row.get(9)?, row.get(10)?),
                             block_number: bn,
                             ext_index: ei,
                             has_gap: false,
@@ -379,7 +528,7 @@ impl Db {
     ) {
         let _ = self.conn.execute(
             "INSERT OR IGNORE INTO channels (channel_block, channel_index, name, description, creator_ss58) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![channel_ref.block, channel_ref.index, name, description, creator_ss58],
+            params![channel_ref.block().get(), channel_ref.index().get(), name, description, creator_ss58],
         );
     }
 
@@ -392,7 +541,7 @@ impl Db {
     ) {
         let _ = self.conn.execute(
             "UPDATE channels SET name = ?3, description = ?4, creator_ss58 = ?5 WHERE channel_block = ?1 AND channel_index = ?2",
-            params![channel_ref.block, channel_ref.index, name, description, creator_ss58],
+            params![channel_ref.block().get(), channel_ref.index().get(), name, description, creator_ss58],
         );
     }
 
@@ -405,7 +554,7 @@ impl Db {
     ) {
         let _ = self.conn.execute(
             "INSERT OR IGNORE INTO known_channels (channel_block, channel_index, name, description, creator_ss58) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![channel_ref.block, channel_ref.index, name, description, creator_ss58],
+            params![channel_ref.block().get(), channel_ref.index().get(), name, description, creator_ss58],
         );
     }
 
@@ -418,7 +567,7 @@ impl Db {
     ) {
         let _ = self.conn.execute(
             "UPDATE known_channels SET name = ?3, description = ?4, creator_ss58 = ?5 WHERE channel_block = ?1 AND channel_index = ?2",
-            params![channel_ref.block, channel_ref.index, name, description, creator_ss58],
+            params![channel_ref.block().get(), channel_ref.index().get(), name, description, creator_ss58],
         );
     }
 
@@ -428,10 +577,7 @@ impl Db {
             let rows = stmt
                 .query_map([], |row| {
                     Ok((
-                        BlockRef {
-                            block: row.get::<_, u32>(0)?,
-                            index: row.get::<_, u16>(1)?,
-                        },
+                        BlockRef::from_parts(row.get::<_, u32>(0)?, row.get::<_, u16>(1)?),
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
@@ -446,15 +592,18 @@ impl Db {
     }
 
     pub fn insert_group(&self, group_ref: BlockRef, creator_pubkey: &Pubkey, members: &[Pubkey]) {
-        let nonce = group_nonce(group_ref.block, group_ref.index);
-        let members_raw: Vec<u8> = members.iter().flat_map(|pk| pk.0.iter().copied()).collect();
+        let nonce = group_nonce(group_ref.block().get(), group_ref.index().get());
+        let members_raw: Vec<u8> = members
+            .iter()
+            .flat_map(|pk| pk.as_bytes().iter().copied())
+            .collect();
         let encrypted_members = self
             .cipher
             .encrypt(Nonce::from_slice(&nonce), members_raw.as_slice())
             .unwrap_or_default();
         let _ = self.conn.execute(
             "INSERT OR IGNORE INTO groups (group_block, group_index, creator_pubkey, members) VALUES (?1, ?2, ?3, ?4)",
-            params![group_ref.block, group_ref.index, &creator_pubkey.0[..], encrypted_members],
+            params![group_ref.block().get(), group_ref.index().get(), &creator_pubkey.as_bytes()[..], encrypted_members],
         );
     }
 
@@ -494,10 +643,14 @@ impl Db {
                         .map(|c| {
                             let mut pk = [0u8; 32];
                             pk.copy_from_slice(c);
-                            Pubkey(pk)
+                            Pubkey::from_bytes(pk)
                         })
                         .collect();
-                    Some((BlockRef { block, index }, Pubkey(creator_bytes), members))
+                    Some((
+                        BlockRef::from_parts(block, index),
+                        Pubkey::from_bytes(creator_bytes),
+                        members,
+                    ))
                 })
                 .collect();
             Some(rows)
@@ -505,33 +658,40 @@ impl Db {
         inner().unwrap_or_default()
     }
 
-    pub fn insert_group_message(
+    pub fn insert_threaded_message(
         &self,
-        group_ref: BlockRef,
+        kind: ConversationKind,
+        conv_ref: BlockRef,
         msg: &ThreadMessage,
         block_number: u32,
         ext_index: u16,
     ) {
         let encrypted = self.encrypt_body(&msg.body, block_number, ext_index);
-        let _ = self.conn.execute(
-            "INSERT OR IGNORE INTO group_messages
-             (group_block, group_index, sender_ss58, timestamp, body, is_mine,
-              reply_to_block, reply_to_index, continues_block, continues_index, block_number, ext_index)
+        let (block_col, index_col) = kind.ref_cols();
+        let sql = format!(
+            "INSERT OR IGNORE INTO {} \
+             ({block_col}, {index_col}, sender_ss58, timestamp, body, is_mine, \
+              reply_to_block, reply_to_index, continues_block, continues_index, block_number, ext_index) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            params![group_ref.block, group_ref.index, msg.sender_ss58, msg.timestamp.timestamp(),
-                    encrypted, msg.is_mine as i32, msg.reply_to.block, msg.reply_to.index,
-                    msg.continues.block, msg.continues.index, block_number, ext_index],
+            kind.table()
         );
-    }
-
-    pub fn has_group_message_at(&self, block_ref: BlockRef) -> bool {
-        self.conn
-            .query_row(
-                "SELECT 1 FROM group_messages WHERE block_number = ?1 AND ext_index = ?2",
-                params![block_ref.block, block_ref.index],
-                |_| Ok(()),
-            )
-            .is_ok()
+        let _ = self.conn.execute(
+            &sql,
+            params![
+                conv_ref.block().get(),
+                conv_ref.index().get(),
+                msg.sender_ss58,
+                msg.timestamp.timestamp(),
+                encrypted,
+                i32::from(msg.is_mine),
+                msg.reply_to.block().get(),
+                msg.reply_to.index().get(),
+                msg.continues.block().get(),
+                msg.continues.index().get(),
+                block_number,
+                ext_index,
+            ],
+        );
     }
 
     pub fn load_group_messages(&self, group_ref: BlockRef) -> Vec<ThreadMessage> {
@@ -547,32 +707,29 @@ impl Db {
                 )
                 .ok()?;
             let rows = stmt
-                .query_map(params![group_ref.block, group_ref.index], |row| {
-                    let t: i64 = row.get(1)?;
-                    let ct: Vec<u8> = row.get(2)?;
-                    let bn: u32 = row.get(8)?;
-                    let ei: u16 = row.get(9)?;
-                    Ok((
-                        ThreadMessage {
-                            sender_ss58: row.get(0)?,
-                            timestamp: ts(t),
-                            body: String::new(),
-                            is_mine: row.get::<_, i32>(3)? != 0,
-                            reply_to: BlockRef {
-                                block: row.get(4)?,
-                                index: row.get(5)?,
+                .query_map(
+                    params![group_ref.block().get(), group_ref.index().get()],
+                    |row| {
+                        let t: i64 = row.get(1)?;
+                        let ct: Vec<u8> = row.get(2)?;
+                        let bn: u32 = row.get(8)?;
+                        let ei: u16 = row.get(9)?;
+                        Ok((
+                            ThreadMessage {
+                                sender_ss58: row.get(0)?,
+                                timestamp: ts(t),
+                                body: String::new(),
+                                is_mine: row.get::<_, i32>(3)? != 0,
+                                reply_to: BlockRef::from_parts(row.get(4)?, row.get(5)?),
+                                continues: BlockRef::from_parts(row.get(6)?, row.get(7)?),
+                                block_number: bn,
+                                ext_index: ei,
+                                has_gap: false,
                             },
-                            continues: BlockRef {
-                                block: row.get(6)?,
-                                index: row.get(7)?,
-                            },
-                            block_number: bn,
-                            ext_index: ei,
-                            has_gap: false,
-                        },
-                        ct,
-                    ))
-                })
+                            ct,
+                        ))
+                    },
+                )
                 .ok()?
                 .filter_map(|r| r.ok())
                 .map(|(mut msg, ct)| {
@@ -585,43 +742,14 @@ impl Db {
         inner().unwrap_or_default()
     }
 
-    pub fn insert_channel_message(
-        &self,
-        channel_ref: BlockRef,
-        msg: &ThreadMessage,
-        block_number: u32,
-        ext_index: u16,
-    ) {
-        let encrypted = self.encrypt_body(&msg.body, block_number, ext_index);
-        let _ = self.conn.execute(
-            "INSERT OR IGNORE INTO channel_messages
-             (channel_block, channel_index, sender_ss58, timestamp, body, is_mine,
-              reply_to_block, reply_to_index, continues_block, continues_index, block_number, ext_index)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            params![channel_ref.block, channel_ref.index, msg.sender_ss58, msg.timestamp.timestamp(),
-                    encrypted, msg.is_mine as i32, msg.reply_to.block, msg.reply_to.index,
-                    msg.continues.block, msg.continues.index, block_number, ext_index],
-        );
-    }
-
-    pub fn has_channel_message_at(&self, block_ref: BlockRef) -> bool {
-        self.conn
-            .query_row(
-                "SELECT 1 FROM channel_messages WHERE block_number = ?1 AND ext_index = ?2",
-                params![block_ref.block, block_ref.index],
-                |_| Ok(()),
-            )
-            .is_ok()
-    }
-
     pub fn delete_channel(&self, channel_ref: BlockRef) {
         let _ = self.conn.execute(
             "DELETE FROM channel_messages WHERE channel_block = ?1 AND channel_index = ?2",
-            params![channel_ref.block, channel_ref.index],
+            params![channel_ref.block().get(), channel_ref.index().get()],
         );
         let _ = self.conn.execute(
             "DELETE FROM channels WHERE channel_block = ?1 AND channel_index = ?2",
-            params![channel_ref.block, channel_ref.index],
+            params![channel_ref.block().get(), channel_ref.index().get()],
         );
     }
 
@@ -631,10 +759,7 @@ impl Db {
             let rows = stmt
                 .query_map([], |row| {
                     Ok((
-                        BlockRef {
-                            block: row.get::<_, u32>(0)?,
-                            index: row.get::<_, u16>(1)?,
-                        },
+                        BlockRef::from_parts(row.get::<_, u32>(0)?, row.get::<_, u16>(1)?),
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
@@ -657,10 +782,7 @@ impl Db {
                 std::collections::HashMap::new();
             for row in stmt
                 .query_map([], |row| {
-                    let ch = BlockRef {
-                        block: row.get(0)?,
-                        index: row.get(1)?,
-                    };
+                    let ch = BlockRef::from_parts(row.get(0)?, row.get(1)?);
                     let t: i64 = row.get(3)?;
                     let ct: Vec<u8> = row.get(4)?;
                     let bn: u32 = row.get(10)?;
@@ -672,14 +794,8 @@ impl Db {
                             timestamp: ts(t),
                             body: String::new(),
                             is_mine: row.get::<_, i32>(5)? != 0,
-                            reply_to: BlockRef {
-                                block: row.get(6)?,
-                                index: row.get(7)?,
-                            },
-                            continues: BlockRef {
-                                block: row.get(8)?,
-                                index: row.get(9)?,
-                            },
+                            reply_to: BlockRef::from_parts(row.get(6)?, row.get(7)?),
+                            continues: BlockRef::from_parts(row.get(8)?, row.get(9)?),
                             block_number: bn,
                             ext_index: ei,
                             has_gap: false,
@@ -734,5 +850,14 @@ fn inbox_nonce(id: i64) -> [u8; 12] {
     let mut nonce = [0u8; 12];
     nonce[..8].copy_from_slice(&id.to_le_bytes());
     nonce[8] = 0xFF;
+    nonce
+}
+
+fn draft_nonce(kind: u8, block: u32, index: u16) -> [u8; 12] {
+    let mut nonce = [0u8; 12];
+    nonce[0] = kind;
+    nonce[1] = 0xDD;
+    nonce[2..6].copy_from_slice(&block.to_le_bytes());
+    nonce[6..8].copy_from_slice(&index.to_le_bytes());
     nonce
 }

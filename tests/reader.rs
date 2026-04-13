@@ -1,71 +1,49 @@
-use schnorrkel::keys::{ExpansionMode, MiniSecretKey};
+mod common;
+
+use common::{build_remark_ext, signing_from_seed as signing};
 use std::sync::mpsc;
 use taolk::event::Event;
-use taolk::extrinsic::{self, ChainInfo};
-use taolk::metadata::AccountInfoLayout;
 use taolk::reader::{self, ReadContext};
+use taolk::secret::DecryptionKeys;
 use taolk::types::Pubkey;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn keypair(seed: &[u8; 32]) -> schnorrkel::Keypair {
-    MiniSecretKey::from_bytes(seed)
-        .unwrap()
-        .expand_to_keypair(ExpansionMode::Ed25519)
+fn ext_to_hex(ext_bytes: &samp::ExtrinsicBytes) -> String {
+    format!("0x{}", hex::encode(ext_bytes.as_bytes()))
 }
 
-fn ci() -> ChainInfo {
-    ChainInfo {
-        genesis_hash: [0; 32],
-        spec_version: 1,
-        tx_version: 1,
-        account_info_layout: AccountInfoLayout {
-            free_offset: 16,
-            free_width: 8,
-        },
-    }
+fn make_keys(seed: &[u8; 32]) -> DecryptionKeys {
+    let view_scalar = *samp::sr25519_signing_scalar(&samp::Seed::from_bytes(*seed)).expose_secret();
+    DecryptionKeys::new(view_scalar, Some(*seed))
 }
 
-fn ext_to_hex(ext_bytes: &[u8]) -> String {
-    format!("0x{}", hex::encode(ext_bytes))
-}
-
-/// Build a ReadContext targeting the given seed/pubkey, returning the context and receiver.
 fn make_ctx<'a>(
-    seed: &'a [u8; 32],
+    keys: &'a DecryptionKeys,
     pubkey: &'a Pubkey,
     tx: &'a mpsc::Sender<Event>,
 ) -> ReadContext<'a> {
     ReadContext {
         my_pubkey: pubkey,
-        seed,
+        keys,
         tx,
     }
 }
 
-// ---------------------------------------------------------------------------
-// 1. read_extrinsic emits Event::NewMessage for a valid SAMP public remark
-// ---------------------------------------------------------------------------
-
 #[test]
 fn read_extrinsic_emits_event_for_samp_remark() {
     let alice_seed = [0xAA; 32];
-    let alice_kp = keypair(&alice_seed);
-    let alice_pubkey = Pubkey(alice_kp.public.to_bytes());
+    let alice_sk = signing(&alice_seed);
+    let alice_pubkey = alice_sk.public_key();
 
     let bob_seed = [0xBB; 32];
-    let bob_pubkey = Pubkey(keypair(&bob_seed).public.to_bytes());
+    let bob_pubkey = signing(&bob_seed).public_key();
 
-    // Alice sends a public message to Bob
-    let remark = samp::encode_public(&bob_pubkey.0, b"hello bob");
-    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_kp, 0, &ci());
+    let remark = samp::encode_public(&bob_pubkey, "hello bob");
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
     let hex = ext_to_hex(&ext);
 
-    // Bob reads the extrinsic
     let (tx, rx) = mpsc::channel();
-    let ctx = make_ctx(&bob_seed, &bob_pubkey, &tx);
+    let keys = make_keys(&bob_seed);
+    let ctx = make_ctx(&keys, &bob_pubkey, &tx);
     reader::read_extrinsic(&hex, &ctx, 100, 1, 1_700_000_000_000);
 
     match rx.try_recv() {
@@ -85,29 +63,28 @@ fn read_extrinsic_emits_event_for_samp_remark() {
             assert_eq!(decrypted_body, Some("hello bob".to_string()));
             assert_eq!(block_number, 100);
             assert_eq!(ext_index, 1);
-            assert_eq!(timestamp, 1_700_000_000);
+            assert_eq!(
+                timestamp,
+                taolk::types::Timestamp::from_unix_secs(1_700_000_000)
+            );
         }
         other => panic!("expected NewMessage, got {:?}", event_debug(&other)),
     }
 }
 
-// ---------------------------------------------------------------------------
-// 2. read_extrinsic ignores non-SAMP remark
-// ---------------------------------------------------------------------------
-
 #[test]
 fn read_extrinsic_ignores_non_samp_remark() {
     let alice_seed = [0xAA; 32];
-    let alice_kp = keypair(&alice_seed);
-    let alice_pubkey = Pubkey(alice_kp.public.to_bytes());
+    let alice_sk = signing(&alice_seed);
+    let alice_pubkey = alice_sk.public_key();
 
-    // Build an extrinsic with a non-SAMP remark
-    let remark = b"not a samp message";
-    let ext = extrinsic::build_remark_extrinsic(remark, &alice_kp, 0, &ci());
+    let remark = samp::RemarkBytes::from_bytes(b"not a samp message".to_vec());
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
     let hex = ext_to_hex(&ext);
 
     let (tx, rx) = mpsc::channel();
-    let ctx = make_ctx(&alice_seed, &alice_pubkey, &tx);
+    let keys = make_keys(&alice_seed);
+    let ctx = make_ctx(&keys, &alice_pubkey, &tx);
     reader::read_extrinsic(&hex, &ctx, 100, 0, 0);
 
     assert!(
@@ -116,48 +93,31 @@ fn read_extrinsic_ignores_non_samp_remark() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// 3. extract_block_timestamp from a real timestamp inherent
-// ---------------------------------------------------------------------------
-
 #[test]
 fn extract_block_timestamp_from_inherent() {
-    // Build a minimal unsigned Substrate timestamp inherent:
-    // SCALE compact length prefix || version(1, unsigned = 0x04) || pallet(0x03) || call(0x00) || compact_timestamp
-    //
-    // Timestamp pallet = 0x03, set call = 0x00
-    // We encode timestamp 1_700_000_000_000 ms using SCALE compact u64.
     let ts_ms: u64 = 1_700_000_000_000;
 
-    // SCALE compact encoding of u64 > 2^30 uses big-integer mode (mode 0b11):
-    // first byte = (bytes_following - 4) << 2 | 0b11
-    // For u64: bytes_following = 8, so first byte = (8-4)<<2 | 3 = 0x13
     let ts_le = ts_ms.to_le_bytes();
-    let mut compact_ts = vec![0x13u8]; // (4 << 2) | 0b11 = 0x13
+    let mut compact_ts = vec![0x13u8];
     compact_ts.extend_from_slice(&ts_le);
 
     let mut payload = Vec::new();
-    payload.push(0x04); // extrinsic version byte: unsigned (no SIGNED_BIT)
-    payload.push(0x03); // Timestamp pallet
-    payload.push(0x00); // set call
+    payload.push(0x04);
+    payload.push(0x03);
+    payload.push(0x00);
     payload.extend_from_slice(&compact_ts);
 
-    // Wrap with SCALE compact length prefix
     let mut full = Vec::new();
     let len = payload.len() as u8;
-    full.push(len << 2); // single-byte compact for small lengths (mode 0b00)
+    full.push(len << 2);
     full.extend_from_slice(&payload);
 
-    let hex = ext_to_hex(&full);
+    let hex = format!("0x{}", hex::encode(&full));
     let extrinsics = vec![serde_json::Value::String(hex)];
 
     let result = reader::extract_block_timestamp(&extrinsics);
     assert_eq!(result, ts_ms);
 }
-
-// ---------------------------------------------------------------------------
-// 4. extract_block_timestamp returns 0 for empty extrinsics array
-// ---------------------------------------------------------------------------
 
 #[test]
 fn extract_block_timestamp_empty() {
@@ -165,45 +125,38 @@ fn extract_block_timestamp_empty() {
     assert_eq!(reader::extract_block_timestamp(&extrinsics), 0);
 }
 
-// ---------------------------------------------------------------------------
-// 5. read_extrinsic decrypts encrypted message for correct recipient
-// ---------------------------------------------------------------------------
-
 #[test]
 fn read_extrinsic_decrypts_for_recipient() {
     let alice_seed = [0xAA; 32];
-    let alice_kp = keypair(&alice_seed);
-    let alice_pubkey = Pubkey(alice_kp.public.to_bytes());
+    let alice_sk = signing(&alice_seed);
+    let alice_pubkey = alice_sk.public_key();
 
     let bob_seed = [0xBB; 32];
-    let bob_ristretto_pub = samp::public_from_seed(&bob_seed);
-    // Bob's sr25519 public key (for Substrate account) comes from the keypair
-    let bob_kp = keypair(&bob_seed);
-    let bob_pubkey = Pubkey(bob_kp.public.to_bytes());
+    let bob_ristretto_pub = samp::public_from_seed(&samp::Seed::from_bytes(bob_seed));
+    let bob_sk = signing(&bob_seed);
+    let bob_pubkey = bob_sk.public_key();
 
-    let plaintext = b"secret for bob";
-    let nonce: [u8; 12] = [0x01; 12];
+    let plaintext = samp::Plaintext::from_bytes(b"secret for bob".to_vec());
+    let nonce = samp::Nonce::from_bytes([0x01; 12]);
+    let alice_samp_seed = samp::Seed::from_bytes(alice_seed);
 
-    // Compute view tag and encrypt
-    let recipient_ristretto = curve25519_dalek::ristretto::CompressedRistretto(bob_ristretto_pub);
-    let view_tag = samp::compute_view_tag(&alice_seed, &recipient_ristretto, &nonce).unwrap();
+    let view_tag = samp::compute_view_tag(&alice_samp_seed, &bob_ristretto_pub, &nonce).unwrap();
     let encrypted_content =
-        samp::encrypt(plaintext, &recipient_ristretto, &nonce, &alice_seed).unwrap();
+        samp::encrypt(&plaintext, &bob_ristretto_pub, &nonce, &alice_samp_seed).unwrap();
 
-    // Build the SAMP remark wire format for encrypted
     let remark = samp::encode_encrypted(
-        samp::CONTENT_TYPE_ENCRYPTED,
+        samp::ContentType::Encrypted,
         view_tag,
         &nonce,
         &encrypted_content,
     );
 
-    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_kp, 0, &ci());
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
     let hex = ext_to_hex(&ext);
 
-    // Bob reads
     let (tx, rx) = mpsc::channel();
-    let ctx = make_ctx(&bob_seed, &bob_pubkey, &tx);
+    let keys = make_keys(&bob_seed);
+    let ctx = make_ctx(&keys, &bob_pubkey, &tx);
     reader::read_extrinsic(&hex, &ctx, 200, 3, 1_700_000_000_000);
 
     match rx.try_recv() {
@@ -221,49 +174,47 @@ fn read_extrinsic_decrypts_for_recipient() {
             assert_eq!(decrypted_body, Some("secret for bob".to_string()));
             assert_eq!(block_number, 200);
             assert_eq!(ext_index, 3);
-            assert_eq!(timestamp, 1_700_000_000);
+            assert_eq!(
+                timestamp,
+                taolk::types::Timestamp::from_unix_secs(1_700_000_000)
+            );
         }
         other => panic!("expected NewMessage, got {:?}", event_debug(&other)),
     }
 }
 
-// ---------------------------------------------------------------------------
-// 6. read_extrinsic skips encrypted message for wrong recipient
-// ---------------------------------------------------------------------------
-
 #[test]
 fn read_extrinsic_skips_message_for_wrong_recipient() {
     let alice_seed = [0xAA; 32];
-    let alice_kp = keypair(&alice_seed);
+    let alice_sk = signing(&alice_seed);
 
     let bob_seed = [0xBB; 32];
-    let bob_ristretto_pub = samp::public_from_seed(&bob_seed);
+    let bob_ristretto_pub = samp::public_from_seed(&samp::Seed::from_bytes(bob_seed));
 
     let charlie_seed = [0xCC; 32];
-    let charlie_kp = keypair(&charlie_seed);
-    let charlie_pubkey = Pubkey(charlie_kp.public.to_bytes());
+    let charlie_sk = signing(&charlie_seed);
+    let charlie_pubkey = charlie_sk.public_key();
 
-    let plaintext = b"for bob only";
-    let nonce: [u8; 12] = [0x02; 12];
+    let plaintext = samp::Plaintext::from_bytes(b"for bob only".to_vec());
+    let nonce = samp::Nonce::from_bytes([0x02; 12]);
+    let alice_samp_seed = samp::Seed::from_bytes(alice_seed);
 
-    // Alice encrypts for Bob
-    let recipient_ristretto = curve25519_dalek::ristretto::CompressedRistretto(bob_ristretto_pub);
-    let view_tag = samp::compute_view_tag(&alice_seed, &recipient_ristretto, &nonce).unwrap();
+    let view_tag = samp::compute_view_tag(&alice_samp_seed, &bob_ristretto_pub, &nonce).unwrap();
     let encrypted_content =
-        samp::encrypt(plaintext, &recipient_ristretto, &nonce, &alice_seed).unwrap();
+        samp::encrypt(&plaintext, &bob_ristretto_pub, &nonce, &alice_samp_seed).unwrap();
     let remark = samp::encode_encrypted(
-        samp::CONTENT_TYPE_ENCRYPTED,
+        samp::ContentType::Encrypted,
         view_tag,
         &nonce,
         &encrypted_content,
     );
 
-    let ext = extrinsic::build_remark_extrinsic(&remark, &alice_kp, 0, &ci());
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
     let hex = ext_to_hex(&ext);
 
-    // Charlie tries to read (should not match -- view tag mismatch filters it)
     let (tx, rx) = mpsc::channel();
-    let ctx = make_ctx(&charlie_seed, &charlie_pubkey, &tx);
+    let keys = make_keys(&charlie_seed);
+    let ctx = make_ctx(&keys, &charlie_pubkey, &tx);
     reader::read_extrinsic(&hex, &ctx, 200, 3, 0);
 
     assert!(
@@ -272,9 +223,508 @@ fn read_extrinsic_skips_message_for_wrong_recipient() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Debug helper for test failures (Event doesn't derive Debug)
-// ---------------------------------------------------------------------------
+#[test]
+fn process_remark_channel_create() {
+    let alice_seed = [0xAA; 32];
+    let alice_sk = signing(&alice_seed);
+    let alice_pubkey = alice_sk.public_key();
+
+    let name = samp::ChannelName::parse("general").unwrap();
+    let desc = samp::ChannelDescription::parse("main channel").unwrap();
+    let remark = samp::encode_channel_create(&name, &desc);
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
+    let hex = ext_to_hex(&ext);
+
+    let (tx, rx) = mpsc::channel();
+    let keys = make_keys(&alice_seed);
+    let ctx = make_ctx(&keys, &alice_pubkey, &tx);
+    reader::read_extrinsic(&hex, &ctx, 500, 0, 1_700_000_000_000);
+
+    match rx.try_recv() {
+        Ok(Event::ChannelDiscovered {
+            name,
+            description,
+            channel_ref,
+            ..
+        }) => {
+            assert_eq!(name, "general");
+            assert_eq!(description, "main channel");
+            assert_eq!(channel_ref, taolk::types::BlockRef::from_parts(500, 0));
+        }
+        other => panic!("expected ChannelDiscovered, got {:?}", event_debug(&other)),
+    }
+}
+
+#[test]
+fn process_remark_channel_message() {
+    let alice_seed = [0xAA; 32];
+    let alice_sk = signing(&alice_seed);
+    let alice_pubkey = alice_sk.public_key();
+
+    let channel_ref = taolk::types::BlockRef::from_parts(300, 1);
+    let remark = samp::encode_channel_msg(
+        channel_ref,
+        taolk::types::BlockRef::ZERO,
+        taolk::types::BlockRef::ZERO,
+        "hello channel",
+    );
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
+    let hex = ext_to_hex(&ext);
+
+    let (tx, rx) = mpsc::channel();
+    let keys = make_keys(&alice_seed);
+    let ctx = make_ctx(&keys, &alice_pubkey, &tx);
+    reader::read_extrinsic(&hex, &ctx, 600, 2, 1_700_000_000_000);
+
+    match rx.try_recv() {
+        Ok(Event::NewChannelMessage {
+            sender,
+            channel_ref: wire_ref,
+            body,
+            block_number,
+            ext_index,
+            ..
+        }) => {
+            assert_eq!(sender, alice_pubkey);
+            assert_eq!(wire_ref, channel_ref);
+            assert_eq!(body, "hello channel");
+            assert_eq!(block_number, 600);
+            assert_eq!(ext_index, 2);
+        }
+        other => panic!("expected NewChannelMessage, got {:?}", event_debug(&other)),
+    }
+}
+
+#[test]
+fn process_remark_locked_outbound() {
+    let alice_seed = [0xAA; 32];
+    let alice_sk = signing(&alice_seed);
+    let alice_pubkey = alice_sk.public_key();
+
+    let bob_seed = [0xBB; 32];
+    let bob_ristretto_pub = samp::public_from_seed(&samp::Seed::from_bytes(bob_seed));
+
+    let plaintext = samp::Plaintext::from_bytes(b"outbound secret".to_vec());
+    let nonce = samp::Nonce::from_bytes([0x05; 12]);
+    let alice_samp_seed = samp::Seed::from_bytes(alice_seed);
+
+    let view_tag = samp::compute_view_tag(&alice_samp_seed, &bob_ristretto_pub, &nonce).unwrap();
+    let encrypted =
+        samp::encrypt(&plaintext, &bob_ristretto_pub, &nonce, &alice_samp_seed).unwrap();
+    let remark = samp::encode_encrypted(samp::ContentType::Encrypted, view_tag, &nonce, &encrypted);
+
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
+    let hex = ext_to_hex(&ext);
+
+    let (tx, rx) = mpsc::channel();
+    let view_scalar =
+        *samp::sr25519_signing_scalar(&samp::Seed::from_bytes(alice_seed)).expose_secret();
+    let keys = DecryptionKeys::new(view_scalar, None);
+    let ctx = make_ctx(&keys, &alice_pubkey, &tx);
+    reader::read_extrinsic(&hex, &ctx, 700, 1, 1_700_000_000_000);
+
+    match rx.try_recv() {
+        Ok(Event::LockedOutbound {
+            sender,
+            block_number,
+            ext_index,
+            ..
+        }) => {
+            assert_eq!(sender, alice_pubkey);
+            assert_eq!(block_number, 700);
+            assert_eq!(ext_index, 1);
+        }
+        other => panic!("expected LockedOutbound, got {:?}", event_debug(&other)),
+    }
+}
+
+#[test]
+fn read_block_emits_block_update_and_message() {
+    let alice_seed = [0xAA; 32];
+    let alice_sk = signing(&alice_seed);
+    let alice_pubkey = alice_sk.public_key();
+
+    let bob_seed = [0xBB; 32];
+    let bob_pubkey = signing(&bob_seed).public_key();
+
+    let remark = samp::encode_public(&bob_pubkey, "block hello");
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
+    let ext_hex = ext_to_hex(&ext);
+
+    let block = serde_json::json!({
+        "header": { "number": "0x64" },
+        "extrinsics": [ext_hex]
+    });
+
+    let (tx, rx) = mpsc::channel();
+    let keys = make_keys(&bob_seed);
+    let ctx = make_ctx(&keys, &bob_pubkey, &tx);
+    reader::read_block(&block, &ctx);
+
+    let mut got_block_update = false;
+    let mut got_message = false;
+    while let Ok(ev) = rx.try_recv() {
+        match ev {
+            Event::BlockUpdate(n) => {
+                assert_eq!(n, 100);
+                got_block_update = true;
+            }
+            Event::NewMessage {
+                sender,
+                decrypted_body,
+                ..
+            } => {
+                assert_eq!(sender, alice_pubkey);
+                assert_eq!(decrypted_body, Some("block hello".to_string()));
+                got_message = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(got_block_update, "should emit BlockUpdate");
+    assert!(got_message, "should emit NewMessage");
+}
+
+#[test]
+fn read_block_no_extrinsics_key() {
+    let bob_seed = [0xBB; 32];
+    let bob_pubkey = signing(&bob_seed).public_key();
+
+    let block = serde_json::json!({
+        "header": { "number": "0x10" }
+    });
+
+    let (tx, rx) = mpsc::channel();
+    let keys = make_keys(&bob_seed);
+    let ctx = make_ctx(&keys, &bob_pubkey, &tx);
+    reader::read_block(&block, &ctx);
+
+    assert!(rx.try_recv().is_err(), "no events for missing extrinsics");
+}
+
+#[test]
+fn read_block_non_string_extrinsic_skipped() {
+    let bob_seed = [0xBB; 32];
+    let bob_pubkey = signing(&bob_seed).public_key();
+
+    let block = serde_json::json!({
+        "header": { "number": "0x10" },
+        "extrinsics": [42, null, true]
+    });
+
+    let (tx, rx) = mpsc::channel();
+    let keys = make_keys(&bob_seed);
+    let ctx = make_ctx(&keys, &bob_pubkey, &tx);
+    reader::read_block(&block, &ctx);
+
+    // Should get only BlockUpdate, no messages
+    match rx.try_recv() {
+        Ok(Event::BlockUpdate(16)) => {}
+        other => panic!("expected BlockUpdate(16), got {:?}", event_debug(&other)),
+    }
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn source_from_extrinsic_invalid_hex() {
+    let result = reader::source_from_extrinsic("not-hex!!", 100, 0, 0);
+    assert!(result.is_none());
+}
+
+#[test]
+fn source_from_extrinsic_valid_public() {
+    let alice_seed = [0xAA; 32];
+    let alice_sk = signing(&alice_seed);
+    let bob_pubkey = signing(&[0xBB; 32]).public_key();
+
+    let remark = samp::encode_public(&bob_pubkey, "test");
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
+    let hex = ext_to_hex(&ext);
+
+    let source = reader::source_from_extrinsic(&hex, 100, 5, 1_700_000_000_000).unwrap();
+    assert_eq!(source.sender, alice_sk.public_key());
+    assert_eq!(source.at.block().get(), 100);
+    assert_eq!(source.at.index().get(), 5);
+    assert_eq!(source.timestamp_secs, 1_700_000_000);
+}
+
+#[test]
+fn extract_block_timestamp_non_timestamp_extrinsic() {
+    let hex = format!("0x{}", hex::encode([0x10, 0x84, 0x00, 0x00, 0x00, 0x00]));
+    let extrinsics = vec![serde_json::Value::String(hex)];
+    assert_eq!(reader::extract_block_timestamp(&extrinsics), 0);
+}
+
+#[test]
+fn extract_block_timestamp_invalid_hex() {
+    let extrinsics = vec![serde_json::Value::String("not-hex!!!".into())];
+    assert_eq!(reader::extract_block_timestamp(&extrinsics), 0);
+}
+
+#[test]
+fn extract_block_timestamp_non_string() {
+    let extrinsics = vec![serde_json::Value::Number(42.into())];
+    assert_eq!(reader::extract_block_timestamp(&extrinsics), 0);
+}
+
+#[test]
+fn process_remark_public_for_sender_not_recipient() {
+    let alice_seed = [0xAA; 32];
+    let alice_sk = signing(&alice_seed);
+
+    let charlie_seed = [0xCC; 32];
+    let charlie_pubkey = signing(&charlie_seed).public_key();
+
+    // Alice sends to Charlie, but we are Dave — should NOT emit event
+    let dave_seed = [0xDD; 32];
+    let dave_pubkey = signing(&dave_seed).public_key();
+
+    let remark = samp::encode_public(&charlie_pubkey, "for charlie");
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
+    let hex = ext_to_hex(&ext);
+
+    let (tx, rx) = mpsc::channel();
+    let keys = make_keys(&dave_seed);
+    let ctx = make_ctx(&keys, &dave_pubkey, &tx);
+    reader::read_extrinsic(&hex, &ctx, 100, 0, 0);
+
+    assert!(
+        rx.try_recv().is_err(),
+        "should not emit for unrelated recipient"
+    );
+}
+
+#[test]
+fn process_remark_public_from_self() {
+    let alice_seed = [0xAA; 32];
+    let alice_sk = signing(&alice_seed);
+    let alice_pubkey = alice_sk.public_key();
+
+    let bob_pubkey = signing(&[0xBB; 32]).public_key();
+
+    let remark = samp::encode_public(&bob_pubkey, "self sent");
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
+    let hex = ext_to_hex(&ext);
+
+    // We ARE the sender (alice)
+    let (tx, rx) = mpsc::channel();
+    let keys = make_keys(&alice_seed);
+    let ctx = make_ctx(&keys, &alice_pubkey, &tx);
+    reader::read_extrinsic(&hex, &ctx, 100, 0, 1_700_000_000_000);
+
+    match rx.try_recv() {
+        Ok(Event::NewMessage { sender, .. }) => {
+            assert_eq!(sender, alice_pubkey);
+        }
+        other => panic!("expected NewMessage, got {:?}", event_debug(&other)),
+    }
+}
+
+#[test]
+fn process_remark_thread_encrypted() {
+    let alice_seed = [0xAA; 32];
+    let alice_sk = signing(&alice_seed);
+    let alice_pubkey = alice_sk.public_key();
+
+    let bob_seed = [0xBB; 32];
+    let bob_ristretto_pub = samp::public_from_seed(&samp::Seed::from_bytes(bob_seed));
+    let bob_sk = signing(&bob_seed);
+    let bob_pubkey = bob_sk.public_key();
+
+    let nonce = samp::Nonce::from_bytes([0x03; 12]);
+    let alice_samp_seed = samp::Seed::from_bytes(alice_seed);
+
+    let thread_content = samp::encode_thread_content(
+        taolk::types::BlockRef::ZERO,
+        taolk::types::BlockRef::ZERO,
+        taolk::types::BlockRef::ZERO,
+        b"thread message",
+    );
+    let plaintext = samp::Plaintext::from_bytes(thread_content);
+    let view_tag = samp::compute_view_tag(&alice_samp_seed, &bob_ristretto_pub, &nonce).unwrap();
+    let encrypted =
+        samp::encrypt(&plaintext, &bob_ristretto_pub, &nonce, &alice_samp_seed).unwrap();
+    let remark = samp::encode_encrypted(samp::ContentType::Thread, view_tag, &nonce, &encrypted);
+
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
+    let hex = ext_to_hex(&ext);
+
+    let (tx, rx) = mpsc::channel();
+    let keys = make_keys(&bob_seed);
+    let ctx = make_ctx(&keys, &bob_pubkey, &tx);
+    reader::read_extrinsic(&hex, &ctx, 300, 0, 1_700_000_000_000);
+
+    match rx.try_recv() {
+        Ok(Event::NewMessage {
+            sender,
+            content_type,
+            decrypted_body,
+            ..
+        }) => {
+            assert_eq!(sender, alice_pubkey);
+            assert_eq!(content_type, samp::ContentType::Thread.to_byte());
+            assert_eq!(decrypted_body, Some("thread message".to_string()));
+        }
+        other => panic!(
+            "expected NewMessage (thread), got {:?}",
+            event_debug(&other)
+        ),
+    }
+}
+
+#[test]
+fn process_remark_group_create_and_message() {
+    let alice_seed = [0xAA; 32];
+    let alice_sk = signing(&alice_seed);
+
+    let bob_seed = [0xBB; 32];
+    let bob_pubkey = signing(&bob_seed).public_key();
+    let bob_ristretto_pub = samp::public_from_seed(&samp::Seed::from_bytes(bob_seed));
+
+    let alice_ristretto_pub = samp::public_from_seed(&samp::Seed::from_bytes(alice_seed));
+    let members = vec![alice_ristretto_pub, bob_ristretto_pub];
+
+    let nonce = samp::Nonce::from_bytes([0x04; 12]);
+    let alice_samp_seed = samp::Seed::from_bytes(alice_seed);
+
+    let mut body_bytes = samp::encode_group_members(&members);
+    body_bytes.extend_from_slice(b"group hello");
+    let plaintext = samp::Plaintext::from_bytes(samp::encode_thread_content(
+        taolk::types::BlockRef::ZERO,
+        taolk::types::BlockRef::ZERO,
+        taolk::types::BlockRef::ZERO,
+        &body_bytes,
+    ));
+    let (eph_pubkey, capsules, ciphertext) =
+        samp::encrypt_for_group(&plaintext, &members, &nonce, &alice_samp_seed).unwrap();
+    let remark = samp::encode_group(&nonce, &eph_pubkey, &capsules, &ciphertext);
+
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
+    let hex = ext_to_hex(&ext);
+
+    let (tx, rx) = mpsc::channel();
+    let keys = make_keys(&bob_seed);
+    let ctx = make_ctx(&keys, &bob_pubkey, &tx);
+    reader::read_extrinsic(&hex, &ctx, 400, 0, 1_700_000_000_000);
+
+    let mut got_group_discovered = false;
+    let mut got_group_message = false;
+    while let Ok(ev) = rx.try_recv() {
+        match ev {
+            Event::GroupDiscovered {
+                members, group_ref, ..
+            } => {
+                assert_eq!(members.len(), 2);
+                assert_eq!(group_ref, taolk::types::BlockRef::from_parts(400, 0));
+                got_group_discovered = true;
+            }
+            Event::NewGroupMessage {
+                body,
+                block_number,
+                ext_index,
+                ..
+            } => {
+                assert_eq!(body, "group hello");
+                assert_eq!(block_number, 400);
+                assert_eq!(ext_index, 0);
+                got_group_message = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(got_group_discovered, "should emit GroupDiscovered");
+    assert!(got_group_message, "should emit NewGroupMessage");
+}
+
+#[test]
+fn process_remark_group_followup_message() {
+    let alice_seed = [0xAA; 32];
+    let alice_sk = signing(&alice_seed);
+
+    let bob_seed = [0xBB; 32];
+    let bob_pubkey = signing(&bob_seed).public_key();
+    let bob_ristretto_pub = samp::public_from_seed(&samp::Seed::from_bytes(bob_seed));
+
+    let alice_ristretto_pub = samp::public_from_seed(&samp::Seed::from_bytes(alice_seed));
+    let members = vec![alice_ristretto_pub, bob_ristretto_pub];
+
+    let nonce = samp::Nonce::from_bytes([0x06; 12]);
+    let alice_samp_seed = samp::Seed::from_bytes(alice_seed);
+
+    let group_ref = taolk::types::BlockRef::from_parts(300, 1);
+    let plaintext = samp::Plaintext::from_bytes(samp::encode_thread_content(
+        group_ref,
+        taolk::types::BlockRef::ZERO,
+        taolk::types::BlockRef::ZERO,
+        b"followup msg",
+    ));
+    let (eph_pubkey, capsules, ciphertext) =
+        samp::encrypt_for_group(&plaintext, &members, &nonce, &alice_samp_seed).unwrap();
+    let remark = samp::encode_group(&nonce, &eph_pubkey, &capsules, &ciphertext);
+
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
+    let hex = ext_to_hex(&ext);
+
+    let (tx, rx) = mpsc::channel();
+    let keys = make_keys(&bob_seed);
+    let ctx = make_ctx(&keys, &bob_pubkey, &tx);
+    reader::read_extrinsic(&hex, &ctx, 500, 2, 1_700_000_000_000);
+
+    match rx.try_recv() {
+        Ok(Event::NewGroupMessage {
+            body,
+            group_ref: wire_ref,
+            block_number,
+            ext_index,
+            ..
+        }) => {
+            assert_eq!(body, "followup msg");
+            assert_eq!(wire_ref, group_ref);
+            assert_eq!(block_number, 500);
+            assert_eq!(ext_index, 2);
+        }
+        other => panic!("expected NewGroupMessage, got {:?}", event_debug(&other)),
+    }
+}
+
+#[test]
+fn process_remark_encrypted_outbound_with_seed() {
+    let alice_seed = [0xAA; 32];
+    let alice_sk = signing(&alice_seed);
+    let alice_pubkey = alice_sk.public_key();
+
+    let bob_seed = [0xBB; 32];
+    let bob_ristretto_pub = samp::public_from_seed(&samp::Seed::from_bytes(bob_seed));
+
+    let plaintext = samp::Plaintext::from_bytes(b"outbound with seed".to_vec());
+    let nonce = samp::Nonce::from_bytes([0x07; 12]);
+    let alice_samp_seed = samp::Seed::from_bytes(alice_seed);
+
+    let view_tag = samp::compute_view_tag(&alice_samp_seed, &bob_ristretto_pub, &nonce).unwrap();
+    let encrypted =
+        samp::encrypt(&plaintext, &bob_ristretto_pub, &nonce, &alice_samp_seed).unwrap();
+    let remark = samp::encode_encrypted(samp::ContentType::Encrypted, view_tag, &nonce, &encrypted);
+
+    let ext = build_remark_ext(&remark, &alice_sk, 0);
+    let hex = ext_to_hex(&ext);
+
+    let (tx, rx) = mpsc::channel();
+    let keys = make_keys(&alice_seed); // WITH seed, so should decrypt
+    let ctx = make_ctx(&keys, &alice_pubkey, &tx);
+    reader::read_extrinsic(&hex, &ctx, 800, 0, 1_700_000_000_000);
+
+    match rx.try_recv() {
+        Ok(Event::NewMessage {
+            sender,
+            decrypted_body,
+            ..
+        }) => {
+            assert_eq!(sender, alice_pubkey);
+            assert_eq!(decrypted_body, Some("outbound with seed".to_string()));
+        }
+        other => panic!("expected NewMessage, got {:?}", event_debug(&other)),
+    }
+}
 
 fn event_debug(result: &Result<Event, mpsc::TryRecvError>) -> String {
     match result {

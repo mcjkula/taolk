@@ -1,6 +1,5 @@
 use crate::types::{BlockRef, Pubkey};
 
-/// All `timestamp` fields in events are Unix seconds (block timestamp milliseconds / 1000).
 pub enum Event {
     NewMessage {
         sender: Pubkey,
@@ -12,7 +11,7 @@ pub enum Event {
         continues: BlockRef,
         block_number: u32,
         ext_index: u16,
-        timestamp: u64,
+        timestamp: crate::types::Timestamp,
     },
     NewChannelMessage {
         sender: Pubkey,
@@ -23,7 +22,7 @@ pub enum Event {
         continues: BlockRef,
         block_number: u32,
         ext_index: u16,
-        timestamp: u64,
+        timestamp: crate::types::Timestamp,
     },
     ChannelDiscovered {
         name: String,
@@ -45,7 +44,14 @@ pub enum Event {
         continues: BlockRef,
         block_number: u32,
         ext_index: u16,
-        timestamp: u64,
+        timestamp: crate::types::Timestamp,
+    },
+    LockedOutbound {
+        sender: Pubkey,
+        block_number: u32,
+        ext_index: u16,
+        timestamp: crate::types::Timestamp,
+        remark_bytes: samp::RemarkBytes,
     },
     MessageSent,
     BlockUpdate(u64),
@@ -56,7 +62,7 @@ pub enum Event {
         channel_ref: BlockRef,
     },
     SubmitRemark {
-        remark: Vec<u8>,
+        remark: samp::RemarkBytes,
     },
     GapsRefreshed,
     FeeEstimated {
@@ -64,7 +70,20 @@ pub enum Event {
         fee_raw: Option<u128>,
     },
     BalanceUpdated(u128),
+    ChainSnapshotRefreshed {
+        info: crate::extrinsic::ChainInfo,
+        token_symbol: String,
+        token_decimals: u32,
+    },
+    GenesisMismatch,
+    ConnectionStatus(ConnState),
     Status(String),
     Error(String),
     CatchupComplete,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConnState {
+    Connected,
+    Reconnecting { in_secs: u32 },
 }

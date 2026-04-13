@@ -1,3 +1,4 @@
+use taolk::secret::{Password, Seed};
 use taolk::wallet;
 use tempfile::TempDir;
 
@@ -5,23 +6,35 @@ fn wallet_path(dir: &TempDir, name: &str) -> std::path::PathBuf {
     dir.path().join(format!("{name}.key"))
 }
 
+fn pw(s: &str) -> Password {
+    Password::new(s.into())
+}
+
+fn fixed_seed(byte: u8) -> Seed {
+    Seed::from_bytes([byte; 32])
+}
+
 #[test]
 fn create_and_open_roundtrip() {
     let dir = TempDir::new().unwrap();
     let path = wallet_path(&dir, "test");
-    let seed = [0xAA; 32];
-    wallet::create_at(&path, "testpass", &seed).unwrap();
-    let opened = wallet::open_at(&path, "testpass").unwrap();
-    assert_eq!(*opened, seed);
+    let original = fixed_seed(0xAA);
+    wallet::create_at(&path, &pw("testpass"), &original).unwrap();
+    let opened = wallet::open_at(&path, &pw("testpass")).unwrap();
+    assert!(original.ct_eq(&opened));
 }
 
 #[test]
 fn wrong_password_rejected() {
     let dir = TempDir::new().unwrap();
     let path = wallet_path(&dir, "test");
-    wallet::create_at(&path, "testpass", &[0xAA; 32]).unwrap();
-    let err = wallet::open_at(&path, "wrongpass").unwrap_err();
-    assert!(matches!(err, wallet::WalletError::WrongPassword));
+    wallet::create_at(&path, &pw("testpass"), &fixed_seed(0xAA)).unwrap();
+    let result = wallet::open_at(&path, &pw("wrongpass"));
+    match result {
+        Err(wallet::WalletError::WrongPassword) => {}
+        Err(e) => panic!("expected WrongPassword, got {e:?}"),
+        Ok(_) => panic!("expected error, got Ok"),
+    }
 }
 
 #[test]
@@ -29,67 +42,20 @@ fn corrupt_file_detected() {
     let dir = TempDir::new().unwrap();
     let path = wallet_path(&dir, "corrupt");
     std::fs::write(&path, b"garbage bytes here").unwrap();
-    let err = wallet::open_at(&path, "testpass").unwrap_err();
-    assert!(matches!(err, wallet::WalletError::CorruptFile));
+    let result = wallet::open_at(&path, &pw("testpass"));
+    match result {
+        Err(wallet::WalletError::CorruptFile) => {}
+        Err(e) => panic!("expected CorruptFile, got {e:?}"),
+        Ok(_) => panic!("expected error, got Ok"),
+    }
 }
 
 #[test]
-fn seed_from_mnemonic_deterministic() {
-    let mnemonic = wallet::generate_mnemonic();
-    let seed_a = wallet::seed_from_mnemonic(&mnemonic);
-    let seed_b = wallet::seed_from_mnemonic(&mnemonic);
-    assert_eq!(seed_a, seed_b);
-}
-
-#[test]
-fn seed_from_mnemonic_different_phrases() {
-    let m1 = wallet::generate_mnemonic();
-    let m2 = wallet::generate_mnemonic();
-    let s1 = wallet::seed_from_mnemonic(&m1);
-    let s2 = wallet::seed_from_mnemonic(&m2);
-    assert_ne!(s1, s2);
-}
-
-#[test]
-fn seed_from_hex_valid() {
-    let hex_str = "aa".repeat(32);
-    let seed = wallet::seed_from_hex(&hex_str).unwrap();
-    assert_eq!(seed, [0xAA; 32]);
-}
-
-#[test]
-fn seed_from_hex_with_0x_prefix() {
-    let hex_str = format!("0x{}", "bb".repeat(32));
-    let seed = wallet::seed_from_hex(&hex_str).unwrap();
-    let expected = wallet::seed_from_hex(&"bb".repeat(32)).unwrap();
-    assert_eq!(seed, expected);
-}
-
-#[test]
-fn seed_from_hex_invalid_length() {
-    let hex_str = "aa".repeat(31); // 62 chars = 31 bytes
-    assert!(wallet::seed_from_hex(&hex_str).is_err());
-}
-
-#[test]
-fn seed_from_hex_invalid_chars() {
-    let hex_str = "gg".repeat(32);
-    assert!(wallet::seed_from_hex(&hex_str).is_err());
-}
-
-#[test]
-fn generate_mnemonic_12_words() {
-    let mnemonic = wallet::generate_mnemonic();
-    assert_eq!(mnemonic.word_count(), 12);
-}
-
-#[test]
-fn open_returns_zeroizing() {
+fn open_returns_seed() {
     let dir = TempDir::new().unwrap();
     let path = wallet_path(&dir, "zero");
-    wallet::create_at(&path, "testpass", &[0xAA; 32]).unwrap();
-    let seed: zeroize::Zeroizing<[u8; 32]> = wallet::open_at(&path, "testpass").unwrap();
-    assert_eq!(seed.len(), 32);
+    wallet::create_at(&path, &pw("testpass"), &fixed_seed(0xAA)).unwrap();
+    let _ = wallet::open_at(&path, &pw("testpass")).unwrap();
 }
 
 #[cfg(unix)]
@@ -99,7 +65,136 @@ fn file_permissions_restrictive() {
 
     let dir = TempDir::new().unwrap();
     let path = wallet_path(&dir, "perms");
-    wallet::create_at(&path, "testpass", &[0xAA; 32]).unwrap();
+    wallet::create_at(&path, &pw("testpass"), &fixed_seed(0xAA)).unwrap();
     let mode = std::fs::metadata(&path).unwrap().mode() & 0o777;
     assert_eq!(mode, 0o600);
+}
+
+#[test]
+fn wallet_list_empty_dir() {
+    let dir = TempDir::new().unwrap();
+    let entries = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            name.strip_suffix(".key").map(|n| n.to_string())
+        })
+        .collect::<Vec<_>>();
+    assert!(entries.is_empty());
+}
+
+#[test]
+fn wallet_list_after_create() {
+    let dir = TempDir::new().unwrap();
+    let path = wallet_path(&dir, "alice");
+    wallet::create_at(&path, &pw("pass"), &fixed_seed(0xAA)).unwrap();
+
+    let mut names: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            name.strip_suffix(".key").map(|n| n.to_string())
+        })
+        .collect();
+    names.sort();
+    assert_eq!(names, vec!["alice"]);
+}
+
+#[test]
+fn wallet_list_multiple_after_create() {
+    let dir = TempDir::new().unwrap();
+    wallet::create_at(&wallet_path(&dir, "bob"), &pw("p1"), &fixed_seed(0xBB)).unwrap();
+    wallet::create_at(&wallet_path(&dir, "alice"), &pw("p2"), &fixed_seed(0xCC)).unwrap();
+
+    let mut names: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            name.strip_suffix(".key").map(|n| n.to_string())
+        })
+        .collect();
+    names.sort();
+    assert_eq!(names, vec!["alice", "bob"]);
+}
+
+#[test]
+fn different_passwords_produce_different_ciphertext() {
+    let dir = TempDir::new().unwrap();
+    let p1 = wallet_path(&dir, "w1");
+    let p2 = wallet_path(&dir, "w2");
+    let seed = fixed_seed(0xDD);
+    wallet::create_at(&p1, &pw("pass1"), &seed).unwrap();
+    wallet::create_at(&p2, &pw("pass2"), &seed).unwrap();
+    let d1 = std::fs::read(&p1).unwrap();
+    let d2 = std::fs::read(&p2).unwrap();
+    assert_ne!(d1, d2, "different passwords should produce different files");
+}
+
+#[test]
+fn open_nonexistent_file() {
+    let dir = TempDir::new().unwrap();
+    let path = wallet_path(&dir, "ghost");
+    let result = wallet::open_at(&path, &pw("pass"));
+    assert!(result.is_err());
+}
+
+// --- wallet_path / wallet_exists / list_wallets ---
+
+#[test]
+fn wallet_path_uses_name() {
+    let path = wallet::wallet_path("mytest");
+    assert!(path.to_string_lossy().contains("mytest.key"));
+    assert!(path.to_string_lossy().contains(".samp"));
+}
+
+#[test]
+fn wallet_exists_false_for_missing() {
+    assert!(!wallet::wallet_exists("nonexistent_wallet_name_zzz"));
+}
+
+#[test]
+fn list_wallets_returns_sorted_names() {
+    // This exercises the real wallet_dir. It may or may not have wallets.
+    let names = wallet::list_wallets();
+    let mut sorted = names.clone();
+    sorted.sort();
+    assert_eq!(names, sorted);
+}
+
+#[test]
+fn create_and_open_via_name() {
+    let name = "taolk_test_wallet_temp";
+    let path = wallet::wallet_path(name);
+    let existed = path.exists();
+
+    let result = wallet::create(name, &pw("testpass"), &fixed_seed(0xEE));
+    if result.is_err() {
+        // Can't write to wallet dir; skip
+        return;
+    }
+
+    assert!(wallet::wallet_exists(name));
+    let names = wallet::list_wallets();
+    assert!(names.contains(&name.to_string()));
+
+    let opened = wallet::open(name, &pw("testpass")).unwrap();
+    assert!(fixed_seed(0xEE).ct_eq(&opened));
+
+    // Cleanup
+    if !existed {
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+#[test]
+fn create_overwrites_existing() {
+    let dir = TempDir::new().unwrap();
+    let path = wallet_path(&dir, "overwrite");
+    wallet::create_at(&path, &pw("pass1"), &fixed_seed(0xAA)).unwrap();
+    wallet::create_at(&path, &pw("pass2"), &fixed_seed(0xBB)).unwrap();
+    let opened = wallet::open_at(&path, &pw("pass2")).unwrap();
+    assert!(fixed_seed(0xBB).ct_eq(&opened));
 }

@@ -6,9 +6,9 @@ use rodio::{DeviceSinkBuilder, MixerDeviceSink};
 
 use crate::config::Notifications;
 
-const DM_BYTES: &[u8] = include_bytes!("dm.ogg");
-const AMBIENT_BYTES: &[u8] = include_bytes!("ambient.ogg");
-const MENTION_BYTES: &[u8] = include_bytes!("mention.ogg");
+const DM_BYTES: &[u8] = include_bytes!("audio/dm.ogg");
+const AMBIENT_BYTES: &[u8] = include_bytes!("audio/ambient.ogg");
+const MENTION_BYTES: &[u8] = include_bytes!("audio/mention.ogg");
 
 const THROTTLE: Duration = Duration::from_millis(250);
 
@@ -50,10 +50,7 @@ impl Audio {
         if !allowed {
             return;
         }
-        let sink = match &self.sink {
-            Some(s) => s,
-            None => return,
-        };
+        let Some(sink) = &self.sink else { return };
 
         let now = Instant::now();
         if now.duration_since(self.last_play.get()) < THROTTLE {
@@ -66,7 +63,7 @@ impl Audio {
             Sound::Ambient => AMBIENT_BYTES,
             Sound::Mention => MENTION_BYTES,
         };
-        let pct = (self.cfg.volume.min(100) as f32) / 100.0;
+        let pct = f32::from(self.cfg.volume.min(100)) / 100.0;
         let gain = pct * pct;
 
         if let Ok(player) = rodio::play(sink.mixer(), Cursor::new(bytes)) {

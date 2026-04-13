@@ -1,28 +1,11 @@
-use crate::app::{App, View};
+use crate::app::{App, Overlay, View};
+use crate::ui::palette;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use taolk::conversation::InboxMessage;
-
-// Deterministic sender colors derived from SS58 address.
-// Avoids Cyan (reserved for "You"), Red (errors), DarkGray (metadata).
-const SENDER_COLORS: &[Color] = &[
-    Color::Yellow,
-    Color::Green,
-    Color::Magenta,
-    Color::Blue,
-    Color::LightYellow,
-    Color::LightGreen,
-    Color::LightMagenta,
-    Color::LightBlue,
-];
-
-fn sender_color(ss58: &str) -> Color {
-    let hash: u8 = ss58.bytes().fold(0u8, |acc, b| acc.wrapping_add(b));
-    SENDER_COLORS[hash as usize % SENDER_COLORS.len()]
-}
 
 const BASE58_CHARS: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
@@ -48,7 +31,6 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
         if at_boundary {
             let remaining = &text[pos..];
 
-            // URL: https:// or http:// -- clickable via OSC 8 hyperlink
             if remaining.starts_with("https://") || remaining.starts_with("http://") {
                 let end = remaining
                     .find(|c: char| c.is_whitespace())
@@ -58,17 +40,20 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
                 spans.push(Span::styled(
                     osc,
                     Style::default()
-                        .fg(Color::Blue)
+                        .fg(palette::ACCENT_ALT)
                         .add_modifier(Modifier::UNDERLINED),
                 ));
                 pos += end;
                 continue;
             }
 
-            // @-mention
             if bytes[pos] == b'@' && is_ss58_at(bytes, pos + 1) {
                 let is_self = &text[pos + 1..pos + 49] == my_ss58;
-                let color = if is_self { Color::Cyan } else { Color::Yellow };
+                let color = if is_self {
+                    palette::ACCENT
+                } else {
+                    palette::ACCENT_ALT
+                };
                 spans.push(Span::styled(
                     text[pos..pos + 49].to_string(),
                     Style::default()
@@ -79,19 +64,17 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
                 continue;
             }
 
-            // Bare SS58
             if is_ss58_at(bytes, pos) {
                 spans.push(Span::styled(
                     text[pos..pos + 48].to_string(),
                     Style::default()
-                        .fg(Color::DarkGray)
+                        .fg(palette::MUTED)
                         .add_modifier(Modifier::UNDERLINED),
                 ));
                 pos += 48;
                 continue;
             }
 
-            // Block: block:\d+
             if let Some(after_block) = remaining.strip_prefix("block:") {
                 let digits = after_block
                     .bytes()
@@ -102,7 +85,7 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
                     spans.push(Span::styled(
                         remaining[..end].to_string(),
                         Style::default()
-                            .fg(Color::Cyan)
+                            .fg(palette::ACCENT)
                             .add_modifier(Modifier::UNDERLINED),
                     ));
                     pos += end;
@@ -110,7 +93,6 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
                 }
             }
 
-            // Extrinsic: ext:\d+:\d+
             if let Some(after_ext) = remaining.strip_prefix("ext:") {
                 let d1 = after_ext.bytes().take_while(|b| b.is_ascii_digit()).count();
                 if d1 > 0 && 4 + d1 < remaining.len() && remaining.as_bytes()[4 + d1] == b':' {
@@ -123,7 +105,7 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
                         spans.push(Span::styled(
                             remaining[..end].to_string(),
                             Style::default()
-                                .fg(Color::Cyan)
+                                .fg(palette::ACCENT)
                                 .add_modifier(Modifier::UNDERLINED),
                         ));
                         pos += end;
@@ -133,12 +115,10 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
             }
         }
 
-        // No pattern matched -- consume until next whitespace
         let word_end = text[pos..]
             .find(|c: char| c.is_whitespace())
             .map(|p| pos + p)
             .unwrap_or(text.len());
-        // Include trailing whitespace in the plain span
         let span_end = text[word_end..]
             .find(|c: char| !c.is_whitespace())
             .map(|p| word_end + p)
@@ -157,8 +137,6 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
     }
 }
 
-/// Word-wrap a line at the given max width, returning wrapped segments.
-/// First line uses full width; continuation lines are indented by `indent`.
 fn wrap_text(text: &str, max_width: usize, indent: usize) -> Vec<String> {
     if max_width == 0 || text.len() <= max_width {
         return vec![text.to_string()];
@@ -176,7 +154,7 @@ fn wrap_text(text: &str, max_width: usize, indent: usize) -> Vec<String> {
         };
         first = false;
 
-        if remaining.len() <= width + indent * (!result.is_empty() as usize) {
+        if remaining.len() <= width + indent * usize::from(!result.is_empty()) {
             if result.is_empty() {
                 result.push(remaining);
             } else {
@@ -185,7 +163,6 @@ fn wrap_text(text: &str, max_width: usize, indent: usize) -> Vec<String> {
             break;
         }
 
-        // Find last space before width limit for word boundary
         let effective = width;
         let search_area = &remaining[..effective.min(remaining.len())];
         let split_at = search_area
@@ -193,7 +170,6 @@ fn wrap_text(text: &str, max_width: usize, indent: usize) -> Vec<String> {
             .unwrap_or(effective.min(remaining.len()));
 
         if split_at == 0 {
-            // No space found, hard break
             let brk = effective.min(remaining.len());
             if result.is_empty() {
                 result.push(remaining[..brk].to_string());
@@ -218,7 +194,6 @@ fn wrap_text(text: &str, max_width: usize, indent: usize) -> Vec<String> {
     }
 }
 
-/// Format a centered date separator: ─────── April 4, 2026 ───────
 fn date_separator(date_str: &str) -> Line<'static> {
     let label = format!(" {date_str} ");
     let dashes = 3;
@@ -232,37 +207,43 @@ fn date_separator(date_str: &str) -> Line<'static> {
     Line::styled(
         sep,
         Style::default()
-            .fg(Color::DarkGray)
+            .fg(palette::MUTED)
             .add_modifier(Modifier::ITALIC),
     )
 }
 
-pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    use crate::app::Mode;
-    app.sender_click_regions.borrow_mut().clear();
-    // Contact picker takes over the main panel during address selection
-    if app.mode == Mode::Compose || (app.mode == Mode::Message && app.msg_recipient.is_none()) {
+pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
+    app.sender_click_regions.clear();
+    if app.overlay == Some(Overlay::Compose)
+        || (app.overlay == Some(Overlay::Message) && app.msg_recipient.is_none())
+    {
         render_contact_picker(frame, app, area);
         return;
     }
-    if app.mode == Mode::CreateGroupMembers {
+    if app.overlay == Some(Overlay::CreateGroupMembers) {
         render_group_member_picker(frame, app, area);
         return;
     }
-    if app.mode == Mode::SenderPicker {
+    if app.overlay == Some(Overlay::SenderPicker) {
         render_sender_picker(frame, app, area);
         return;
     }
 
     match app.view {
-        View::Inbox => {
-            render_standalone(frame, app, &app.session.inbox, "Inbox", "From", None, area)
-        }
+        View::Inbox => render_standalone(
+            frame,
+            app,
+            &app.session.inbox,
+            &format!("{} Inbox", super::icons::INBOX),
+            "From",
+            None,
+            area,
+        ),
         View::Outbox => render_standalone(
             frame,
             app,
             &app.session.outbox,
-            "Sent",
+            &format!("{} Sent", super::icons::OUTBOX),
             "To",
             pending_text(app, View::Outbox),
             area,
@@ -292,7 +273,7 @@ fn render_standalone(
     area: Rect,
 ) {
     let mut lines: Vec<Line> = vec![
-        header_line(title, "", area.width as usize),
+        header_line("", title, "", usize::from(area.width)),
         separator(area.width),
     ];
 
@@ -302,16 +283,23 @@ fn render_standalone(
             let time = msg
                 .timestamp
                 .with_timezone(&chrono::Local)
-                .format(&app.date_format)
+                .format(&app.config.date_format)
                 .to_string();
-            let (type_icon, type_label, badge_bg) = if msg.content_type == 0x00 {
-                (super::icons::PUBLIC, "public", Color::Cyan)
-            } else {
-                (super::icons::ENCRYPTED, "encrypted", Color::Magenta)
-            };
+            let (type_icon, type_label, badge_bg) =
+                match samp::ContentType::from_byte(msg.content_type) {
+                    Ok(samp::ContentType::Public) => (super::icons::PUBLIC, "public", Color::Cyan),
+                    Ok(samp::ContentType::Encrypted) => {
+                        (super::icons::ENCRYPTED, "encrypted", Color::Magenta)
+                    }
+                    _ => (
+                        super::icons::BLOCK,
+                        &*format!("0x{:02x}", msg.content_type),
+                        Color::DarkGray,
+                    ),
+                };
 
             lines.push(Line::from(vec![
-                Span::styled(format!(" {time} "), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!(" {time} "), Style::default().fg(palette::MUTED)),
                 Span::styled(
                     format!(" {type_icon} {type_label} "),
                     Style::default()
@@ -322,12 +310,12 @@ fn render_standalone(
                 Span::raw(" "),
                 Span::styled(
                     format!("{direction}: "),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(palette::MUTED),
                 ),
                 Span::styled(
                     truncate(&msg.peer_ss58, 20),
                     Style::default()
-                        .fg(Color::White)
+                        .fg(Color::Reset)
                         .add_modifier(Modifier::BOLD),
                 ),
             ]));
@@ -336,7 +324,7 @@ fn render_standalone(
                 lines.push(Line::from(vec![Span::styled(
                     "   empty",
                     Style::default()
-                        .fg(Color::DarkGray)
+                        .fg(palette::MUTED)
                         .add_modifier(Modifier::ITALIC),
                 )]));
             } else {
@@ -344,7 +332,7 @@ fn render_standalone(
                 for text_line in msg.body.lines() {
                     lines.push(render_body_line(
                         &format!("   {text_line}"),
-                        Color::White,
+                        Color::Reset,
                         my_ss58,
                     ));
                 }
@@ -352,13 +340,17 @@ fn render_standalone(
         }
     }
 
+    if messages.is_empty() && pending.is_none() {
+        lines.push(Line::raw(""));
+        lines.push(dim("  No messages yet"));
+    }
+
     if let Some(text) = pending {
         let spinner = app.spinner_16();
-        // Match confirmed layout: "YYYY-MM-DD HH:MM" = 16 chars
-        let (type_icon, type_label) = if app.msg_type == Some(0x01) {
-            (super::icons::PUBLIC, "public")
-        } else {
-            (super::icons::ENCRYPTED, "encrypted")
+        let type_badge: Option<(&str, &str)> = match app.pending_msg_type {
+            Some(samp::ContentType::Public) => Some((super::icons::PUBLIC, "public")),
+            Some(samp::ContentType::Encrypted) => Some((super::icons::ENCRYPTED, "encrypted")),
+            _ => None,
         };
         let recipient_label = app
             .msg_recipient
@@ -367,31 +359,34 @@ fn render_standalone(
             .unwrap_or_default();
 
         lines.push(Line::raw(""));
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!(" {spinner}  "),
-                Style::default().fg(Color::DarkGray),
-            ),
-            Span::styled(
-                format!(" {type_icon} {type_label} "),
+        let mut spans = vec![Span::styled(
+            format!(" {spinner} "),
+            Style::default().fg(palette::MUTED),
+        )];
+        if let Some((icon, label)) = type_badge {
+            spans.push(Span::styled(
+                format!(" {icon} {label} "),
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(palette::MUTED)
                     .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
-            Span::styled("To: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
+            ));
+            spans.push(Span::raw(" "));
+        }
+        if !recipient_label.is_empty() {
+            spans.push(Span::styled("To: ", Style::default().fg(palette::MUTED)));
+            spans.push(Span::styled(
                 truncate(&recipient_label, 20),
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(palette::MUTED)
                     .add_modifier(Modifier::BOLD),
-            ),
-        ]));
+            ));
+        }
+        lines.push(Line::from(spans));
 
         for text_line in text.lines() {
             lines.push(Line::styled(
                 format!("   {text_line}"),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(palette::MUTED),
             ));
         }
     }
@@ -399,121 +394,192 @@ fn render_standalone(
     render_scrolled(frame, lines, 0, area);
 }
 
-fn render_thread(frame: &mut Frame, app: &App, thread_idx: usize, area: Rect) {
-    let thread = match app.session.threads.get(thread_idx) {
-        Some(t) => t,
-        None => return,
-    };
-
-    let w = area.width as usize;
-    let th_block = thread.thread_ref.block;
-    let th_index = thread.thread_ref.index;
-    let id_str = if thread.thread_ref.is_zero() {
+fn id_block_str(id_str: &str) -> String {
+    if id_str.is_empty() {
         String::new()
     } else {
-        format!("{}:{}", th_block, th_index)
-    };
-    let id_reserve = if id_str.is_empty() {
+        format!("{} {}", super::icons::BLOCK, id_str)
+    }
+}
+
+fn id_block_reserve(id_str: &str) -> usize {
+    use unicode_width::UnicodeWidthStr;
+    if id_str.is_empty() {
         0
     } else {
-        id_str.len() + 1
-    };
-    let name_max = w.saturating_sub(2 + id_reserve);
-    let peer = truncate(&thread.peer_ss58, name_max);
-    let left_used = 1 + peer.len();
-    let pad = w.saturating_sub(left_used + id_reserve);
-    let mut lines: Vec<Line> = vec![
-        Line::from(vec![
-            Span::styled(
-                format!(" {peer}"),
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" ".repeat(pad)),
-            Span::styled(id_str, Style::default().fg(Color::DarkGray)),
-        ]),
-        separator(area.width),
-    ];
+        UnicodeWidthStr::width(id_block_str(id_str).as_str()) + 1
+    }
+}
 
+fn title_header_line(
+    title: String,
+    title_color: Color,
+    id_str: String,
+    width: usize,
+) -> Line<'static> {
+    let id_block = id_block_str(&id_str);
+    let id_reserve = id_block_reserve(&id_str);
+    let title_display_width = title.chars().count();
+    let left_used = 1 + title_display_width;
+    let pad = width.saturating_sub(left_used + id_reserve);
+    Line::from(vec![
+        Span::styled(
+            format!(" {title}"),
+            Style::default()
+                .fg(title_color)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" ".repeat(pad)),
+        Span::styled(id_block, Style::default().fg(palette::MUTED)),
+    ])
+}
+
+fn render_threaded(
+    frame: &mut Frame,
+    app: &App,
+    mut lines: Vec<Line<'static>>,
+    messages: &[crate::conversation::ThreadMessage],
+    empty_msg: &str,
+    view: View,
+    area: Rect,
+) -> Vec<(usize, u16, u16, String)> {
     let mut pending_clicks = Vec::new();
     render_messages(
         &mut lines,
-        &thread.messages,
+        messages,
         app,
-        area.width as usize,
+        usize::from(area.width),
         &mut pending_clicks,
     );
-    render_pending(&mut lines, app, View::Thread(thread_idx));
-    record_sender_clicks(app, &pending_clicks, lines.len(), app.scroll_offset, area);
+    render_pending(&mut lines, app, view);
+    if messages.is_empty() && !(app.sending && app.pending_view == Some(view)) {
+        lines.push(Line::raw(""));
+        lines.push(dim(&format!("  {empty_msg}")));
+    }
+    let clicks = resolve_sender_clicks(&pending_clicks, lines.len(), app.scroll_offset, area);
     render_scrolled(frame, lines, app.scroll_offset, area);
+    clicks
 }
 
-fn render_channel(frame: &mut Frame, app: &App, chan_idx: usize, area: Rect) {
+fn render_thread(frame: &mut Frame, app: &mut App, thread_idx: usize, area: Rect) {
+    if thread_idx >= app.session.threads.len() {
+        return;
+    }
+    let w = usize::from(area.width);
+    let thread = &app.session.threads[thread_idx];
+    let id_str = if thread.thread_ref.is_zero() {
+        String::new()
+    } else {
+        format!(
+            "{}:{}",
+            thread.thread_ref.block().get(),
+            thread.thread_ref.index().get()
+        )
+    };
+    let id_reserve = id_block_reserve(&id_str);
+    let peer = truncate(&thread.peer_ss58, w.saturating_sub(2 + id_reserve)).to_string();
+    let lines = vec![
+        title_header_line(peer, Color::Reset, id_str, w),
+        separator(area.width),
+    ];
+
+    let clicks = render_threaded(
+        frame,
+        app,
+        lines,
+        &app.session.threads[thread_idx].messages,
+        "No messages in this thread",
+        View::Thread(thread_idx),
+        area,
+    );
+    for (row, c0, c1, ss58) in clicks {
+        app.sender_click_regions.push((row as u16, c0, c1, ss58));
+    }
+}
+
+fn render_channel(frame: &mut Frame, app: &mut App, chan_idx: usize, area: Rect) {
     let channel = match app.session.channels.get(chan_idx) {
         Some(c) => c,
         None => return,
     };
 
-    let w = area.width as usize;
-    let ref_block = channel.channel_ref.block;
-    let ref_index = channel.channel_ref.index;
-    let id_str = format!("{}:{}", ref_block, ref_index);
-    let id_reserve = id_str.len() + 1;
-    let name_max = w.saturating_sub(2 + id_reserve);
-    let title = format!("#{}", truncate(&channel.name, name_max));
-    let left_used = 1 + title.len();
-    let pad = w.saturating_sub(left_used + id_reserve);
+    let w = usize::from(area.width);
+    let id_str = format!(
+        "{}:{}",
+        channel.channel_ref.block().get(),
+        channel.channel_ref.index().get()
+    );
+    let id_reserve = id_block_reserve(&id_str);
+    let title = format!(
+        "#{}",
+        truncate(&channel.name, w.saturating_sub(2 + id_reserve))
+    );
 
-    let mut lines: Vec<Line> = vec![Line::from(vec![
-        Span::styled(
-            format!(" {title}"),
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" ".repeat(pad)),
-        Span::styled(id_str, Style::default().fg(Color::DarkGray)),
-    ])];
+    let mut lines = vec![title_header_line(title, Color::Reset, id_str, w)];
 
     if !channel.description.is_empty() {
-        let desc_max = (area.width as usize).saturating_sub(3);
+        let desc_max = (usize::from(area.width)).saturating_sub(3);
         lines.push(Line::from(vec![Span::styled(
             format!(" {} ", truncate(&channel.description, desc_max)),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(palette::MUTED),
         )]));
     }
 
     lines.push(separator(area.width));
 
-    let mut pending_clicks = Vec::new();
-    render_messages(
-        &mut lines,
-        &channel.messages,
+    let clicks = render_threaded(
+        frame,
         app,
-        area.width as usize,
-        &mut pending_clicks,
+        lines,
+        &channel.messages,
+        "No messages in this channel yet",
+        View::Channel(chan_idx),
+        area,
     );
-    render_pending(&mut lines, app, View::Channel(chan_idx));
-    record_sender_clicks(app, &pending_clicks, lines.len(), app.scroll_offset, area);
-    render_scrolled(frame, lines, app.scroll_offset, area);
+    for (row, c0, c1, ss58) in clicks {
+        app.sender_click_regions.push((row as u16, c0, c1, ss58));
+    }
 }
 
-fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
+fn render_group(frame: &mut Frame, app: &mut App, group_idx: usize, area: Rect) {
     let group = match app.session.groups.get(group_idx) {
         Some(g) => g,
         None => return,
     };
 
-    let w = area.width as usize;
-    let ref_block = group.group_ref.block;
-    let ref_index = group.group_ref.index;
+    let w = usize::from(area.width);
     let id_str = if group.group_ref.is_zero() {
         String::new()
     } else {
-        format!("{}:{}", ref_block, ref_index)
+        format!(
+            "{}:{}",
+            group.group_ref.block().get(),
+            group.group_ref.index().get()
+        )
     };
-    // Sort member indices: creator first, then rest in order
+    let id_reserve = id_block_reserve(&id_str);
+    let title = group_member_title(group, app, w.saturating_sub(2 + id_reserve));
+
+    let lines = vec![
+        title_header_line(title, palette::ACCENT, id_str, w),
+        separator(area.width),
+    ];
+
+    let clicks = render_threaded(
+        frame,
+        app,
+        lines,
+        &group.messages,
+        "No messages in this group yet",
+        View::Group(group_idx),
+        area,
+    );
+    for (row, c0, c1, ss58) in clicks {
+        app.sender_click_regions.push((row as u16, c0, c1, ss58));
+    }
+}
+
+fn group_member_title(group: &crate::conversation::Group, app: &App, title_max: usize) -> String {
     let mut member_order: Vec<usize> = (0..group.members.len()).collect();
     if let Some(pos) = member_order
         .iter()
@@ -522,12 +588,6 @@ fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
         let c = member_order.remove(pos);
         member_order.insert(0, c);
     }
-    let id_reserve = if id_str.is_empty() {
-        0
-    } else {
-        id_str.len() + 1
-    };
-    let title_max = w.saturating_sub(2 + id_reserve);
     let mut title = String::new();
     for (i, &mi) in member_order.iter().enumerate() {
         let pk = &group.members[mi];
@@ -559,43 +619,17 @@ fn render_group(frame: &mut Frame, app: &App, group_idx: usize, area: Rect) {
         }
         title.push_str(&label);
     }
-    let title_display_width = title.chars().count();
-    let left_used = 1 + title_display_width;
-    let pad = w.saturating_sub(left_used + id_reserve);
-
-    let mut lines: Vec<Line> = vec![Line::from(vec![
-        Span::styled(
-            format!(" {title}"),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" ".repeat(pad)),
-        Span::styled(id_str, Style::default().fg(Color::DarkGray)),
-    ])];
-
-    lines.push(separator(area.width));
-
-    let mut pending_clicks = Vec::new();
-    render_messages(
-        &mut lines,
-        &group.messages,
-        app,
-        area.width as usize,
-        &mut pending_clicks,
-    );
-    render_pending(&mut lines, app, View::Group(group_idx));
-    record_sender_clicks(app, &pending_clicks, lines.len(), app.scroll_offset, area);
-    render_scrolled(frame, lines, app.scroll_offset, area);
+    title
 }
 
 fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
     let count = app.session.known_channels.len();
     let mut lines: Vec<Line> = vec![
         header_line(
+            super::icons::CHANNELS,
             "Channels",
-            &format!("{count} available"),
-            area.width as usize,
+            &format!("{count} channels"),
+            usize::from(area.width),
         ),
         separator(area.width),
     ];
@@ -611,16 +645,21 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
         let subscribed = app.session.is_subscribed(&info.channel_ref);
 
         let indicator = if selected { "> " } else { "  " };
-        let check = if subscribed { " \u{2713}" } else { "" };
-        let id_str = format!(" {}:{}", info.channel_ref.block, info.channel_ref.index);
+        let check = if subscribed { " \u{F012C}" } else { "" };
+        let id_str = format!(
+            " {} {}:{}",
+            super::icons::BLOCK,
+            info.channel_ref.block().get(),
+            info.channel_ref.index().get()
+        );
         let name_str = format!("#{}", info.name);
 
-        let name_color = if subscribed {
-            Color::DarkGray
-        } else if selected {
-            Color::White
+        let name_color = if selected {
+            Color::Reset
+        } else if !subscribed {
+            palette::ACCENT
         } else {
-            Color::Cyan
+            Color::Reset
         };
         let name_mod = if selected {
             Modifier::BOLD
@@ -628,24 +667,27 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
             Modifier::empty()
         };
 
+        if i > 0 {
+            lines.push(Line::raw(""));
+        }
         lines.push(Line::from(vec![
-            Span::styled(indicator, Style::default().fg(Color::Cyan)),
-            Span::styled("  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(indicator, Style::default().fg(palette::ACCENT)),
+            Span::styled("  ", Style::default().fg(palette::MUTED)),
             Span::styled(
                 name_str,
                 Style::default().fg(name_color).add_modifier(name_mod),
             ),
-            Span::styled(id_str, Style::default().fg(Color::DarkGray)),
-            Span::styled(check, Style::default().fg(Color::Green)),
+            Span::styled(id_str, Style::default().fg(palette::MUTED)),
+            Span::styled(check, Style::default().fg(palette::SUCCESS)),
         ]));
 
         if !info.description.is_empty() {
-            let desc_max = (area.width as usize).saturating_sub(5);
+            let desc_max = (usize::from(area.width)).saturating_sub(7);
             lines.push(Line::from(vec![
-                Span::raw("    "),
+                Span::raw("      "),
                 Span::styled(
                     truncate(&info.description, desc_max),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(palette::MUTED),
                 ),
             ]));
         }
@@ -657,29 +699,52 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
 fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
     let contacts = app.filtered_contacts();
     let total = app.session.known_contacts().len();
-    let w = area.width as usize;
+    let w = usize::from(area.width);
 
     let mut lines: Vec<Line> = vec![
-        header_line("Contacts", &format!("{total} known"), w),
+        header_line(
+            super::icons::ACCOUNT,
+            "Contacts",
+            &format!("{total} contacts"),
+            w,
+        ),
         separator(area.width),
     ];
 
     if total == 0 {
         lines.push(Line::raw(""));
         lines.push(dim("  No known contacts yet"));
-        lines.push(dim("  Paste an SS58 address below to message someone"));
+        lines.push(dim("  Paste an SS58 address below to send"));
     } else if contacts.is_empty() && !app.input.is_empty() {
         lines.push(Line::raw(""));
-        lines.push(dim("  No matches"));
+        let input = app.input.as_str();
+        if input.starts_with('5') && input.len() >= 48 {
+            lines.push(dim("  New contact \u{2014} Enter to send"));
+        } else {
+            lines.push(dim("  No matches"));
+        }
     }
 
+    let my_pubkey = app.session.pubkey();
     for (i, (_, pubkey)) in contacts.iter().enumerate() {
         let selected = i == app.contact_idx % contacts.len().max(1) && app.input.is_empty();
+        let is_self = *pubkey == my_pubkey;
         let full_addr = taolk::util::ss58_from_pubkey(pubkey);
+        let label = if is_self {
+            format!("{full_addr} (You)")
+        } else {
+            full_addr
+        };
         let addr_max = w.saturating_sub(4);
 
         let indicator = if selected { "> " } else { "  " };
-        let addr_color = if selected { Color::White } else { Color::Cyan };
+        let addr_color = if is_self {
+            palette::MUTED
+        } else if selected {
+            Color::Reset
+        } else {
+            palette::ACCENT
+        };
         let addr_mod = if selected {
             Modifier::BOLD
         } else {
@@ -687,9 +752,9 @@ fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(indicator, Style::default().fg(Color::Cyan)),
+            Span::styled(indicator, Style::default().fg(palette::ACCENT)),
             Span::styled(
-                truncate(&full_addr, addr_max),
+                truncate(&label, addr_max),
                 Style::default().fg(addr_color).add_modifier(addr_mod),
             ),
         ]));
@@ -701,10 +766,15 @@ fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
 fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
     let senders = &app.picker_senders;
     let total = senders.len();
-    let w = area.width as usize;
+    let w = usize::from(area.width);
 
     let mut lines: Vec<Line> = vec![
-        header_line("Copy SS58", &format!("{total} senders"), w),
+        header_line(
+            super::icons::ACCOUNT,
+            "Copy SS58",
+            &format!("{total} senders in view"),
+            w,
+        ),
         separator(area.width),
     ];
 
@@ -722,11 +792,11 @@ fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
         let addr_max = w.saturating_sub(4);
         let indicator = if selected { "> " } else { "  " };
         let addr_color = if selected {
-            Color::White
+            Color::Reset
         } else if pk.is_some() {
-            Color::Cyan
+            palette::ACCENT
         } else {
-            Color::DarkGray
+            palette::MUTED
         };
         let addr_mod = if selected {
             Modifier::BOLD
@@ -735,7 +805,7 @@ fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(indicator, Style::default().fg(Color::Cyan)),
+            Span::styled(indicator, Style::default().fg(palette::ACCENT)),
             Span::styled(
                 truncate(&display, addr_max),
                 Style::default().fg(addr_color).add_modifier(addr_mod),
@@ -749,13 +819,19 @@ fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
 fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
     let contacts = app.filtered_contacts();
     let total = app.session.known_contacts().len();
-    let selected_count = app.pending_group_members.len();
-    let w = area.width as usize;
+    let my_pubkey = app.session.pubkey();
+    let others_selected = app
+        .pending_group_members
+        .iter()
+        .filter(|(pk, _)| *pk != my_pubkey)
+        .count();
+    let w = usize::from(area.width);
 
     let mut lines: Vec<Line> = vec![
         header_line(
+            super::icons::GROUPS,
             "Select Members",
-            &format!("{selected_count} selected, {total} known"),
+            &format!("{others_selected} selected, {total} contacts"),
             w,
         ),
         separator(area.width),
@@ -770,22 +846,22 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     for (i, (_, pubkey)) in contacts.iter().enumerate() {
+        if *pubkey == my_pubkey {
+            continue;
+        }
         let cursor = i == app.contact_idx % contacts.len().max(1) && app.input.is_empty();
         let is_member = app.pending_group_members.iter().any(|(pk, _)| pk == pubkey);
-        let is_self = *pubkey == app.session.pubkey();
         let full_addr = taolk::util::ss58_from_pubkey(pubkey);
         let addr_max = w.saturating_sub(6);
 
         let indicator = if cursor { "> " } else { "  " };
-        let check = if is_member { "\u{2713} " } else { "  " };
-        let addr_color = if is_self {
-            Color::DarkGray
-        } else if cursor {
-            Color::White
+        let check = if is_member { "\u{F012C} " } else { "  " };
+        let addr_color = if cursor {
+            Color::Reset
         } else if is_member {
-            Color::Green
+            palette::SUCCESS
         } else {
-            Color::Gray
+            Color::Reset
         };
         let addr_mod = if cursor {
             Modifier::BOLD
@@ -794,8 +870,8 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(indicator, Style::default().fg(Color::Cyan)),
-            Span::styled(check, Style::default().fg(Color::Green)),
+            Span::styled(indicator, Style::default().fg(palette::ACCENT)),
+            Span::styled(check, Style::default().fg(palette::SUCCESS)),
             Span::styled(
                 truncate(&full_addr, addr_max),
                 Style::default().fg(addr_color).add_modifier(addr_mod),
@@ -812,25 +888,25 @@ fn render_pending(lines: &mut Vec<Line<'static>>, app: &App, view: View) {
         && let Some(text) = &app.pending_text
     {
         let first_line = text.lines().next().unwrap_or("");
-        let indent = 7 + 3 + 2; // " ⠿⠒⠒⠒⠒ " + "You" + "  "
+        let indent = 7 + 3 + 2;
         lines.push(Line::raw(""));
         lines.push(Line::from(vec![
             Span::styled(
                 format!(" {} ", app.spinner_5()),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(palette::MUTED),
             ),
             Span::styled(
                 "You  ",
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(palette::MUTED)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(first_line.to_string(), Style::default().fg(Color::DarkGray)),
+            Span::styled(first_line.to_string(), Style::default().fg(palette::MUTED)),
         ]));
         for body_line in text.lines().skip(1) {
             lines.push(Line::styled(
                 format!("{:indent$}{body_line}", ""),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(palette::MUTED),
             ));
         }
     }
@@ -846,46 +922,47 @@ fn render_messages(
     let my_ss58 = app.session.ss58();
     let mut last_date: Option<chrono::NaiveDate> = None;
     let mut last_sender: Option<&str> = None;
-    let mut last_indent: usize = 7; // fallback
+    let mut last_indent: usize = 7;
 
     for (i, msg) in messages.iter().enumerate() {
-        // Date separator between different days
         let msg_date = msg.timestamp.with_timezone(&chrono::Local).date_naive();
         if last_date.is_some() && last_date != Some(msg_date) {
             let date_str = msg_date.format("%B %-d, %Y").to_string();
             lines.push(date_separator(&date_str));
-            last_sender = None; // reset compaction after date separator
+            last_sender = None;
         }
         last_date = Some(msg_date);
 
-        // Gap indicator
         if msg.has_gap {
             let pulse = if app.frame % 8 < 4 {
-                Color::DarkGray
+                palette::MUTED
             } else {
-                Color::Cyan
+                palette::WARNING
             };
-            let gap_text = truncate(
-                " \u{25B2} Earlier messages may be missing \u{00B7} press r to load",
-                width,
+            let gap_str = format!(
+                " {} Earlier messages may be missing \u{00B7} press r to load",
+                super::icons::HISTORY
             );
+            let gap_text = truncate(&gap_str, width);
             lines.push(Line::from(vec![Span::styled(
                 gap_text,
                 Style::default().fg(pulse),
             )]));
-            last_sender = None; // reset compaction after gap
+            last_sender = None;
         }
 
         let search = &app.search_query;
         let is_empty_body = msg.body.is_empty();
         let has_match =
             !search.is_empty() && msg.body.to_lowercase().contains(&search.to_lowercase());
-        let body_color = if has_match { Color::Cyan } else { Color::White };
+        let body_color = if has_match {
+            palette::ACCENT
+        } else {
+            Color::Reset
+        };
         let display_body = if is_empty_body { "empty" } else { &msg.body };
         let first_body_line = display_body.lines().next().unwrap_or("");
 
-        // Compact consecutive: same sender omits timestamp+name
-        // But show timestamp if >5 minutes since last message
         let same_sender = last_sender == Some(&msg.sender_ss58);
         let time_gap = if i > 0 {
             (msg.timestamp - messages[i - 1].timestamp)
@@ -897,7 +974,7 @@ fn render_messages(
         };
 
         let body_color = if is_empty_body {
-            Color::DarkGray
+            palette::MUTED
         } else {
             body_color
         };
@@ -906,22 +983,21 @@ fn render_messages(
             lines.push(Line::from(vec![Span::styled(
                 format!("{:last_indent$}empty", ""),
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(palette::MUTED)
                     .add_modifier(Modifier::ITALIC),
             )]));
         } else if is_empty_body {
-            // Empty body with header (new sender or time gap): render header then italic "empty"
             let time = msg
                 .timestamp
                 .with_timezone(&chrono::Local)
-                .format(&app.timestamp_format)
+                .format(&app.config.timestamp_format)
                 .to_string();
             let (name, name_color) = if msg.is_mine {
-                ("You".to_string(), Color::Cyan)
+                ("You".to_string(), palette::ACCENT)
             } else {
                 (
                     truncate(&msg.sender_ss58, 16),
-                    sender_color(&msg.sender_ss58),
+                    palette::sender_color(&msg.sender_ss58),
                 )
             };
             let indent = 7 + name.len() + 2;
@@ -930,12 +1006,12 @@ fn render_messages(
                 pending_clicks.push((
                     lines.len(),
                     7,
-                    7 + name.len() as u16,
+                    7 + u16::try_from(name.len()).unwrap_or(u16::MAX),
                     msg.sender_ss58.clone(),
                 ));
             }
             lines.push(Line::from(vec![
-                Span::styled(format!(" {time} "), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!(" {time} "), Style::default().fg(palette::MUTED)),
                 Span::styled(
                     format!("{name}  "),
                     Style::default().fg(name_color).add_modifier(Modifier::BOLD),
@@ -943,12 +1019,11 @@ fn render_messages(
                 Span::styled(
                     "empty",
                     Style::default()
-                        .fg(Color::DarkGray)
+                        .fg(palette::MUTED)
                         .add_modifier(Modifier::ITALIC),
                 ),
             ]));
         } else if same_sender && !time_gap {
-            // Compact: just body at previous indent
             for body_line in display_body.lines() {
                 let prefixed = format!("{:last_indent$}{body_line}", "");
                 for wrapped in wrap_text(&prefixed, width, last_indent) {
@@ -956,11 +1031,10 @@ fn render_messages(
                 }
             }
         } else if same_sender && time_gap {
-            // Same sender but time gap: show timestamp, no name
             let time = msg
                 .timestamp
                 .with_timezone(&chrono::Local)
-                .format(&app.timestamp_format)
+                .format(&app.config.timestamp_format)
                 .to_string();
             let body_avail = width.saturating_sub(last_indent);
             let first_wrapped = if first_body_line.len() > body_avail && body_avail > 0 {
@@ -975,7 +1049,7 @@ fn render_messages(
 
             let pad = last_indent.saturating_sub(7);
             let mut spans = vec![
-                Span::styled(format!(" {time} "), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!(" {time} "), Style::default().fg(palette::MUTED)),
                 Span::styled(format!("{:pad$}", ""), Style::default()),
             ];
             let rendered = render_body_line(&first_wrapped.0, body_color, my_ss58);
@@ -1000,7 +1074,6 @@ fn render_messages(
                 }
             }
         } else {
-            // Blank line between different sender groups
             if i > 0 {
                 lines.push(Line::raw(""));
             }
@@ -1008,21 +1081,20 @@ fn render_messages(
             let time = msg
                 .timestamp
                 .with_timezone(&chrono::Local)
-                .format(&app.timestamp_format)
+                .format(&app.config.timestamp_format)
                 .to_string();
             let (name, name_color) = if msg.is_mine {
-                ("You".to_string(), Color::Cyan)
+                ("You".to_string(), palette::ACCENT)
             } else {
                 (
                     truncate(&msg.sender_ss58, 16),
-                    sender_color(&msg.sender_ss58),
+                    palette::sender_color(&msg.sender_ss58),
                 )
             };
 
             let indent = 7 + name.len() + 2;
             last_indent = indent;
 
-            // Wrap the first body line within available space after header
             let header_width = indent;
             let body_avail = width.saturating_sub(header_width);
             let first_wrapped = if first_body_line.len() > body_avail && body_avail > 0 {
@@ -1035,17 +1107,16 @@ fn render_messages(
                 (first_body_line.to_string(), None)
             };
 
-            // First line: timestamp + name + body (first part)
             if !msg.is_mine {
                 pending_clicks.push((
                     lines.len(),
                     7,
-                    7 + name.len() as u16,
+                    7 + u16::try_from(name.len()).unwrap_or(u16::MAX),
                     msg.sender_ss58.clone(),
                 ));
             }
             let mut first_spans = vec![
-                Span::styled(format!(" {time} "), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!(" {time} "), Style::default().fg(palette::MUTED)),
                 Span::styled(
                     format!("{name}  "),
                     Style::default().fg(name_color).add_modifier(Modifier::BOLD),
@@ -1057,14 +1128,12 @@ fn render_messages(
             }
             lines.push(Line::from(first_spans));
 
-            // Overflow from first line wrap
             if let Some(overflow) = first_wrapped.1 {
                 for wrapped in wrap_text(&format!("{:indent$}{overflow}", ""), width, indent) {
                     lines.push(render_body_line(&wrapped, body_color, my_ss58));
                 }
             }
 
-            // Continuation lines (explicit \n in message)
             for body_line in msg.body.lines().skip(1) {
                 let prefixed = format!("{:indent$}{body_line}", "");
                 for wrapped in wrap_text(&prefixed, width, indent) {
@@ -1077,59 +1146,144 @@ fn render_messages(
     }
 }
 
-fn header_line(title: &str, right: &str, width: usize) -> Line<'static> {
-    let title_max = width.saturating_sub(right.len() + 3);
+fn header_line(glyph: &str, title: &str, right: &str, width: usize) -> Line<'static> {
+    use unicode_width::UnicodeWidthStr;
+    let glyph_part = if glyph.is_empty() {
+        String::new()
+    } else {
+        format!("{glyph} ")
+    };
+    let glyph_w = UnicodeWidthStr::width(glyph_part.as_str());
+    let right_w = UnicodeWidthStr::width(right);
+    let title_max = width.saturating_sub(right_w + 3 + glyph_w);
     let truncated = truncate(title, title_max);
-    let pad = width.saturating_sub(truncated.len() + 2 + right.len());
+    let title_w = UnicodeWidthStr::width(truncated.as_str());
+    let pad = width.saturating_sub(2 + glyph_w + title_w + right_w);
     Line::from(vec![
         Span::styled(
-            format!(" {truncated}"),
+            format!(" {glyph_part}{truncated}"),
             Style::default()
-                .fg(Color::White)
+                .fg(Color::Reset)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" ".repeat(pad)),
-        Span::styled(right.to_string(), Style::default().fg(Color::DarkGray)),
+        Span::styled(right.to_string(), Style::default().fg(palette::MUTED)),
     ])
 }
 
 fn separator(width: u16) -> Line<'static> {
     Line::styled(
-        "\u{2500}".repeat(width as usize),
-        Style::default().fg(Color::DarkGray),
+        "\u{2500}".repeat(usize::from(width)),
+        Style::default().fg(palette::MUTED),
     )
 }
 
 fn dim(text: &str) -> Line<'static> {
-    Line::styled(text.to_string(), Style::default().fg(Color::DarkGray))
+    Line::styled(text.to_string(), Style::default().fg(palette::MUTED))
 }
 
 fn render_scrolled(frame: &mut ratatui::Frame, lines: Vec<Line<'_>>, scroll: usize, area: Rect) {
-    let visible = area.height as usize;
+    let visible = usize::from(area.height);
     let bottom = lines.len().saturating_sub(visible);
     let start = bottom.saturating_sub(scroll);
     let end = (start + visible).min(lines.len());
     frame.render_widget(Paragraph::new(lines[start..end].to_vec()), area);
 }
 
-fn record_sender_clicks(
-    app: &App,
+fn resolve_sender_clicks(
     pending: &[(usize, u16, u16, String)],
     lines_len: usize,
     scroll: usize,
     area: Rect,
-) {
-    let visible = area.height as usize;
+) -> Vec<(usize, u16, u16, String)> {
+    let visible = usize::from(area.height);
     let bottom = lines_len.saturating_sub(visible);
     let start = bottom.saturating_sub(scroll);
     let end = (start + visible).min(lines_len);
-    let mut regions = app.sender_click_regions.borrow_mut();
+    let mut out = Vec::new();
     for (line_idx, c0, c1, ss58) in pending {
         if *line_idx >= start && *line_idx < end {
-            let row = area.y + (*line_idx - start) as u16;
-            regions.push((row, area.x + *c0, area.x + *c1, ss58.clone()));
+            let row = area.y + u16::try_from(*line_idx - start).unwrap_or(u16::MAX);
+            out.push((usize::from(row), area.x + *c0, area.x + *c1, ss58.clone()));
         }
     }
+    out
 }
 
 use taolk::util::truncate;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_base58_accepts_alphabet() {
+        assert!(is_base58(b'1'));
+        assert!(is_base58(b'A'));
+        assert!(is_base58(b'z'));
+    }
+
+    #[test]
+    fn is_base58_rejects_zero_and_capital_o() {
+        assert!(!is_base58(b'0'));
+        assert!(!is_base58(b'O'));
+        assert!(!is_base58(b'I'));
+        assert!(!is_base58(b'l'));
+    }
+
+    #[test]
+    fn is_ss58_at_finds_at_zero() {
+        let ss58 = "5FHneW46xGXgs5AUiveU4sbTyGBzmstUspZC92UhjJM694ty";
+        assert_eq!(ss58.len(), 48);
+        assert!(is_ss58_at(ss58.as_bytes(), 0));
+    }
+
+    #[test]
+    fn is_ss58_at_rejects_non_5_prefix() {
+        let bad = "1FHneW46xGXgs5AUiveU4sbTyGBzmstUspZC92UhjJM694ty";
+        assert!(!is_ss58_at(bad.as_bytes(), 0));
+    }
+
+    #[test]
+    fn is_ss58_at_rejects_short_buffer() {
+        assert!(!is_ss58_at(b"5short", 0));
+    }
+
+    #[test]
+    fn wrap_text_short_returns_single_line() {
+        let lines = wrap_text("hello", 80, 0);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0], "hello");
+    }
+
+    #[test]
+    fn wrap_text_long_text_wraps_at_word_boundary() {
+        let lines = wrap_text("the quick brown fox", 10, 0);
+        assert!(lines.len() >= 2);
+        for line in &lines {
+            assert!(line.len() <= 12, "line too long: {line:?}");
+        }
+    }
+
+    #[test]
+    fn wrap_text_no_spaces_hard_breaks() {
+        let lines = wrap_text("aaaaaaaaaaaaaaaa", 5, 0);
+        assert!(lines.len() >= 2);
+    }
+
+    #[test]
+    fn wrap_text_continuation_lines_are_indented() {
+        let lines = wrap_text("the quick brown fox jumps over", 10, 4);
+        assert!(lines.len() >= 2);
+        for line in lines.iter().skip(1) {
+            assert!(line.starts_with("    "), "expected indent on: {line:?}");
+        }
+    }
+
+    #[test]
+    fn wrap_text_empty_returns_single_empty() {
+        let lines = wrap_text("", 80, 0);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0], "");
+    }
+}

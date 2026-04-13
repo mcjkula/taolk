@@ -1,9 +1,13 @@
+use std::collections::HashSet;
 use std::sync::mpsc::Sender;
 
-use curve25519_dalek::scalar::Scalar;
-use samp::{ContentType, decode_remark};
+use samp::Remark;
 
+use crate::chain;
+use crate::error::ChainError;
 use crate::event::Event;
+use crate::reader::{self, RemarkSource};
+use crate::secret::DecryptionKeys;
 use crate::types::{BlockRef, Pubkey};
 
 #[derive(serde::Deserialize)]
@@ -13,37 +17,32 @@ struct HealthResp {
 }
 
 #[derive(serde::Deserialize)]
-struct ChannelResp {
-    block: u32,
-    index: u16,
-    creator: String,
-    name: String,
-    description: String,
+struct Hint {
+    #[serde(rename = "block")]
+    b: u32,
+    #[serde(rename = "index")]
+    i: u16,
 }
 
-#[derive(serde::Deserialize)]
-struct RemarkResp {
-    block: u32,
-    index: u16,
-    sender: String,
-    timestamp: u64,
-    remark: String,
-}
-
-/// Sync historical data from a SAMP mirror. Produces events on the same channel as the chain reader.
+#[allow(clippy::too_many_arguments)]
 pub async fn sync(
-    mirror_url: &str,
-    expected_ss58_prefix: u16,
-    seed: &[u8; 32],
+    mirror_urls: Vec<String>,
+    node_url: &str,
+    expected_chain: &crate::types::ChainName,
+    expected_ss58_prefix: samp::Ss58Prefix,
+    keys: &DecryptionKeys,
     my_pubkey: &Pubkey,
     subscribed_channels: Vec<BlockRef>,
     last_block: u64,
     tx: Sender<Event>,
 ) {
+    let _ = tx.send(Event::Status("Catching up...".into()));
     if let Err(e) = sync_inner(
-        mirror_url,
+        mirror_urls,
+        node_url,
+        expected_chain,
         expected_ss58_prefix,
-        seed,
+        keys,
         my_pubkey,
         subscribed_channels,
         last_block,
@@ -51,366 +50,300 @@ pub async fn sync(
     )
     .await
     {
-        let _ = tx.send(Event::Error(format!("Could not reach mirror: {e}")));
+        let _ = tx.send(Event::Error(format!("Could not reach mirrors: {e}")));
     }
     let _ = tx.send(Event::CatchupComplete);
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn sync_inner(
-    mirror_url: &str,
-    expected_ss58_prefix: u16,
-    seed: &[u8; 32],
+    mirror_urls: Vec<String>,
+    node_url: &str,
+    expected_chain: &crate::types::ChainName,
+    expected_ss58_prefix: samp::Ss58Prefix,
+    keys: &DecryptionKeys,
     my_pubkey: &Pubkey,
     subscribed_channels: Vec<BlockRef>,
     last_block: u64,
     tx: &Sender<Event>,
-) -> Result<(), String> {
-    let _ = tx.send(Event::Status("Catching up...".into()));
+) -> Result<(), ChainError> {
     let client = reqwest::Client::new();
-    let base = mirror_url.trim_end_matches('/');
+    let bases: Vec<String> = mirror_urls
+        .iter()
+        .map(|u| u.trim_end_matches('/').to_string())
+        .collect();
 
-    // 1. Health check: verify SS58 prefix matches (same chain)
-    let health: HealthResp = client
-        .get(format!("{base}/v1/health"))
-        .send()
-        .await
-        .map_err(|e| format!("health: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("health json: {e}"))?;
-
-    if health.ss58_prefix != expected_ss58_prefix {
-        return Err(format!(
-            "chain mismatch: mirror serves '{}' (SS58 prefix {}), expected prefix {}",
-            health.chain, health.ss58_prefix, expected_ss58_prefix
-        ));
+    let healthy = check_health_all(&client, &bases, expected_chain, expected_ss58_prefix).await;
+    if healthy.is_empty() {
+        let prefix = expected_ss58_prefix.get();
+        return Err(ChainError::Http(format!(
+            "no healthy mirrors serving '{}' (ss58 {prefix})",
+            expected_chain.as_str()
+        )));
     }
 
-    // 2. Fetch all channels
-    let channels: Vec<ChannelResp> = client
-        .get(format!("{base}/v1/channels"))
-        .send()
-        .await
-        .map_err(|e| format!("channels: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("channels json: {e}"))?;
+    let channel_hints = fetch_channel_directory_hints(&client, &healthy).await;
+    let message_hints =
+        fetch_message_hints(&client, &healthy, last_block, &subscribed_channels).await;
 
-    for ch in &channels {
-        let _ = tx.send(Event::ChannelDiscovered {
-            name: ch.name.clone(),
-            description: ch.description.clone(),
-            creator_ss58: ch.creator.clone(),
-            channel_ref: BlockRef {
-                block: ch.block,
-                index: ch.index,
-            },
-        });
-    }
-
-    // 3. Fetch messages for subscribed channels
-    for ch in &subscribed_channels {
-        let (ch_block, ch_index) = (ch.block, ch.index);
-        let remarks: Vec<RemarkResp> = client
-            .get(format!(
-                "{base}/v1/channels/{ch_block}/{ch_index}/messages?after={last_block}"
-            ))
-            .send()
-            .await
-            .map_err(|e| format!("channel messages: {e}"))?
-            .json()
-            .await
-            .map_err(|e| format!("channel messages json: {e}"))?;
-
-        for r in remarks {
-            process_remark_from_mirror(&r, tx);
-        }
-    }
-
-    // 4. Fetch inbox remarks for every SAMP content type and dispatch by kind.
-    let scalar = samp::sr25519_signing_scalar(seed);
-
-    for r in fetch_remarks(&client, base, 0x10, last_block, "public").await? {
-        process_public_remark(&r, my_pubkey, tx);
-    }
-    for r in fetch_remarks(&client, base, 0x11, last_block, "encrypted").await? {
-        process_encrypted_remark(&r, &scalar, my_pubkey, seed, tx);
-    }
-    for r in fetch_remarks(&client, base, 0x12, last_block, "thread").await? {
-        process_encrypted_remark(&r, &scalar, my_pubkey, seed, tx);
-    }
-    for r in fetch_remarks(&client, base, 0x15, last_block, "group").await? {
-        process_group_remark(&r, &scalar, tx);
-    }
+    resolve_channel_hints(node_url, channel_hints, tx).await;
+    resolve_message_hints(node_url, message_hints, my_pubkey, keys, tx).await;
 
     let _ = tx.send(Event::Status("All caught up".into()));
     Ok(())
 }
 
-async fn fetch_remarks(
-    client: &reqwest::Client,
-    base: &str,
-    type_byte: u8,
-    after: u64,
-    label: &str,
-) -> Result<Vec<RemarkResp>, String> {
-    client
-        .get(format!(
-            "{base}/v1/remarks?type=0x{type_byte:02x}&after={after}"
-        ))
-        .send()
-        .await
-        .map_err(|e| format!("{label}: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("{label} json: {e}"))
+#[allow(clippy::too_many_arguments)]
+pub async fn fetch_channel(
+    mirror_urls: Vec<String>,
+    node_url: &str,
+    expected_chain: &crate::types::ChainName,
+    expected_ss58_prefix: samp::Ss58Prefix,
+    channel_ref: BlockRef,
+    my_pubkey: &Pubkey,
+    keys: &DecryptionKeys,
+    tx: Sender<Event>,
+) {
+    let client = reqwest::Client::new();
+    let bases: Vec<String> = mirror_urls
+        .iter()
+        .map(|u| u.trim_end_matches('/').to_string())
+        .collect();
+    let healthy = check_health_all(&client, &bases, expected_chain, expected_ss58_prefix).await;
+    if healthy.is_empty() {
+        let prefix = expected_ss58_prefix.get();
+        let _ = tx.send(Event::Error(format!(
+            "no healthy mirrors serving '{}' (ss58 {prefix})",
+            expected_chain.as_str()
+        )));
+        return;
+    }
+    let (b, i) = (channel_ref.block().get(), channel_ref.index().get());
+    let hints = fetch_per_channel_hints(&client, &healthy, b, i, 0).await;
+    resolve_message_hints(node_url, hints, my_pubkey, keys, &tx).await;
+    let _ = tx.send(Event::CatchupComplete);
 }
 
-/// Fetch a single channel's messages from the mirror. Called when subscribing or pressing `r`.
-pub async fn fetch_channel(mirror_url: &str, channel_ref: BlockRef, tx: Sender<Event>) {
-    let base = mirror_url.trim_end_matches('/');
-    let client = reqwest::Client::new();
-    let (ch_block, ch_index) = (channel_ref.block, channel_ref.index);
-
-    let remarks: Vec<RemarkResp> = match client
-        .get(format!(
-            "{base}/v1/channels/{ch_block}/{ch_index}/messages?after=0"
-        ))
-        .send()
-        .await
-    {
-        Ok(resp) => match resp.json().await {
-            Ok(r) => r,
-            Err(e) => {
-                let _ = tx.send(Event::Error(format!("Could not load messages: {e}")));
-                return;
+async fn check_health_all(
+    client: &reqwest::Client,
+    bases: &[String],
+    expected_chain: &crate::types::ChainName,
+    expected_prefix: samp::Ss58Prefix,
+) -> Vec<String> {
+    let expected_chain_str = expected_chain.as_str().to_string();
+    let expected_prefix_u16 = expected_prefix.get();
+    let futures = bases.iter().map(|base| {
+        let expected_chain_str = expected_chain_str.clone();
+        async move {
+            let resp: HealthResp = client
+                .get(format!("{base}/v1/health"))
+                .send()
+                .await
+                .ok()?
+                .json()
+                .await
+                .ok()?;
+            if resp.chain == expected_chain_str && resp.ss58_prefix == expected_prefix_u16 {
+                Some(base.clone())
+            } else {
+                None
             }
-        },
+        }
+    });
+    futures_util::future::join_all(futures)
+        .await
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+async fn fetch_channel_directory_hints(
+    client: &reqwest::Client,
+    bases: &[String],
+) -> HashSet<(u32, u16)> {
+    let futures = bases.iter().map(|base| async move {
+        let hints: Vec<Hint> = client
+            .get(format!("{base}/v1/channels"))
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()?;
+        Some(hints)
+    });
+    let mut union = HashSet::new();
+    for hints in futures_util::future::join_all(futures)
+        .await
+        .into_iter()
+        .flatten()
+    {
+        for h in hints {
+            union.insert((h.b, h.i));
+        }
+    }
+    union
+}
+
+async fn fetch_message_hints(
+    client: &reqwest::Client,
+    bases: &[String],
+    last_block: u64,
+    subscribed_channels: &[BlockRef],
+) -> HashSet<(u32, u16)> {
+    let mut union = HashSet::new();
+
+    for ch in subscribed_channels {
+        for hint in fetch_per_channel_hints(
+            client,
+            bases,
+            ch.block().get(),
+            ch.index().get(),
+            last_block,
+        )
+        .await
+        {
+            union.insert(hint);
+        }
+    }
+
+    for type_byte in [0x10u8, 0x11, 0x12, 0x15] {
+        let futures = bases.iter().map(|base| async move {
+            let hints: Vec<Hint> = client
+                .get(format!(
+                    "{base}/v1/remarks?type=0x{type_byte:02x}&after={last_block}"
+                ))
+                .send()
+                .await
+                .ok()?
+                .json()
+                .await
+                .ok()?;
+            Some(hints)
+        });
+        for hints in futures_util::future::join_all(futures)
+            .await
+            .into_iter()
+            .flatten()
+        {
+            for h in hints {
+                union.insert((h.b, h.i));
+            }
+        }
+    }
+
+    union
+}
+
+async fn fetch_per_channel_hints(
+    client: &reqwest::Client,
+    bases: &[String],
+    ch_block: u32,
+    ch_index: u16,
+    last_block: u64,
+) -> HashSet<(u32, u16)> {
+    let futures = bases.iter().map(|base| async move {
+        let hints: Vec<Hint> = client
+            .get(format!(
+                "{base}/v1/channels/{ch_block}/{ch_index}/messages?after={last_block}"
+            ))
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()?;
+        Some(hints)
+    });
+    let mut union = HashSet::new();
+    for hints in futures_util::future::join_all(futures)
+        .await
+        .into_iter()
+        .flatten()
+    {
+        for h in hints {
+            union.insert((h.b, h.i));
+        }
+    }
+    union
+}
+
+async fn resolve_message_hints(
+    node_url: &str,
+    hints: HashSet<(u32, u16)>,
+    my_pubkey: &Pubkey,
+    keys: &DecryptionKeys,
+    tx: &Sender<Event>,
+) {
+    if hints.is_empty() {
+        return;
+    }
+    let block_nums: Vec<u32> = hints
+        .iter()
+        .map(|&(b, _)| b)
+        .collect::<HashSet<u32>>()
+        .into_iter()
+        .collect();
+    let blocks = match chain::fetch_blocks(node_url, &block_nums).await {
+        Ok(b) => b,
         Err(e) => {
-            let _ = tx.send(Event::Error(format!("Could not load messages: {e}")));
+            let _ = tx.send(Event::Error(format!("Resolve hints: {e}")));
             return;
         }
     };
-
-    for r in remarks {
-        process_remark_from_mirror(&r, &tx);
-    }
-}
-
-fn process_remark_from_mirror(r: &RemarkResp, tx: &Sender<Event>) {
-    let remark_bytes = match hex::decode(&r.remark) {
-        Ok(b) => b,
-        Err(_) => return,
-    };
-    let remark = match decode_remark(&remark_bytes) {
-        Ok(r) => r,
-        Err(_) => return,
-    };
-
-    if remark.content_type == ContentType::Channel
-        && let Ok((reply_to, continues, body_bytes)) = samp::decode_channel_content(&remark.content)
-        && let Ok(body) = String::from_utf8(body_bytes.to_vec())
-    {
-        let sender = crate::util::pubkey_from_ss58(&r.sender).unwrap_or(Pubkey::ZERO);
-        let sender_ss58 = if sender == Pubkey::ZERO {
-            r.sender.clone()
-        } else {
-            crate::util::ss58_short(&sender)
+    for (block_num, ext_index) in hints {
+        let Some(block) = blocks.get(&block_num) else {
+            continue;
         };
-        let _ = tx.send(Event::NewChannelMessage {
-            sender,
-            sender_ss58,
-            channel_ref: samp::channel_ref_from_recipient(&remark.recipient),
-            body,
-            reply_to,
-            continues,
-            block_number: r.block,
-            ext_index: r.index,
-            timestamp: r.timestamp,
-        });
+        let Some(ext_hex) = block.extrinsics.get(usize::from(ext_index)) else {
+            continue;
+        };
+        if let Some(source) =
+            reader::source_from_extrinsic(ext_hex, block_num, ext_index, block.timestamp_ms)
+        {
+            reader::process_remark(&source, my_pubkey, keys, tx);
+        }
     }
 }
 
-fn process_public_remark(r: &RemarkResp, my_pubkey: &Pubkey, tx: &Sender<Event>) {
-    let bytes = match hex::decode(&r.remark) {
-        Ok(b) => b,
-        Err(_) => return,
-    };
-    let remark = match decode_remark(&bytes) {
-        Ok(r) => r,
-        Err(_) => return,
-    };
-    if remark.content_type != ContentType::Public {
+async fn resolve_channel_hints(node_url: &str, hints: HashSet<(u32, u16)>, tx: &Sender<Event>) {
+    if hints.is_empty() {
         return;
     }
-    let sender = crate::util::pubkey_from_ss58(&r.sender).unwrap_or(Pubkey::ZERO);
-    if remark.recipient != my_pubkey.0 && sender != *my_pubkey {
+    let block_nums: Vec<u32> = hints
+        .iter()
+        .map(|&(b, _)| b)
+        .collect::<HashSet<u32>>()
+        .into_iter()
+        .collect();
+    let blocks = match chain::fetch_blocks(node_url, &block_nums).await {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+    for (block_num, ext_index) in hints {
+        let Some(block) = blocks.get(&block_num) else {
+            continue;
+        };
+        let Some(ext_hex) = block.extrinsics.get(usize::from(ext_index)) else {
+            continue;
+        };
+        let Some(source) =
+            reader::source_from_extrinsic(ext_hex, block_num, ext_index, block.timestamp_ms)
+        else {
+            continue;
+        };
+        emit_channel_create(&source, tx);
+    }
+}
+
+fn emit_channel_create(source: &RemarkSource, tx: &Sender<Event>) {
+    let Remark::ChannelCreate { name, description } = &source.remark else {
         return;
-    }
-    let _ = tx.send(Event::NewMessage {
-        sender,
-        content_type: remark.content_type.to_byte(),
-        recipient: Pubkey(remark.recipient),
-        decrypted_body: String::from_utf8(remark.content).ok(),
-        thread_ref: BlockRef::ZERO,
-        reply_to: BlockRef::ZERO,
-        continues: BlockRef::ZERO,
-        block_number: r.block,
-        ext_index: r.index,
-        timestamp: r.timestamp,
+    };
+    let _ = tx.send(Event::ChannelDiscovered {
+        name: name.as_str().to_string(),
+        description: description.as_str().to_string(),
+        creator_ss58: crate::util::ss58_short(&source.sender),
+        channel_ref: source.at,
     });
-}
-
-fn process_encrypted_remark(
-    r: &RemarkResp,
-    scalar: &Scalar,
-    my_pubkey: &Pubkey,
-    seed: &[u8; 32],
-    tx: &Sender<Event>,
-) {
-    let remark_bytes = match hex::decode(&r.remark) {
-        Ok(b) => b,
-        Err(_) => return,
-    };
-    let remark = match decode_remark(&remark_bytes) {
-        Ok(r) => r,
-        Err(_) => return,
-    };
-
-    // Check view tag (recipient path)
-    let tag = match samp::check_view_tag(&remark, scalar) {
-        Ok(t) => t,
-        Err(_) => return,
-    };
-
-    // Try recipient decryption first
-    let (plaintext, is_mine) = if tag == remark.view_tag {
-        match samp::decrypt(&remark, scalar) {
-            Ok(pt) => (pt, false),
-            Err(_) => return,
-        }
-    } else {
-        // Try sender self-decryption
-        match samp::decrypt_as_sender(&remark, seed) {
-            Ok(pt) => {
-                // Verify the unsealed recipient is valid
-                match samp::unseal_recipient(&remark, seed) {
-                    Ok(_) => (pt, true),
-                    Err(_) => return,
-                }
-            }
-            Err(_) => return, // Not for us and not from us
-        }
-    };
-
-    let ct = remark.content_type.to_byte();
-    let mut recipient = remark.recipient;
-    if is_mine && let Ok(r) = samp::unseal_recipient(&remark, seed) {
-        recipient = r;
-    }
-
-    let (body, thread_ref, reply_to, continues) = if ct & 0x0F == 0x02 {
-        match samp::decode_thread_content(&plaintext) {
-            Ok((thread, reply_to, continues, body_bytes)) => (
-                String::from_utf8(body_bytes.to_vec()).ok(),
-                thread,
-                reply_to,
-                continues,
-            ),
-            Err(_) => return,
-        }
-    } else {
-        (
-            String::from_utf8(plaintext).ok(),
-            BlockRef::ZERO,
-            BlockRef::ZERO,
-            BlockRef::ZERO,
-        )
-    };
-
-    let _ = tx.send(Event::NewMessage {
-        sender: if is_mine { *my_pubkey } else { Pubkey::ZERO },
-        content_type: ct,
-        recipient: Pubkey(recipient),
-        decrypted_body: body,
-        thread_ref,
-        reply_to,
-        continues,
-        block_number: r.block,
-        ext_index: r.index,
-        timestamp: r.timestamp,
-    });
-}
-
-fn process_group_remark(r: &RemarkResp, scalar: &Scalar, tx: &Sender<Event>) {
-    let remark_bytes = match hex::decode(&r.remark) {
-        Ok(b) => b,
-        Err(_) => return,
-    };
-    let remark = match decode_remark(&remark_bytes) {
-        Ok(r) => r,
-        Err(_) => return,
-    };
-
-    let plaintext = match samp::decrypt_from_group(&remark.content, scalar, &remark.nonce, None) {
-        Ok(pt) => pt,
-        Err(_) => return, // Not for us
-    };
-
-    let (group_ref, reply_to, continues, body_bytes) = match samp::decode_group_content(&plaintext)
-    {
-        Ok(r) => r,
-        Err(_) => return,
-    };
-
-    let sender_pubkey = crate::util::pubkey_from_ss58(&r.sender).unwrap_or(Pubkey::ZERO);
-
-    if group_ref.is_zero() {
-        let (members, first_msg) = match samp::decode_group_members(body_bytes) {
-            Ok(r) => r,
-            Err(_) => return,
-        };
-        let members = members.into_iter().map(Pubkey).collect();
-        let _ = tx.send(Event::GroupDiscovered {
-            creator_pubkey: sender_pubkey,
-            group_ref: BlockRef {
-                block: r.block,
-                index: r.index,
-            },
-            members,
-        });
-        let body = String::from_utf8(first_msg.to_vec()).unwrap_or_default();
-        let sender_ss58 = crate::util::ss58_short(&sender_pubkey);
-        let _ = tx.send(Event::NewGroupMessage {
-            sender: sender_pubkey,
-            sender_ss58,
-            group_ref: BlockRef {
-                block: r.block,
-                index: r.index,
-            },
-            body,
-            reply_to: BlockRef::ZERO,
-            continues: BlockRef::ZERO,
-            block_number: r.block,
-            ext_index: r.index,
-            timestamp: r.timestamp,
-        });
-    } else {
-        let body = match String::from_utf8(body_bytes.to_vec()) {
-            Ok(b) => b,
-            Err(_) => return,
-        };
-        let sender_ss58 = crate::util::ss58_short(&sender_pubkey);
-        let _ = tx.send(Event::NewGroupMessage {
-            sender: sender_pubkey,
-            sender_ss58,
-            group_ref,
-            body,
-            reply_to,
-            continues,
-            block_number: r.block,
-            ext_index: r.index,
-            timestamp: r.timestamp,
-        });
-    }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "taolk"
-version = "1.2.1"
+version = "2.0.0"
 edition = "2024"
 license = "MIT"
 description = "Encrypted messaging client for Bittensor"
@@ -20,10 +20,9 @@ strip = true
 codegen-units = 1
 
 [dependencies]
-samp = { git = "https://github.com/samp-org/samp", subdirectory = "rust" }
-tokio = { version = "1", features = ["full"] }
+samp = { git = "https://github.com/samp-org/samp", tag = "v1.1", subdirectory = "rust" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "net", "time", "io-util"] }
 schnorrkel = "0.11"
-curve25519-dalek = { version = "4", features = ["digest"] }
 hkdf = "0.12"
 sha2 = "0.10"
 chacha20poly1305 = "0.10"
@@ -32,12 +31,12 @@ serde_json = "1"
 hex = "0.4"
 futures-util = "0.3"
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
-parity-scale-codec = { version = "3.7", features = ["derive"] }
 chrono = "0.4"
 blake2 = "0.10"
 getrandom = "0.3"
 rusqlite = { version = "0.32", features = ["bundled"] }
 dirs = "6"
+unicode-width = "0.2"
 argon2 = "0.5"
 bip39 = "2"
 pbkdf2 = "0.12"
@@ -49,11 +48,12 @@ thiserror = "2"
 zeroize = { version = "1", features = ["derive"] }
 rodio = { version = "0.22", default-features = false, features = ["playback", "vorbis"], optional = true }
 
-# TUI-only dependencies (gated behind "tui" feature)
 ratatui = { version = "0.30", optional = true }
 crossterm = { version = "0.29", optional = true }
 rpassword = { version = "7", optional = true }
 clap = { version = "4", features = ["derive", "env"], optional = true }
+nucleo-matcher = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
+trybuild = "1"

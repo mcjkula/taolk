@@ -1,13 +1,28 @@
-use std::cell::RefCell;
+use crate::ui::composer::TextBuffer;
+use crate::ui::overlay::jump::JumpState;
+use crate::ui::overlay::palette::PaletteState;
 use std::time::Instant;
 use taolk::audio::Audio;
+use taolk::event::ConnState;
 use taolk::session::Session;
 use taolk::types::{BlockRef, Pubkey};
 
-#[derive(PartialEq, Clone, Copy)]
-pub enum Mode {
-    Normal,
-    Insert,
+pub struct AppConfig {
+    pub sidebar_width: u16,
+    pub timestamp_format: String,
+    pub date_format: String,
+    pub audio: Audio,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Focus {
+    Composer,
+    Timeline,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Overlay {
+    Help,
     Confirm,
     Compose,
     Message,
@@ -16,9 +31,19 @@ pub enum Mode {
     CreateGroupMembers,
     Search,
     SenderPicker,
+    CommandPalette,
+    FuzzyJump,
 }
 
-#[derive(PartialEq, Clone, Copy)]
+pub struct LockedOutbound {
+    pub sender: Pubkey,
+    pub block_number: u32,
+    pub ext_index: u16,
+    pub timestamp: crate::types::Timestamp,
+    pub remark_bytes: samp::RemarkBytes,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum View {
     Inbox,
     Outbox,
@@ -31,52 +56,65 @@ pub enum View {
 pub struct App {
     pub session: Session,
     pub running: bool,
-    pub mode: Mode,
+    pub focus: Focus,
+    pub overlay: Option<Overlay>,
+    pub focus_before_overlay: Focus,
     pub view: View,
     pub show_sidebar: bool,
-    pub input: String,
-    pub cursor_pos: usize,
+    pub input: TextBuffer,
     pub channel_dir_cursor: usize,
     pub channel_dir_input: String,
     pub status_message: Option<(String, Instant, u64, bool)>,
-    pub pending_remark: Option<Vec<u8>>,
+    pub pending_remark: Option<samp::RemarkBytes>,
     pub pending_text: Option<String>,
     pub pending_fee: Option<String>,
     pub pending_view: Option<View>,
+    pub pending_msg_type: Option<samp::ContentType>,
+    pub pending_send_text: Option<String>,
+    pub locked_outbound: Vec<LockedOutbound>,
+    pub pending_unlock_all: bool,
+    pub lock_requested: bool,
+    pub wallet_switch_requested: bool,
+    pub refresh_requested: bool,
+    pub pending_fetches: Vec<BlockRef>,
     pub frame: u32,
     pub sending: bool,
+    pub ephemeral_signing: Option<std::sync::Arc<taolk::secret::SigningKey>>,
     pub msg_recipient: Option<(Pubkey, String)>,
-    pub msg_type: Option<u8>,
+    pub msg_type: Option<samp::ContentType>,
     pub scroll_offset: usize,
+    pub help_scroll: u16,
     pub quit_confirm: bool,
     pub search_query: String,
     pub contact_idx: usize,
     pub pending_channel_name: Option<String>,
     pub pending_channel_desc: Option<String>,
+    pub pending_channel_create: bool,
     pub pending_group_members: Vec<(Pubkey, String)>,
     pub last_fee: Option<u128>,
     pub block_changed_at: u32,
     pub balance_changed_at: u32,
     pub balance_decreased: bool,
-    pub sidebar_width: u16,
-    pub timestamp_format: String,
-    pub date_format: String,
-    pub audio: Audio,
+    pub config: AppConfig,
     pub sound_armed: bool,
     pub picker_senders: Vec<(String, Option<Pubkey>)>,
-    pub sender_click_regions: RefCell<Vec<(u16, u16, u16, String)>>,
+    pub sender_click_regions: Vec<(u16, u16, u16, String)>,
+    pub connection: ConnState,
+    pub palette: Option<PaletteState>,
+    pub jump: Option<JumpState>,
 }
 
 impl App {
-    pub fn new(session: Session, audio: Audio) -> Self {
+    pub fn new(session: Session, config: AppConfig) -> Self {
         Self {
             session,
             running: true,
-            mode: Mode::Normal,
+            focus: Focus::Timeline,
+            overlay: None,
+            focus_before_overlay: Focus::Timeline,
             view: View::Inbox,
             show_sidebar: true,
-            input: String::new(),
-            cursor_pos: 0,
+            input: TextBuffer::new(),
             channel_dir_cursor: 0,
             channel_dir_input: String::new(),
             status_message: None,
@@ -84,29 +122,60 @@ impl App {
             pending_text: None,
             pending_fee: None,
             pending_view: None,
+            pending_msg_type: None,
+            pending_send_text: None,
+            locked_outbound: Vec::new(),
+            pending_unlock_all: false,
+            lock_requested: false,
+            wallet_switch_requested: false,
+            refresh_requested: false,
+            pending_fetches: Vec::new(),
             frame: 0,
             sending: false,
+            ephemeral_signing: None,
             msg_recipient: None,
             msg_type: None,
             scroll_offset: 0,
+            help_scroll: 0,
             quit_confirm: false,
             search_query: String::new(),
             contact_idx: 0,
             pending_channel_name: None,
             pending_channel_desc: None,
+            pending_channel_create: false,
             pending_group_members: Vec::new(),
             last_fee: None,
             block_changed_at: 0,
             balance_changed_at: 0,
             balance_decreased: false,
-            sidebar_width: 28,
-            timestamp_format: "%H:%M".into(),
-            date_format: "%Y-%m-%d %H:%M".into(),
-            audio,
+            config,
             sound_armed: false,
             picker_senders: Vec::new(),
-            sender_click_regions: RefCell::new(Vec::new()),
+            sender_click_regions: Vec::new(),
+            connection: ConnState::Connected,
+            palette: None,
+            jump: None,
         }
+    }
+
+    pub fn open_palette(&mut self) {
+        self.palette = Some(PaletteState::new());
+        self.enter_overlay(Overlay::CommandPalette);
+    }
+
+    pub fn close_palette(&mut self) {
+        self.palette = None;
+        self.close_overlay();
+    }
+
+    pub fn open_jump(&mut self) {
+        self.jump = Some(JumpState::new(self));
+        self.enter_overlay(Overlay::FuzzyJump);
+    }
+
+    pub fn close_jump(&mut self) {
+        self.jump = None;
+        self.close_overlay();
     }
 
     pub fn set_status(&mut self, msg: impl Into<String>) {
@@ -115,6 +184,63 @@ impl App {
 
     pub fn set_error(&mut self, msg: impl Into<String>) {
         self.status_message = Some((msg.into(), Instant::now(), 30, true));
+    }
+
+    pub fn set_chain_error(&mut self, raw: &str) {
+        let translated = self.session.chain_info.errors.humanize_rpc_error(raw);
+        self.set_error(translated);
+    }
+
+    pub fn reset_input(&mut self) {
+        self.input.clear();
+    }
+
+    pub fn default_focus_for_view(&self) -> Focus {
+        match self.view {
+            View::Thread(_) | View::Channel(_) | View::Group(_) => Focus::Composer,
+            View::Inbox | View::Outbox | View::ChannelDir => Focus::Timeline,
+        }
+    }
+
+    pub fn enter_overlay(&mut self, overlay: Overlay) {
+        self.reset_input();
+        self.focus_before_overlay = self.focus;
+        self.overlay = Some(overlay);
+    }
+
+    pub fn close_overlay(&mut self) {
+        self.overlay = None;
+        self.focus = self.focus_before_overlay;
+    }
+
+    pub fn close_overlay_to(&mut self, focus: Focus) {
+        self.overlay = None;
+        self.focus = focus;
+        self.focus_before_overlay = focus;
+    }
+
+    pub fn focus_composer(&mut self) {
+        self.focus = Focus::Composer;
+    }
+
+    pub fn focus_timeline(&mut self) {
+        self.focus = Focus::Timeline;
+    }
+
+    pub fn is_overlay(&self, o: Overlay) -> bool {
+        self.overlay == Some(o)
+    }
+
+    pub fn is_composing(&self) -> bool {
+        self.overlay.is_none() && self.focus == Focus::Composer
+    }
+
+    pub fn check_not_sending(&mut self) -> bool {
+        if self.sending {
+            self.set_error("Still sending previous message");
+            return false;
+        }
+        true
     }
 
     pub fn current_status(&self) -> Option<(&str, bool)> {
@@ -131,13 +257,13 @@ impl App {
 
     pub fn spinner_1(&self) -> char {
         const FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-        FRAMES[self.frame as usize % FRAMES.len()]
+        FRAMES[usize::try_from(self.frame).unwrap_or(0) % FRAMES.len()]
     }
 
     pub fn spinner_5(&self) -> &'static str {
         const POS: &[&str] = &["⠿⠒⠒⠒⠒", "⠒⠿⠒⠒⠒", "⠒⠒⠿⠒⠒", "⠒⠒⠒⠿⠒", "⠒⠒⠒⠒⠿"];
         const EASE: &[usize] = &[0, 0, 1, 2, 3, 4, 4, 3, 2, 1];
-        POS[EASE[self.frame as usize % EASE.len()]]
+        POS[EASE[usize::try_from(self.frame).unwrap_or(0) % EASE.len()]]
     }
 
     pub fn spinner_16(&self) -> &'static str {
@@ -163,7 +289,7 @@ impl App {
             0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 15, 15, 14, 13, 12, 11, 10,
             9, 8, 7, 6, 5, 4, 3, 2, 1,
         ];
-        POS[EASE[self.frame as usize % EASE.len()]]
+        POS[EASE[usize::try_from(self.frame).unwrap_or(0) % EASE.len()]]
     }
 
     pub fn is_busy(&self) -> bool {
@@ -171,23 +297,48 @@ impl App {
     }
 
     pub fn save_draft(&mut self) {
+        use taolk::db::ConversationKind;
+        let key: Option<(ConversationKind, BlockRef)> = match self.view {
+            View::Thread(i) => self
+                .session
+                .threads
+                .get(i)
+                .map(|t| (ConversationKind::Thread, t.thread_ref)),
+            View::Channel(i) => self
+                .session
+                .channels
+                .get(i)
+                .map(|c| (ConversationKind::Channel, c.channel_ref)),
+            View::Group(i) => self
+                .session
+                .groups
+                .get(i)
+                .map(|g| (ConversationKind::Group, g.group_ref)),
+            _ => None,
+        };
+        let draft = self.input.as_str().to_string();
         match self.view {
             View::Thread(i) => {
                 if let Some(thread) = self.session.threads.get_mut(i) {
-                    thread.draft = self.input.clone();
+                    thread.draft = draft.clone();
                 }
             }
             View::Channel(i) => {
                 if let Some(ch) = self.session.channels.get_mut(i) {
-                    ch.draft = self.input.clone();
+                    ch.draft = draft.clone();
                 }
             }
             View::Group(i) => {
                 if let Some(g) = self.session.groups.get_mut(i) {
-                    g.draft = self.input.clone();
+                    g.draft = draft.clone();
                 }
             }
             _ => {}
+        }
+        if let Some((kind, bref)) = key {
+            self.session
+                .db
+                .save_draft(kind, bref.block().get(), bref.index().get(), &draft);
         }
     }
 
@@ -198,8 +349,7 @@ impl App {
             View::Group(i) => self.session.groups.get(i).map(|g| g.draft.clone()),
             _ => None,
         };
-        self.input = draft.unwrap_or_default();
-        self.cursor_pos = self.input.len();
+        self.input.set(draft.unwrap_or_default());
     }
 
     pub fn current_draft(&self) -> Option<&str> {
@@ -234,6 +384,25 @@ impl App {
     }
 
     pub fn clear_draft(&mut self) {
+        use taolk::db::ConversationKind;
+        let key: Option<(ConversationKind, BlockRef)> = match self.view {
+            View::Thread(i) => self
+                .session
+                .threads
+                .get(i)
+                .map(|t| (ConversationKind::Thread, t.thread_ref)),
+            View::Channel(i) => self
+                .session
+                .channels
+                .get(i)
+                .map(|c| (ConversationKind::Channel, c.channel_ref)),
+            View::Group(i) => self
+                .session
+                .groups
+                .get(i)
+                .map(|g| (ConversationKind::Group, g.group_ref)),
+            _ => None,
+        };
         match self.view {
             View::Thread(i) => {
                 if let Some(thread) = self.session.threads.get_mut(i) {
@@ -252,10 +421,15 @@ impl App {
             }
             _ => {}
         }
+        if let Some((kind, bref)) = key {
+            self.session
+                .db
+                .delete_draft(kind, bref.block().get(), bref.index().get());
+        }
     }
 
     pub fn filtered_contacts(&self) -> Vec<(String, Pubkey)> {
-        let filter = self.input.to_lowercase();
+        let filter = self.input.as_str().to_lowercase();
         if filter.is_empty() {
             return self.session.known_contacts();
         }
@@ -287,10 +461,7 @@ impl App {
                     if !m.is_mine {
                         record(
                             &m.peer_ss58,
-                            BlockRef {
-                                block: m.block_number,
-                                index: m.ext_index,
-                            },
+                            BlockRef::from_parts(m.block_number, m.ext_index),
                         );
                     }
                 }
@@ -299,10 +470,7 @@ impl App {
                 for m in &self.session.outbox {
                     record(
                         &m.peer_ss58,
-                        BlockRef {
-                            block: m.block_number,
-                            index: m.ext_index,
-                        },
+                        BlockRef::from_parts(m.block_number, m.ext_index),
                     );
                 }
             }
@@ -312,10 +480,7 @@ impl App {
                         if !m.is_mine {
                             record(
                                 &m.sender_ss58,
-                                BlockRef {
-                                    block: m.block_number,
-                                    index: m.ext_index,
-                                },
+                                BlockRef::from_parts(m.block_number, m.ext_index),
                             );
                         }
                     }
@@ -327,10 +492,7 @@ impl App {
                         if !m.is_mine {
                             record(
                                 &m.sender_ss58,
-                                BlockRef {
-                                    block: m.block_number,
-                                    index: m.ext_index,
-                                },
+                                BlockRef::from_parts(m.block_number, m.ext_index),
                             );
                         }
                     }
@@ -342,10 +504,7 @@ impl App {
                         if !m.is_mine {
                             record(
                                 &m.sender_ss58,
-                                BlockRef {
-                                    block: m.block_number,
-                                    index: m.ext_index,
-                                },
+                                BlockRef::from_parts(m.block_number, m.ext_index),
                             );
                         }
                     }
@@ -377,6 +536,7 @@ impl App {
         self.pending_text = None;
         self.pending_fee = None;
         self.pending_view = None;
+        self.pending_msg_type = None;
         self.pending_channel_name = None;
         self.pending_channel_desc = None;
         self.pending_group_members.clear();
@@ -407,19 +567,13 @@ impl App {
                 let la =
                     a.1.iter()
                         .filter_map(|&i| self.session.threads[i].messages.last())
-                        .map(|m| BlockRef {
-                            block: m.block_number,
-                            index: m.ext_index,
-                        })
+                        .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
                         .max()
                         .unwrap_or(BlockRef::ZERO);
                 let lb =
                     b.1.iter()
                         .filter_map(|&i| self.session.threads[i].messages.last())
-                        .map(|m| BlockRef {
-                            block: m.block_number,
-                            index: m.ext_index,
-                        })
+                        .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
                         .max()
                         .unwrap_or(BlockRef::ZERO);
                 lb.cmp(&la)
@@ -429,18 +583,12 @@ impl App {
                     let la = self.session.threads[a]
                         .messages
                         .last()
-                        .map(|m| BlockRef {
-                            block: m.block_number,
-                            index: m.ext_index,
-                        })
+                        .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
                         .unwrap_or(BlockRef::ZERO);
                     let lb = self.session.threads[b]
                         .messages
                         .last()
-                        .map(|m| BlockRef {
-                            block: m.block_number,
-                            index: m.ext_index,
-                        })
+                        .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
                         .unwrap_or(BlockRef::ZERO);
                     lb.cmp(&la)
                 });
@@ -476,18 +624,12 @@ impl App {
                 let la = self.session.channels[a]
                     .messages
                     .last()
-                    .map(|m| BlockRef {
-                        block: m.block_number,
-                        index: m.ext_index,
-                    })
+                    .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
                     .unwrap_or(BlockRef::ZERO);
                 let lb = self.session.channels[b]
                     .messages
                     .last()
-                    .map(|m| BlockRef {
-                        block: m.block_number,
-                        index: m.ext_index,
-                    })
+                    .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
                     .unwrap_or(BlockRef::ZERO);
                 lb.cmp(&la)
             });
@@ -508,18 +650,12 @@ impl App {
                 let la = self.session.groups[a]
                     .messages
                     .last()
-                    .map(|m| BlockRef {
-                        block: m.block_number,
-                        index: m.ext_index,
-                    })
+                    .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
                     .unwrap_or(BlockRef::ZERO);
                 let lb = self.session.groups[b]
                     .messages
                     .last()
-                    .map(|m| BlockRef {
-                        block: m.block_number,
-                        index: m.ext_index,
-                    })
+                    .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
                     .unwrap_or(BlockRef::ZERO);
                 lb.cmp(&la)
             });
@@ -544,28 +680,44 @@ impl App {
     }
 
     pub fn select_sidebar(&mut self, index: usize) {
-        if self.mode == Mode::Insert {
+        if self.is_composing() {
             self.save_draft();
-            self.mode = Mode::Normal;
         }
+        self.overlay = None;
         self.scroll_offset = 0;
         let selectable: Vec<View> = self.sidebar_rows().into_iter().flatten().collect();
         if let Some(&view) = selectable.get(index) {
             self.view = view;
         }
         self.mark_read();
+        self.focus = Focus::Timeline;
+        self.focus_before_overlay = Focus::Timeline;
     }
 
     pub fn select_sidebar_row(&mut self, row: usize) {
         let rows = self.sidebar_rows();
         if let Some(Some(view)) = rows.get(row) {
-            if self.mode == Mode::Insert {
+            if self.is_composing() {
                 self.save_draft();
-                self.mode = Mode::Normal;
             }
+            self.overlay = None;
             self.scroll_offset = 0;
             self.view = *view;
             self.mark_read();
+            self.focus = Focus::Timeline;
+            self.focus_before_overlay = Focus::Timeline;
+        }
+    }
+
+    pub fn enter_composer_for_current_view(&mut self) {
+        if matches!(
+            self.view,
+            View::Thread(_) | View::Channel(_) | View::Group(_)
+        ) {
+            self.load_draft();
+            self.scroll_offset = 0;
+            self.focus = Focus::Composer;
+            self.focus_before_overlay = Focus::Composer;
         }
     }
 

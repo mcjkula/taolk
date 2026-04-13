@@ -28,6 +28,7 @@ pub struct Network {
 #[serde(default)]
 pub struct Security {
     pub lock_timeout: u64,
+    pub require_password_per_send: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -60,7 +61,10 @@ impl Default for Network {
 
 impl Default for Security {
     fn default() -> Self {
-        Self { lock_timeout: 300 }
+        Self {
+            lock_timeout: 300,
+            require_password_per_send: false,
+        }
     }
 }
 
@@ -102,10 +106,6 @@ pub fn config_path() -> PathBuf {
         .join("config.toml")
 }
 
-// ---------------------------------------------------------------------------
-// Key registry
-// ---------------------------------------------------------------------------
-
 pub struct KeyDef {
     pub key: &'static str,
     pub section: &'static str,
@@ -142,6 +142,13 @@ pub const KEYS: &[KeyDef] = &[
         field: "lock_timeout",
         description: "Auto-lock timeout in seconds (0=off)",
         default_display: "300",
+    },
+    KeyDef {
+        key: "security.require_password_per_send",
+        section: "security",
+        field: "require_password_per_send",
+        description: "Re-prompt password before each send (ephemeral seed)",
+        default_display: "false",
     },
     KeyDef {
         key: "ui.sidebar_width",
@@ -230,12 +237,15 @@ pub fn get_value(config: &Config, key: &str) -> String {
         "network.node" => config.network.node.clone(),
         "network.mirrors" => {
             if config.network.mirrors.is_empty() {
-                "\u{2014}".into() // em-dash
+                "\u{2014}".into()
             } else {
                 config.network.mirrors.join(", ")
             }
         }
         "security.lock_timeout" => config.security.lock_timeout.to_string(),
+        "security.require_password_per_send" => {
+            config.security.require_password_per_send.to_string()
+        }
         "ui.sidebar_width" => config.ui.sidebar_width.to_string(),
         "ui.mouse" => config.ui.mouse.to_string(),
         "ui.timestamp_format" => config.ui.timestamp_format.clone(),
@@ -249,7 +259,6 @@ pub fn get_value(config: &Config, key: &str) -> String {
     }
 }
 
-/// Check if a key was explicitly set in the config file (vs filled by serde default).
 pub fn is_user_set(key: &str) -> bool {
     let def = match lookup_key(key) {
         Some(d) => d,
@@ -269,12 +278,11 @@ pub fn is_user_set(key: &str) -> bool {
         .is_some()
 }
 
-/// Validate and set a key in the raw TOML file (read-modify-write).
-/// Only the specified key is written — other defaults stay out of the file.
-pub fn set_key(key: &str, raw: &[String]) -> Result<String, String> {
-    let def = lookup_key(key).ok_or_else(|| format!("Unknown key: {key}"))?;
+use crate::error::ConfigError;
 
-    // Parse and validate the value
+pub fn set_key(key: &str, raw: &[String]) -> Result<String, ConfigError> {
+    let def = lookup_key(key).ok_or_else(|| ConfigError::UnknownKey(key.into()))?;
+
     let toml_value = match key {
         "wallet.default" | "network.node" | "ui.timestamp_format" | "ui.date_format" => {
             toml::Value::String(raw.join(" "))
@@ -289,13 +297,16 @@ pub fn set_key(key: &str, raw: &[String]) -> Result<String, String> {
         }
         "security.lock_timeout" => {
             let v: u64 = parse_val(raw, "a number")?;
-            toml::Value::Integer(v as i64)
+            toml::Value::Integer(i64::try_from(v).map_err(|_| ConfigError::InvalidValue {
+                expected: "0..=i64::MAX".into(),
+                got: v.to_string(),
+            })?)
         }
         "ui.sidebar_width" => {
             let v: u16 = parse_val(raw, "a number (0-65535)")?;
-            toml::Value::Integer(v as i64)
+            toml::Value::Integer(i64::from(v))
         }
-        "ui.mouse" => toml::Value::Boolean(parse_bool(raw)?),
+        "ui.mouse" | "security.require_password_per_send" => toml::Value::Boolean(parse_bool(raw)?),
         "notifications.enabled"
         | "notifications.dm"
         | "notifications.ambient"
@@ -303,14 +314,16 @@ pub fn set_key(key: &str, raw: &[String]) -> Result<String, String> {
         "notifications.volume" => {
             let v: u8 = parse_val(raw, "a number (0-100)")?;
             if v > 100 {
-                return Err(format!("Expected 0-100, got {v}"));
+                return Err(ConfigError::InvalidValue {
+                    expected: "0-100".into(),
+                    got: v.to_string(),
+                });
             }
-            toml::Value::Integer(v as i64)
+            toml::Value::Integer(i64::from(v))
         }
-        _ => return Err(format!("Unknown key: {key}")),
+        _ => return Err(ConfigError::UnknownKey(key.into())),
     };
 
-    // Read-modify-write the TOML file
     let path = config_path();
     let content = std::fs::read_to_string(&path).unwrap_or_default();
     let mut table: toml::Table = content.parse().unwrap_or_default();
@@ -324,31 +337,31 @@ pub fn set_key(key: &str, raw: &[String]) -> Result<String, String> {
 
     write_table(&path, &table)?;
 
-    // Return the display value
     let cfg = load();
     Ok(get_value(&cfg, key))
 }
 
-pub fn save(config: &Config) -> Result<(), String> {
+pub fn save(config: &Config) -> Result<(), ConfigError> {
     let path = config_path();
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(parent)?;
     }
-    let content = toml::to_string_pretty(config).map_err(|e| e.to_string())?;
-    std::fs::write(&path, content).map_err(|e| e.to_string())
+    let content = toml::to_string_pretty(config)?;
+    std::fs::write(&path, content)?;
+    Ok(())
 }
 
-fn write_table(path: &std::path::Path, table: &toml::Table) -> Result<(), String> {
+fn write_table(path: &std::path::Path, table: &toml::Table) -> Result<(), ConfigError> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(parent)?;
     }
-    let content = toml::to_string_pretty(table).map_err(|e| e.to_string())?;
-    std::fs::write(path, content).map_err(|e| e.to_string())
+    let content = toml::to_string_pretty(table)?;
+    std::fs::write(path, content)?;
+    Ok(())
 }
 
-/// Remove a single key from the TOML file. Returns the default value for display.
-pub fn unset_key(key: &str) -> Result<String, String> {
-    let def = lookup_key(key).ok_or("unknown key")?;
+pub fn unset_key(key: &str) -> Result<String, ConfigError> {
+    let def = lookup_key(key).ok_or_else(|| ConfigError::UnknownKey(key.into()))?;
 
     let path = config_path();
     let content = std::fs::read_to_string(&path).unwrap_or_default();
@@ -367,22 +380,23 @@ pub fn unset_key(key: &str) -> Result<String, String> {
     Ok(def.default_display.to_string())
 }
 
-// ---------------------------------------------------------------------------
-// Parsing helpers
-// ---------------------------------------------------------------------------
-
-fn parse_val<T: std::str::FromStr>(raw: &[String], expected: &str) -> Result<T, String> {
+fn parse_val<T: std::str::FromStr>(raw: &[String], expected: &str) -> Result<T, ConfigError> {
     let s = raw.first().map(|s| s.as_str()).unwrap_or("");
-    s.parse::<T>()
-        .map_err(|_| format!("Expected {expected}, got '{s}'"))
+    s.parse::<T>().map_err(|_| ConfigError::InvalidValue {
+        expected: expected.into(),
+        got: s.into(),
+    })
 }
 
-fn parse_bool(raw: &[String]) -> Result<bool, String> {
+fn parse_bool(raw: &[String]) -> Result<bool, ConfigError> {
     let s = raw.first().map(|s| s.as_str()).unwrap_or("");
     match s {
         "true" => Ok(true),
         "false" => Ok(false),
-        _ => Err(format!("Expected 'true' or 'false', got '{s}'")),
+        _ => Err(ConfigError::InvalidValue {
+            expected: "'true' or 'false'".into(),
+            got: s.into(),
+        }),
     }
 }
 

@@ -1,48 +1,141 @@
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::mpsc::Sender;
+use std::time::Duration;
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
-use zeroize::Zeroizing;
 
-use crate::event::Event;
+use crate::error::ChainError;
+use crate::event::{ConnState, Event};
 use crate::reader;
+use crate::secret::DecryptionKeys;
 use crate::types::Pubkey;
 
-/// Fetch a block and process only the extrinsic at the given index.
-/// Used for DAG walk -- we know exactly which (block, index) we need.
+const PIPELINE_WINDOW: usize = 32;
+
+pub struct BlockData {
+    pub extrinsics: Vec<String>,
+    pub timestamp_ms: u64,
+}
+
+enum BlockState {
+    WaitingForHash { block_num: u32 },
+    WaitingForBlock { block_num: u32 },
+}
+
+pub async fn fetch_blocks(
+    node_url: &str,
+    block_nums: &[u32],
+) -> Result<HashMap<u32, BlockData>, ChainError> {
+    if block_nums.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let (ws, _) = connect_async(node_url)
+        .await
+        .map_err(|e| ChainError::Connect(e.to_string()))?;
+    let (mut write, mut read) = ws.split();
+
+    let mut in_flight: BTreeMap<u64, BlockState> = BTreeMap::new();
+    let mut out: HashMap<u32, BlockData> = HashMap::new();
+    let mut next_input: usize = 0;
+    let mut request_id: u64 = 0;
+    let total = block_nums.len();
+
+    while out.len() < total {
+        while in_flight.len() < PIPELINE_WINDOW && next_input < total {
+            request_id += 1;
+            let block_num = block_nums[next_input];
+            let req = json!({
+                "jsonrpc": "2.0", "id": request_id,
+                "method": "chain_getBlockHash", "params": [block_num]
+            });
+            write
+                .send(WsMessage::Text(req.to_string().into()))
+                .await
+                .map_err(|e| ChainError::Send(e.to_string()))?;
+            in_flight.insert(request_id, BlockState::WaitingForHash { block_num });
+            next_input += 1;
+        }
+
+        if in_flight.is_empty() {
+            break;
+        }
+
+        let text = next_text(&mut read).await?;
+        let v: Value = match serde_json::from_str(&text) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let Some(resp_id) = v["id"].as_u64() else {
+            continue;
+        };
+        let Some(state) = in_flight.remove(&resp_id) else {
+            continue;
+        };
+
+        if v.get("error").is_some() {
+            continue;
+        }
+
+        match state {
+            BlockState::WaitingForHash { block_num } => {
+                if let Some(hash) = v["result"].as_str() {
+                    request_id += 1;
+                    let req = json!({
+                        "jsonrpc": "2.0", "id": request_id,
+                        "method": "chain_getBlock", "params": [hash]
+                    });
+                    write
+                        .send(WsMessage::Text(req.to_string().into()))
+                        .await
+                        .map_err(|e| ChainError::Send(e.to_string()))?;
+                    in_flight.insert(request_id, BlockState::WaitingForBlock { block_num });
+                }
+            }
+            BlockState::WaitingForBlock { block_num } => {
+                if let Some(block) = v["result"].get("block")
+                    && let Some(exts) = block["extrinsics"].as_array()
+                {
+                    let extrinsics: Vec<String> = exts
+                        .iter()
+                        .filter_map(|e| e.as_str().map(String::from))
+                        .collect();
+                    let timestamp_ms = reader::extract_block_timestamp(exts);
+                    out.insert(
+                        block_num,
+                        BlockData {
+                            extrinsics,
+                            timestamp_ms,
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+pub async fn fetch_block(node_url: &str, block_num: u32) -> Result<BlockData, ChainError> {
+    let mut blocks = fetch_blocks(node_url, &[block_num]).await?;
+    blocks.remove(&block_num).ok_or(ChainError::BadShape)
+}
+
 pub async fn fetch_and_process_extrinsic(
     node_url: &str,
     block_num: u32,
     ext_index: u16,
     my_pubkey: Pubkey,
-    seed: Zeroizing<[u8; 32]>,
+    keys: DecryptionKeys,
     tx: Sender<Event>,
 ) {
     let result =
-        fetch_extrinsic_inner(node_url, block_num, ext_index, &my_pubkey, &seed, &tx).await;
+        fetch_extrinsic_inner(node_url, block_num, ext_index, &my_pubkey, &keys, &tx).await;
     if let Err(e) = result {
         let _ = tx.send(Event::Error(format!(
             "Load block {block_num}:{ext_index}: {e}"
         )));
-    }
-}
-
-/// Read the next Text message from a WebSocket, skipping Ping/Pong/Binary frames.
-async fn next_text(
-    ws: &mut futures_util::stream::SplitStream<
-        tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
-    >,
-) -> Result<String, String> {
-    loop {
-        match ws.next().await {
-            Some(Ok(WsMessage::Text(t))) => return Ok(t.to_string()),
-            Some(Ok(WsMessage::Ping(_) | WsMessage::Pong(_))) => continue,
-            Some(Ok(other)) => return Err(format!("unexpected frame: {other:?}")),
-            Some(Err(e)) => return Err(format!("ws error: {e}")),
-            None => return Err("connection closed".into()),
-        }
     }
 }
 
@@ -51,91 +144,89 @@ async fn fetch_extrinsic_inner(
     block_num: u32,
     ext_index: u16,
     my_pubkey: &Pubkey,
-    seed: &[u8; 32],
+    keys: &DecryptionKeys,
     tx: &Sender<Event>,
-) -> Result<(), String> {
-    let (ws, _) = connect_async(node_url)
-        .await
-        .map_err(|e| format!("connect failed: {e}"))?;
-
-    let (mut write, mut read) = ws.split();
-
-    let hash_req = json!({
-        "jsonrpc": "2.0", "id": 1,
-        "method": "chain_getBlockHash", "params": [block_num]
-    });
-    write
-        .send(WsMessage::Text(hash_req.to_string().into()))
-        .await
-        .map_err(|e| format!("send: {e}"))?;
-
-    let hash_resp = next_text(&mut read).await?;
-    let v: Value = serde_json::from_str(&hash_resp).map_err(|e| format!("parse: {e}"))?;
-    let block_hash = v["result"]
-        .as_str()
-        .ok_or("no hash in response")?
-        .to_string();
-
-    let block_req = json!({
-        "jsonrpc": "2.0", "id": 2,
-        "method": "chain_getBlock", "params": [block_hash]
-    });
-    write
-        .send(WsMessage::Text(block_req.to_string().into()))
-        .await
-        .map_err(|e| format!("send: {e}"))?;
-
-    let block_resp = next_text(&mut read).await?;
-    let v: Value = serde_json::from_str(&block_resp).map_err(|e| format!("parse: {e}"))?;
-    let block = v["result"].get("block").ok_or("no block in response")?;
-
-    if let Some(exts) = block["extrinsics"].as_array() {
-        let block_ts = reader::extract_block_timestamp(exts);
-        if let Some(ext) = exts.get(ext_index as usize)
-            && let Some(ext_hex) = ext.as_str()
-        {
-            let ctx = reader::ReadContext {
-                my_pubkey,
-                seed,
-                tx,
-            };
-            reader::read_extrinsic(ext_hex, &ctx, block_num, ext_index, block_ts);
-        }
+) -> Result<(), ChainError> {
+    let block = fetch_block(node_url, block_num).await?;
+    if let Some(ext_hex) = block.extrinsics.get(usize::from(ext_index)) {
+        let ctx = reader::ReadContext {
+            my_pubkey,
+            keys,
+            tx,
+        };
+        reader::read_extrinsic(ext_hex, &ctx, block_num, ext_index, block.timestamp_ms);
     }
     Ok(())
 }
 
-/// Subscribe to finalized heads and read SAMP messages from each block.
+async fn next_text(
+    ws: &mut futures_util::stream::SplitStream<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    >,
+) -> Result<String, ChainError> {
+    loop {
+        match ws.next().await {
+            Some(Ok(WsMessage::Text(t))) => return Ok(t.to_string()),
+            Some(Ok(WsMessage::Ping(_) | WsMessage::Pong(_))) => continue,
+            Some(Ok(_)) => return Err(ChainError::BadShape),
+            Some(Err(e)) => return Err(ChainError::Ws(e.to_string())),
+            None => return Err(ChainError::WsClosed),
+        }
+    }
+}
+
 pub async fn subscribe_blocks(
     node_url: &str,
     my_pubkey: Pubkey,
-    seed: Zeroizing<[u8; 32]>,
+    keys: DecryptionKeys,
     tx: Sender<Event>,
 ) {
-    let (mut ws, _) = match connect_async(node_url).await {
-        Ok(conn) => conn,
-        Err(e) => {
-            let _ = tx.send(Event::Error(format!("WebSocket connect failed: {e}")));
-            return;
+    let mut delay: u32 = 1;
+    loop {
+        let _ = tx.send(Event::ConnectionStatus(ConnState::Connected));
+        match run_subscription(node_url, &my_pubkey, &keys, &tx).await {
+            Ok(()) => return,
+            Err(e) => {
+                let _ = tx.send(Event::Status(format!("Chain disconnected: {e}")));
+            }
         }
-    };
+        for remaining in (1..=delay).rev() {
+            let _ = tx.send(Event::ConnectionStatus(ConnState::Reconnecting {
+                in_secs: remaining,
+            }));
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        delay = (delay * 2).min(60);
+    }
+}
+
+async fn run_subscription(
+    node_url: &str,
+    my_pubkey: &Pubkey,
+    keys: &DecryptionKeys,
+    tx: &Sender<Event>,
+) -> Result<(), ChainError> {
+    let (mut ws, _) = connect_async(node_url)
+        .await
+        .map_err(|e| ChainError::Connect(e.to_string()))?;
 
     let sub_msg = json!({
         "jsonrpc": "2.0", "id": 1,
         "method": "chain_subscribeNewHeads", "params": []
     });
-    if ws
-        .send(WsMessage::Text(sub_msg.to_string().into()))
+    ws.send(WsMessage::Text(sub_msg.to_string().into()))
         .await
-        .is_err()
-    {
-        let _ = tx.send(Event::Error("Failed to subscribe".into()));
-        return;
-    }
+        .map_err(|e| ChainError::Send(e.to_string()))?;
 
     let mut request_id: u64 = 100;
 
-    while let Some(Ok(msg)) = ws.next().await {
+    while let Some(frame) = ws.next().await {
+        let msg = match frame {
+            Ok(m) => m,
+            Err(e) => return Err(ChainError::Ws(e.to_string())),
+        };
         let text = match &msg {
             WsMessage::Text(t) => t.to_string(),
             _ => continue,
@@ -156,7 +247,9 @@ pub async fn subscribe_blocks(
                 "jsonrpc": "2.0", "id": request_id,
                 "method": "chain_getBlockHash", "params": [block_num]
             });
-            let _ = ws.send(WsMessage::Text(hash_req.to_string().into())).await;
+            ws.send(WsMessage::Text(hash_req.to_string().into()))
+                .await
+                .map_err(|e| ChainError::Send(e.to_string()))?;
             continue;
         }
 
@@ -167,17 +260,19 @@ pub async fn subscribe_blocks(
                     "jsonrpc": "2.0", "id": request_id,
                     "method": "chain_getBlock", "params": [block_hash]
                 });
-                let _ = ws.send(WsMessage::Text(block_req.to_string().into())).await;
+                ws.send(WsMessage::Text(block_req.to_string().into()))
+                    .await
+                    .map_err(|e| ChainError::Send(e.to_string()))?;
             } else if let Some(block) = result.get("block") {
                 let ctx = reader::ReadContext {
-                    my_pubkey: &my_pubkey,
-                    seed: &seed,
-                    tx: &tx,
+                    my_pubkey,
+                    keys,
+                    tx,
                 };
                 reader::read_block(block, &ctx);
             }
         }
     }
 
-    let _ = tx.send(Event::Error("WebSocket connection closed".into()));
+    Err(ChainError::WsClosed)
 }

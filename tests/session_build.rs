@@ -1,72 +1,39 @@
-use schnorrkel::keys::{ExpansionMode, MiniSecretKey};
-use taolk::db::Db;
-use taolk::extrinsic::ChainInfo;
-use taolk::metadata::AccountInfoLayout;
-use taolk::session::Session;
+mod common;
+
+use common::{ALICE_SEED, alice_session};
 use taolk::types::{BlockRef, Pubkey};
-use zeroize::Zeroizing;
 
-const ALICE_SEED: [u8; 32] = [0xAA; 32];
-const BOB_SEED: [u8; 32] = [0xBB; 32];
+const BOB_SAMP_SEED: [u8; 32] = [0xBB; 32];
 
-fn keypair_from_seed(seed: &[u8; 32]) -> schnorrkel::Keypair {
-    MiniSecretKey::from_bytes(seed)
-        .unwrap()
-        .expand_to_keypair(ExpansionMode::Ed25519)
-}
-
-fn ci() -> ChainInfo {
-    ChainInfo {
-        genesis_hash: [0; 32],
-        spec_version: 1,
-        tx_version: 1,
-        account_info_layout: AccountInfoLayout {
-            free_offset: 16,
-            free_width: 8,
-        },
-    }
-}
-
-fn alice_session() -> Session {
-    let db = Db::open_in_memory(&ALICE_SEED).unwrap();
-    Session::new(
-        keypair_from_seed(&ALICE_SEED),
-        Zeroizing::new(ALICE_SEED),
-        "ws://test".into(),
-        ci(),
-        db,
-    )
-}
-
-fn bob_scalar() -> curve25519_dalek::scalar::Scalar {
-    samp::sr25519_signing_scalar(&BOB_SEED)
+fn bob_scalar() -> samp::ViewScalar {
+    samp::sr25519_signing_scalar(&samp::Seed::from_bytes(BOB_SAMP_SEED))
 }
 
 fn bob_pubkey() -> Pubkey {
-    Pubkey(samp::public_from_seed(&BOB_SEED))
+    samp::public_from_seed(&samp::Seed::from_bytes(BOB_SAMP_SEED))
 }
 
-// ---------------------------------------------------------------------------
-// Public message
-// ---------------------------------------------------------------------------
+fn mb(s: &str) -> taolk::types::MessageBody {
+    taolk::types::MessageBody::parse(s.to_string()).unwrap()
+}
 
 #[test]
 fn build_public_message_roundtrip() {
     let session = alice_session();
     let recipient = bob_pubkey();
-    let body = "hello world";
+    let body = mb("hello world");
 
-    let remark = session.build_public_message(&recipient, body).unwrap();
-    let decoded = samp::decode_remark(&remark).unwrap();
-
-    assert_eq!(decoded.content_type, samp::ContentType::Public);
-    assert_eq!(decoded.recipient, recipient.0);
-    assert_eq!(std::str::from_utf8(&decoded.content).unwrap(), body);
+    let remark = session.build_public_message(&recipient, &body).unwrap();
+    let samp::Remark::Public {
+        recipient: r,
+        body: b,
+    } = samp::decode_remark(&remark).unwrap()
+    else {
+        panic!("expected Public");
+    };
+    assert_eq!(r, recipient);
+    assert_eq!(b.as_str(), "hello world");
 }
-
-// ---------------------------------------------------------------------------
-// Encrypted 1:1 message
-// ---------------------------------------------------------------------------
 
 #[test]
 fn build_encrypted_message_decryptable() {
@@ -74,19 +41,18 @@ fn build_encrypted_message_decryptable() {
     let recipient = bob_pubkey();
 
     let remark = session
-        .build_encrypted_message(&recipient, "hello")
+        .build_encrypted_message(&ALICE_SEED, &recipient, &mb("hello"))
         .unwrap();
-    let decoded = samp::decode_remark(&remark).unwrap();
+    let samp::Remark::Encrypted {
+        nonce, ciphertext, ..
+    } = samp::decode_remark(&remark).unwrap()
+    else {
+        panic!("expected Encrypted");
+    };
 
-    assert_eq!(decoded.content_type, samp::ContentType::Encrypted);
-
-    let plaintext = samp::decrypt(&decoded, &bob_scalar()).unwrap();
-    assert_eq!(std::str::from_utf8(&plaintext).unwrap(), "hello");
+    let plaintext = samp::decrypt(&ciphertext, &nonce, &bob_scalar()).unwrap();
+    assert_eq!(std::str::from_utf8(plaintext.as_bytes()).unwrap(), "hello");
 }
-
-// ---------------------------------------------------------------------------
-// Thread root
-// ---------------------------------------------------------------------------
 
 #[test]
 fn build_thread_root_decryptable() {
@@ -94,82 +60,73 @@ fn build_thread_root_decryptable() {
     let recipient = bob_pubkey();
 
     let remark = session
-        .build_thread_root(&recipient, "thread start")
+        .build_thread_root(&ALICE_SEED, &recipient, &mb("thread start"))
         .unwrap();
-    let decoded = samp::decode_remark(&remark).unwrap();
+    let samp::Remark::Thread {
+        nonce, ciphertext, ..
+    } = samp::decode_remark(&remark).unwrap()
+    else {
+        panic!("expected Thread");
+    };
 
-    assert_eq!(decoded.content_type, samp::ContentType::Thread);
-
-    let plaintext = samp::decrypt(&decoded, &bob_scalar()).unwrap();
+    let plaintext = samp::decrypt(&ciphertext, &nonce, &bob_scalar()).unwrap();
     let (thread_ref, _reply_to, _continues, body) =
-        samp::decode_thread_content(&plaintext).unwrap();
+        samp::decode_thread_content(plaintext.as_bytes()).unwrap();
 
     assert_eq!(thread_ref, BlockRef::ZERO);
     assert_eq!(std::str::from_utf8(body).unwrap(), "thread start");
 }
 
-// ---------------------------------------------------------------------------
-// Channel create
-// ---------------------------------------------------------------------------
-
 #[test]
 fn build_channel_create_roundtrip() {
     let session = alice_session();
 
-    let remark = session.build_channel_create("test", "desc").unwrap();
-    let decoded = samp::decode_remark(&remark).unwrap();
-
-    assert_eq!(decoded.content_type, samp::ContentType::ChannelCreate);
-
-    let (name, description) = samp::decode_channel_create(&decoded.content).unwrap();
-    assert_eq!(name, "test");
-    assert_eq!(description, "desc");
+    let name = samp::ChannelName::parse("test").unwrap();
+    let desc = samp::ChannelDescription::parse("desc").unwrap();
+    let remark = session.build_channel_create(&name, &desc).unwrap();
+    let samp::Remark::ChannelCreate { name, description } = samp::decode_remark(&remark).unwrap()
+    else {
+        panic!("expected ChannelCreate");
+    };
+    assert_eq!(name.as_str(), "test");
+    assert_eq!(description.as_str(), "desc");
 }
-
-// ---------------------------------------------------------------------------
-// Channel message
-// ---------------------------------------------------------------------------
 
 #[test]
 fn build_channel_message_roundtrip() {
     let mut session = alice_session();
-    let channel_ref = BlockRef {
-        block: 500,
-        index: 1,
-    };
+    let channel_ref = BlockRef::from_parts(500, 1);
     session.subscribe_channel(channel_ref);
 
-    let remark = session.build_channel_message(0, "chan msg").unwrap();
-    let decoded = samp::decode_remark(&remark).unwrap();
-
-    assert_eq!(decoded.content_type, samp::ContentType::Channel);
-
-    let wire_ref = samp::channel_ref_from_recipient(&decoded.recipient);
+    let remark = session.build_channel_message(0, &mb("chan msg")).unwrap();
+    let samp::Remark::Channel {
+        channel_ref: wire_ref,
+        ..
+    } = samp::decode_remark(&remark).unwrap()
+    else {
+        panic!("expected Channel");
+    };
     assert_eq!(wire_ref, channel_ref);
 }
-
-// ---------------------------------------------------------------------------
-// Group create
-// ---------------------------------------------------------------------------
 
 #[test]
 fn build_group_create_decryptable() {
     let session = alice_session();
-    let alice_pk = samp::public_from_seed(&ALICE_SEED);
-    let bob_pk = samp::public_from_seed(&BOB_SEED);
-    let members = vec![Pubkey(alice_pk), Pubkey(bob_pk)];
+    let alice_pk = samp::public_from_seed(&samp::Seed::from_bytes(ALICE_SEED));
+    let bob_pk = samp::public_from_seed(&samp::Seed::from_bytes(BOB_SAMP_SEED));
+    let members = vec![alice_pk, bob_pk];
 
-    let remark = session.build_group_create(&members, "group hello").unwrap();
-    let decoded = samp::decode_remark(&remark).unwrap();
+    let remark = session
+        .build_group_create(&ALICE_SEED, &members, &mb("group hello"))
+        .unwrap();
+    let samp::Remark::Group { nonce, content } = samp::decode_remark(&remark).unwrap() else {
+        panic!("expected Group");
+    };
 
-    assert_eq!(decoded.content_type, samp::ContentType::Group);
-
-    // Bob decrypts
-    let plaintext =
-        samp::decrypt_from_group(&decoded.content, &bob_scalar(), &decoded.nonce, Some(2)).unwrap();
+    let plaintext = samp::decrypt_from_group(&content, &nonce, &bob_scalar(), Some(2)).unwrap();
 
     let (_group_ref, _reply_to, _continues, body) =
-        samp::decode_thread_content(&plaintext).unwrap();
+        samp::decode_thread_content(plaintext.as_bytes()).unwrap();
 
     let (member_list, text) = samp::decode_group_members(body).unwrap();
     assert_eq!(member_list.len(), 2);
@@ -178,40 +135,28 @@ fn build_group_create_decryptable() {
     assert_eq!(std::str::from_utf8(text).unwrap(), "group hello");
 }
 
-// ---------------------------------------------------------------------------
-// Error: invalid thread index
-// ---------------------------------------------------------------------------
-
 #[test]
 fn build_returns_error_for_invalid_thread_idx() {
     let session = alice_session();
-    let result = session.build_thread_reply(999, "test");
+    let result = session.build_thread_reply(&ALICE_SEED, 999, &mb("test"));
     assert!(result.is_err());
     let err = format!("{}", result.unwrap_err());
     assert!(err.contains("not found"), "expected NotFound, got: {err}");
 }
-
-// ---------------------------------------------------------------------------
-// Error: invalid channel index
-// ---------------------------------------------------------------------------
 
 #[test]
 fn build_returns_error_for_invalid_channel_idx() {
     let session = alice_session();
-    let result = session.build_channel_message(999, "test");
+    let result = session.build_channel_message(999, &mb("test"));
     assert!(result.is_err());
     let err = format!("{}", result.unwrap_err());
     assert!(err.contains("not found"), "expected NotFound, got: {err}");
 }
 
-// ---------------------------------------------------------------------------
-// Error: invalid group index
-// ---------------------------------------------------------------------------
-
 #[test]
 fn build_returns_error_for_invalid_group_idx() {
     let session = alice_session();
-    let result = session.build_group_message(999, "test");
+    let result = session.build_group_message(&ALICE_SEED, 999, &mb("test"));
     assert!(result.is_err());
     let err = format!("{}", result.unwrap_err());
     assert!(err.contains("not found"), "expected NotFound, got: {err}");

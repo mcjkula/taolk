@@ -1,51 +1,51 @@
 use crate::app::{App, View};
+use crate::conversation::Conversation;
+use crate::ui::chrome;
+use crate::ui::palette;
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, List, ListItem};
+use ratatui::widgets::{List, ListItem};
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    let max_name = area.width.saturating_sub(8) as usize;
+    let text_style = Style::default();
+    let selected_style = Style::default()
+        .fg(palette::ACCENT)
+        .add_modifier(Modifier::BOLD);
+    let dim_style = palette::dim();
+    let accent_style = Style::default().fg(palette::ACCENT);
+    let unread_style = selected_style;
+    let title_style = selected_style;
+    let item_style = |selected: bool| if selected { selected_style } else { text_style };
+    let indicator = |selected: bool| if selected { "\u{25B8} " } else { "  " };
+    let max_name = usize::from(area.width.saturating_sub(8));
     let mut items: Vec<ListItem> = Vec::new();
 
-    // Inbox
     let inbox_selected = app.view == View::Inbox;
     let inbox_style = item_style(inbox_selected);
     items.push(ListItem::new(Line::from(vec![
         Span::styled(indicator(inbox_selected), inbox_style),
         Span::styled(format!("{} Inbox", super::icons::INBOX), inbox_style),
-        Span::styled(
-            format!(" ({})", app.session.inbox.len()),
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(format!(" ({})", app.session.inbox.len()), dim_style),
     ])));
 
-    // Outbox
     let outbox_selected = app.view == View::Outbox;
     let outbox_style = item_style(outbox_selected);
     items.push(ListItem::new(Line::from(vec![
         Span::styled(indicator(outbox_selected), outbox_style),
         Span::styled(format!("{} Sent", super::icons::OUTBOX), outbox_style),
-        Span::styled(
-            format!(" ({})", app.session.outbox.len()),
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(format!(" ({})", app.session.outbox.len()), dim_style),
     ])));
 
-    // Threads section -- grouped by peer
     if !app.session.threads.is_empty() {
         items.push(ListItem::new(Line::raw("")));
         items.push(ListItem::new(Line::from(vec![
             Span::styled("  ", Style::default()),
-            Span::styled(
-                format!("{} ", super::icons::THREADS),
-                Style::default().fg(Color::DarkGray),
-            ),
-            Span::styled("Threads", Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{} ", super::icons::THREADS), dim_style),
+            Span::styled("Threads", dim_style),
         ])));
 
-        // Group thread indices by peer_ss58, sorted by most recent activity
         let mut peer_groups: Vec<(String, Vec<usize>)> = Vec::new();
         let mut peer_idx_map: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
@@ -58,7 +58,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 peer_groups.push((thread.peer_ss58.clone(), vec![i]));
             }
         }
-        // Sort peer groups by most recent message (highest block_number) descending
         peer_groups.sort_by(|a, b| {
             let latest_a =
                 a.1.iter()
@@ -74,7 +73,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                     .unwrap_or((0, 0));
             latest_b.cmp(&latest_a)
         });
-        // Sort threads within each peer group by most recent message descending
         for (_, idxs) in &mut peer_groups {
             idxs.sort_by(|&a, &b| {
                 let la = app.session.threads[a]
@@ -93,7 +91,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
         for (peer_ss58, thread_idxs) in &peer_groups {
             if thread_idxs.len() == 1 {
-                // Single thread: show peer name directly (selectable)
                 let i = thread_idxs[0];
                 let thread = &app.session.threads[i];
                 let selected = matches!(app.view, View::Thread(idx) if idx == i);
@@ -110,30 +107,21 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                     Span::styled(name, style),
                 ];
                 if thread.thread_ref.is_zero() {
-                    spans.push(Span::styled(
-                        format!(" {}", app.spinner_1()),
-                        Style::default().fg(Color::DarkGray),
-                    ));
+                    spans.push(Span::styled(format!(" {}", app.spinner_1()), dim_style));
                 } else if unread > 0 {
-                    spans.push(Span::styled(
-                        format!(" ({unread})"),
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    ));
+                    spans.push(Span::styled(format!(" ({unread})"), unread_style));
                 }
                 if !thread.draft.is_empty() {
                     spans.push(Span::styled(
                         format!(" {}", super::icons::DRAFT),
-                        Style::default().fg(Color::Cyan),
+                        accent_style,
                     ));
                 }
                 items.push(ListItem::new(Line::from(spans)));
             } else {
-                // Multiple threads: peer header + indented thread entries
                 items.push(ListItem::new(Line::styled(
                     format!("    {}", truncate(peer_ss58, max_name.saturating_sub(2))),
-                    Style::default().fg(Color::DarkGray),
+                    dim_style,
                 )));
                 for (j, &i) in thread_idxs.iter().enumerate() {
                     let thread = &app.session.threads[i];
@@ -142,7 +130,11 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                     let label = if thread.thread_ref.is_zero() {
                         app.spinner_5().to_string()
                     } else {
-                        format!("{}:{}", thread.thread_ref.block, thread.thread_ref.index)
+                        format!(
+                            "{}:{}",
+                            thread.thread_ref.block().get(),
+                            thread.thread_ref.index().get()
+                        )
                     };
                     let is_last = j == thread_idxs.len() - 1;
                     let branch = if is_last {
@@ -158,24 +150,19 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                     } + if !thread.draft.is_empty() { 2 } else { 0 };
                     let mut spans = vec![
                         Span::styled(if selected { " \u{25B8}" } else { "  " }, style),
-                        Span::styled(branch, Style::default().fg(Color::DarkGray)),
+                        Span::styled(branch, dim_style),
                         Span::styled(
                             truncate(&label, max_name.saturating_sub(6 + badge_reserve)),
                             style,
                         ),
                     ];
                     if unread > 0 {
-                        spans.push(Span::styled(
-                            format!(" ({unread})"),
-                            Style::default()
-                                .fg(Color::Cyan)
-                                .add_modifier(Modifier::BOLD),
-                        ));
+                        spans.push(Span::styled(format!(" ({unread})"), unread_style));
                     }
                     if !thread.draft.is_empty() {
                         spans.push(Span::styled(
                             format!(" {}", super::icons::DRAFT),
-                            Style::default().fg(Color::Cyan),
+                            accent_style,
                         ));
                     }
                     items.push(ListItem::new(Line::from(spans)));
@@ -184,21 +171,17 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    // Channels section (header is selectable → ChannelDir)
     {
         items.push(ListItem::new(Line::raw("")));
         let dir_selected = app.view == View::ChannelDir;
         let dir_style = item_style(dir_selected);
         items.push(ListItem::new(Line::from(vec![
             Span::styled(indicator(dir_selected), dir_style),
-            Span::styled(
-                format!("{} ", super::icons::CHANNELS),
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(format!("{} ", super::icons::CHANNELS), dim_style),
             Span::styled("Channels", dir_style),
             Span::styled(
                 format!(" ({})", app.session.known_channels.len()),
-                Style::default().fg(Color::DarkGray),
+                dim_style,
             ),
         ])));
 
@@ -241,38 +224,26 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled(name, style),
             ];
             if channel.channel_ref.is_zero() {
-                spans.push(Span::styled(
-                    format!(" {}", app.spinner_1()),
-                    Style::default().fg(Color::DarkGray),
-                ));
+                spans.push(Span::styled(format!(" {}", app.spinner_1()), dim_style));
             } else if unread > 0 {
-                spans.push(Span::styled(
-                    format!(" ({unread})"),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ));
+                spans.push(Span::styled(format!(" ({unread})"), unread_style));
             }
             if !channel.draft.is_empty() {
                 spans.push(Span::styled(
                     format!(" {}", super::icons::DRAFT),
-                    Style::default().fg(Color::Cyan),
+                    accent_style,
                 ));
             }
             items.push(ListItem::new(Line::from(spans)));
         }
     }
 
-    // Groups section
     if !app.session.groups.is_empty() {
         items.push(ListItem::new(Line::raw("")));
         items.push(ListItem::new(Line::from(vec![
             Span::styled("  ", Style::default()),
-            Span::styled(
-                format!("{} ", super::icons::GROUPS),
-                Style::default().fg(Color::DarkGray),
-            ),
-            Span::styled("Groups", Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{} ", super::icons::GROUPS), dim_style),
+            Span::styled("Groups", dim_style),
         ])));
 
         let mut group_order: Vec<usize> = (0..app.session.groups.len()).collect();
@@ -309,7 +280,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 0 => "(you)".to_string(),
                 1 => taolk::util::ss58_short(&others[0]),
                 _ => {
-                    // First 6 chars per member (matches start of ss58_short)
                     let a = &taolk::util::ss58_from_pubkey(&others[0])[..6];
                     let b = &taolk::util::ss58_from_pubkey(&others[1])[..6];
                     if others.len() == 2 {
@@ -324,54 +294,25 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled(name, style),
             ];
             if group.group_ref.is_zero() {
-                spans.push(Span::styled(
-                    format!(" {}", app.spinner_1()),
-                    Style::default().fg(Color::DarkGray),
-                ));
+                spans.push(Span::styled(format!(" {}", app.spinner_1()), dim_style));
             } else if unread > 0 {
-                spans.push(Span::styled(
-                    format!(" ({unread})"),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ));
+                spans.push(Span::styled(format!(" ({unread})"), unread_style));
             }
             if !group.draft.is_empty() {
                 spans.push(Span::styled(
                     format!(" {}", super::icons::DRAFT),
-                    Style::default().fg(Color::Cyan),
+                    accent_style,
                 ));
             }
             items.push(ListItem::new(Line::from(spans)));
         }
     }
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::DarkGray))
+    let block = chrome::panel(false)
         .title(" \u{03C4}alk ")
-        .title_style(
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        );
+        .title_style(title_style);
 
     frame.render_widget(List::new(items).block(block), area);
-}
-
-fn item_style(selected: bool) -> Style {
-    if selected {
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::White)
-    }
-}
-
-fn indicator(selected: bool) -> &'static str {
-    if selected { "▸ " } else { "  " }
 }
 
 use taolk::util::truncate;

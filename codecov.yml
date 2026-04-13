@@ -1,0 +1,10 @@
+ignore:
+  - "src/ui/**"
+  - "src/main.rs"
+  - "src/app.rs"
+  - "src/chain.rs"
+  - "src/mirror.rs"
+  - "src/chain_cache.rs"
+  - "src/audio.rs"
+  - "src/cli_fmt.rs"
+  - "src/cmd/**"

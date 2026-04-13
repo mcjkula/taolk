@@ -1,7 +1,6 @@
 use crate::types::{BlockRef, Pubkey};
 use chrono::{DateTime, Utc};
 
-/// A standalone message (public or encrypted). Not threaded.
 #[derive(Clone)]
 pub struct InboxMessage {
     pub peer_ss58: String,
@@ -13,7 +12,6 @@ pub struct InboxMessage {
     pub ext_index: u16,
 }
 
-/// A message in a threaded conversation (thread or channel).
 #[derive(Clone)]
 pub struct ThreadMessage {
     pub sender_ss58: String,
@@ -27,7 +25,22 @@ pub struct ThreadMessage {
     pub has_gap: bool,
 }
 
-/// Parameters for adding a new message to a thread, channel, or group.
+impl ThreadMessage {
+    pub fn from_new(msg: NewMessage, is_mine: bool, has_gap: bool) -> Self {
+        Self {
+            sender_ss58: msg.sender_ss58,
+            timestamp: msg.timestamp,
+            body: msg.body,
+            is_mine,
+            reply_to: msg.reply_to,
+            continues: msg.continues,
+            block_number: msg.block_number,
+            ext_index: msg.ext_index,
+            has_gap,
+        }
+    }
+}
+
 pub struct NewMessage {
     pub sender_ss58: String,
     pub timestamp: DateTime<Utc>,
@@ -38,15 +51,10 @@ pub struct NewMessage {
     pub ext_index: u16,
 }
 
-// Shared DAG helpers for any Vec<ThreadMessage> (used by Thread and Channel).
-
 pub fn last_ref(messages: &[ThreadMessage]) -> BlockRef {
     messages
         .last()
-        .map(|m| BlockRef {
-            block: m.block_number,
-            index: m.ext_index,
-        })
+        .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
         .unwrap_or(BlockRef::ZERO)
 }
 
@@ -55,10 +63,7 @@ pub fn my_last_ref(messages: &[ThreadMessage]) -> BlockRef {
         .iter()
         .rev()
         .find(|m| m.is_mine)
-        .map(|m| BlockRef {
-            block: m.block_number,
-            index: m.ext_index,
-        })
+        .map(|m| BlockRef::from_parts(m.block_number, m.ext_index))
         .unwrap_or(BlockRef::ZERO)
 }
 
@@ -74,12 +79,29 @@ pub fn gap_refs(messages: &[ThreadMessage]) -> Vec<BlockRef> {
             }
         }
     }
-    refs.sort_by(|a, b| (a.block, a.index).cmp(&(b.block, b.index)));
+    refs.sort_by_key(|r| (r.block().get(), r.index().get()));
     refs.dedup();
     refs
 }
 
-/// An encrypted 1:1 threaded conversation.
+pub trait Conversation {
+    fn messages(&self) -> &[ThreadMessage];
+    fn last_read(&self) -> usize;
+
+    fn last_ref(&self) -> BlockRef {
+        last_ref(self.messages())
+    }
+    fn my_last_ref(&self) -> BlockRef {
+        my_last_ref(self.messages())
+    }
+    fn gap_refs(&self) -> Vec<BlockRef> {
+        gap_refs(self.messages())
+    }
+    fn unread(&self) -> usize {
+        self.messages().len().saturating_sub(self.last_read())
+    }
+}
+
 pub struct Thread {
     pub thread_ref: BlockRef,
     pub peer_ss58: String,
@@ -89,22 +111,15 @@ pub struct Thread {
     pub last_read: usize,
 }
 
-impl Thread {
-    pub fn last_ref(&self) -> BlockRef {
-        last_ref(&self.messages)
+impl Conversation for Thread {
+    fn messages(&self) -> &[ThreadMessage] {
+        &self.messages
     }
-    pub fn my_last_ref(&self) -> BlockRef {
-        my_last_ref(&self.messages)
-    }
-    pub fn gap_refs(&self) -> Vec<BlockRef> {
-        gap_refs(&self.messages)
-    }
-    pub fn unread(&self) -> usize {
-        self.messages.len().saturating_sub(self.last_read)
+    fn last_read(&self) -> usize {
+        self.last_read
     }
 }
 
-/// A discovered public channel (metadata only, not yet subscribed).
 pub struct ChannelInfo {
     pub name: String,
     pub description: String,
@@ -112,7 +127,6 @@ pub struct ChannelInfo {
     pub channel_ref: BlockRef,
 }
 
-/// A subscribed public channel.
 pub struct Channel {
     pub name: String,
     pub description: String,
@@ -123,23 +137,15 @@ pub struct Channel {
     pub last_read: usize,
 }
 
-impl Channel {
-    pub fn last_ref(&self) -> BlockRef {
-        last_ref(&self.messages)
+impl Conversation for Channel {
+    fn messages(&self) -> &[ThreadMessage] {
+        &self.messages
     }
-    pub fn my_last_ref(&self) -> BlockRef {
-        my_last_ref(&self.messages)
-    }
-    pub fn gap_refs(&self) -> Vec<BlockRef> {
-        gap_refs(&self.messages)
-    }
-    pub fn unread(&self) -> usize {
-        self.messages.len().saturating_sub(self.last_read)
+    fn last_read(&self) -> usize {
+        self.last_read
     }
 }
 
-/// An encrypted group. Members are fixed at creation.
-/// Auto-subscribed on discovery (you only see groups you're a member of).
 pub struct Group {
     pub creator_pubkey: Pubkey,
     pub group_ref: BlockRef,
@@ -149,17 +155,11 @@ pub struct Group {
     pub last_read: usize,
 }
 
-impl Group {
-    pub fn last_ref(&self) -> BlockRef {
-        last_ref(&self.messages)
+impl Conversation for Group {
+    fn messages(&self) -> &[ThreadMessage] {
+        &self.messages
     }
-    pub fn my_last_ref(&self) -> BlockRef {
-        my_last_ref(&self.messages)
-    }
-    pub fn gap_refs(&self) -> Vec<BlockRef> {
-        gap_refs(&self.messages)
-    }
-    pub fn unread(&self) -> usize {
-        self.messages.len().saturating_sub(self.last_read)
+    fn last_read(&self) -> usize {
+        self.last_read
     }
 }

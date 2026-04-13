@@ -1,25 +1,12 @@
-use blake2::Digest;
-
 use crate::types::Pubkey;
 
-const SS58_PREFIX: u8 = 42;
-
-/// Full SS58 address from a 32-byte public key.
 pub fn ss58_from_pubkey(pubkey: &Pubkey) -> String {
-    let mut payload = vec![SS58_PREFIX];
-    payload.extend_from_slice(&pubkey.0);
-    let hash = {
-        let mut hasher = blake2::Blake2b512::new();
-        hasher.update(b"SS58PRE");
-        hasher.update(&payload);
-        hasher.finalize()
-    };
-    payload.extend_from_slice(&hash[..2]);
-    bs58_encode(&payload)
+    pubkey
+        .to_ss58(samp::Ss58Prefix::SUBSTRATE_GENERIC)
+        .as_str()
+        .to_string()
 }
 
-/// Shortened SS58 display: "5FHneW...94ty" (first 6 + ... + last 4 = 13 chars).
-/// The first 6 chars are the human-memorable identifier (how people refer to wallets).
 pub fn ss58_short(pubkey: &Pubkey) -> String {
     let full = ss58_from_pubkey(pubkey);
     if full.len() > 12 {
@@ -29,7 +16,6 @@ pub fn ss58_short(pubkey: &Pubkey) -> String {
     }
 }
 
-/// Truncate a string with ellipsis in the middle.
 pub fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
@@ -40,13 +26,10 @@ pub fn truncate(s: &str, max: usize) -> String {
     format!("{}...{}", &s[..max - 7], &s[s.len() - 4..])
 }
 
-/// Format a balance in plancks to human-readable form. Uses τ symbol for TAO.
-/// Full precision -- used for fee display.
 pub fn format_balance(plancks: u128, decimals: u32, symbol: &str) -> String {
     format_balance_inner(plancks, decimals, symbol, None)
 }
 
-/// Format a balance with limited decimal places -- used for status bar display.
 pub fn format_balance_short(plancks: u128, decimals: u32, symbol: &str) -> String {
     format_balance_inner(plancks, decimals, symbol, Some(4))
 }
@@ -59,12 +42,13 @@ fn format_balance_inner(
 ) -> String {
     let display_symbol = if symbol == "TAO" { "\u{03C4}" } else { symbol };
     if decimals == 0 {
-        return format!("{} {display_symbol}", format_number(plancks as u64));
+        return format!("{} {display_symbol}", format_number(plancks));
     }
     let divisor = 10u128.pow(decimals);
     let whole = plancks / divisor;
     let frac = plancks % divisor;
-    let frac_str = format!("{:0>width$}", frac, width = decimals as usize);
+    let width = usize::try_from(decimals).unwrap_or(0);
+    let frac_str = format!("{:0>width$}", frac, width = width);
     let trimmed = match max_frac {
         Some(max) => {
             let capped = if frac_str.len() > max {
@@ -76,7 +60,7 @@ fn format_balance_inner(
         }
         None => frac_str.trim_end_matches('0'),
     };
-    let whole_fmt = format_number(whole as u64);
+    let whole_fmt = format_number(whole);
     if trimmed.is_empty() {
         format!("{whole_fmt}.0 {display_symbol}")
     } else {
@@ -84,21 +68,17 @@ fn format_balance_inner(
     }
 }
 
-/// Format a fee amount -- uses RAO for small amounts, TAO for large.
-/// Picks the unit that produces the most readable number.
 pub fn format_fee(plancks: u128, decimals: u32, symbol: &str) -> String {
     let divisor = 10u128.pow(decimals);
     if plancks < divisor / 1000 {
-        // Less than 0.001 TAO -- display in RAO (whole numbers)
         let rao_symbol = if symbol == "TAO" { "RAO" } else { symbol };
-        format!("{} {rao_symbol}", format_number(plancks as u64))
+        format!("{} {rao_symbol}", format_number(plancks))
     } else {
-        // 0.001 TAO or more -- display in TAO with full precision
         format_balance(plancks, decimals, symbol)
     }
 }
 
-pub fn format_number(n: u64) -> String {
+pub fn format_number(n: u128) -> String {
     let s = n.to_string();
     let mut result = String::with_capacity(s.len() + s.len() / 3);
     for (i, c) in s.chars().enumerate() {
@@ -110,12 +90,10 @@ pub fn format_number(n: u64) -> String {
     result
 }
 
-/// Try to parse an SS58 address to a 32-byte public key. Returns None on failure.
 pub fn pubkey_from_ss58(address: &str) -> Option<Pubkey> {
     ss58_decode(address).ok()
 }
 
-/// True if `body` contains `@<my_ss58>` at a word boundary.
 pub fn body_mentions(body: &str, my_ss58: &str) -> bool {
     let target = my_ss58.as_bytes();
     if target.len() != 48 {
@@ -155,62 +133,101 @@ fn is_base58_byte(b: u8) -> bool {
     )
 }
 
-/// Decode an SS58 address to a 32-byte public key.
-pub fn ss58_decode(address: &str) -> Result<Pubkey, String> {
-    let decoded = bs58_decode(address).map_err(|_| "Invalid base58")?;
-    // Minimum: 1 (prefix) + 32 (pubkey) + 2 (checksum) = 35
-    if decoded.len() < 35 {
-        return Err("Address too short".into());
+pub fn ss58_decode(address: &str) -> Result<Pubkey, crate::error::AddressError> {
+    use crate::error::AddressError;
+    use samp::SampError;
+    match samp::Ss58Address::parse(address) {
+        Ok(addr) => Ok(*addr.pubkey()),
+        Err(SampError::Ss58InvalidBase58) => Err(AddressError::InvalidBase58),
+        Err(SampError::Ss58TooShort | SampError::Ss58PrefixUnsupported(_)) => {
+            Err(AddressError::TooShort)
+        }
+        Err(SampError::Ss58BadChecksum) => Err(AddressError::BadChecksum),
+        Err(_) => Err(AddressError::TooShort),
     }
-    let prefix_len = if decoded[0] < 64 { 1 } else { 2 };
-    let pubkey_end = prefix_len + 32;
-    if decoded.len() < pubkey_end + 2 {
-        return Err("Address too short".into());
-    }
-    // Verify checksum
-    let payload = &decoded[..pubkey_end];
-    let expected_checksum = &decoded[pubkey_end..pubkey_end + 2];
-    let hash = {
-        let mut hasher = blake2::Blake2b512::new();
-        hasher.update(b"SS58PRE");
-        hasher.update(payload);
-        hasher.finalize()
-    };
-    if &hash[..2] != expected_checksum {
-        return Err("Invalid checksum".into());
-    }
-    let mut pubkey = [0u8; 32];
-    pubkey.copy_from_slice(&decoded[prefix_len..pubkey_end]);
-    Ok(Pubkey(pubkey))
 }
 
-pub fn copy_to_clipboard(text: &str) {
+pub fn copy_to_clipboard(text: &str) -> bool {
+    if write_osc52(text) && term_supports_osc52() {
+        return true;
+    }
+    #[cfg(target_os = "macos")]
+    if try_pipe("pbcopy", &[], text) {
+        return true;
+    }
+    if std::env::var("WAYLAND_DISPLAY").is_ok() && try_pipe("wl-copy", &[], text) {
+        return true;
+    }
+    if std::env::var("DISPLAY").is_ok() && try_pipe("xclip", &["-selection", "clipboard"], text) {
+        return true;
+    }
+    if try_pipe("xsel", &["-b", "-i"], text) {
+        return true;
+    }
+    false
+}
+
+fn write_osc52(text: &str) -> bool {
     use std::io::{Write, stdout};
     let encoded = b64_encode(text.as_bytes());
     let mut out = stdout().lock();
-    let _ = out.write_all(b"\x1b]52;c;");
-    let _ = out.write_all(encoded.as_bytes());
-    let _ = out.write_all(b"\x07");
-    let _ = out.flush();
+    out.write_all(b"\x1b]52;c;").is_ok()
+        && out.write_all(encoded.as_bytes()).is_ok()
+        && out.write_all(b"\x07").is_ok()
+        && out.flush().is_ok()
+}
+
+fn term_supports_osc52() -> bool {
+    if std::env::var("TMUX").is_ok() {
+        return true;
+    }
+    matches!(
+        std::env::var("TERM_PROGRAM").as_deref(),
+        Ok("iTerm.app" | "WezTerm" | "Alacritty" | "kitty" | "ghostty")
+    )
+}
+
+fn try_pipe(cmd: &str, args: &[&str], text: &str) -> bool {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let Ok(mut child) = Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    if let Some(mut stdin) = child.stdin.take()
+        && stdin.write_all(text.as_bytes()).is_err()
+    {
+        return false;
+    }
+    matches!(child.wait(), Ok(s) if s.success())
 }
 
 fn b64_encode(data: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
-        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let b0 = u32::from(chunk[0]);
+        let b1 = u32::from(chunk.get(1).copied().unwrap_or(0));
+        let b2 = u32::from(chunk.get(2).copied().unwrap_or(0));
         let n = (b0 << 16) | (b1 << 8) | b2;
-        out.push(ALPHABET[((n >> 18) & 0x3f) as usize] as char);
-        out.push(ALPHABET[((n >> 12) & 0x3f) as usize] as char);
+        let i0 = ((n >> 18) & 0x3f) as usize;
+        let i1 = ((n >> 12) & 0x3f) as usize;
+        let i2 = ((n >> 6) & 0x3f) as usize;
+        let i3 = (n & 0x3f) as usize;
+        out.push(char::from(ALPHABET[i0]));
+        out.push(char::from(ALPHABET[i1]));
         out.push(if chunk.len() > 1 {
-            ALPHABET[((n >> 6) & 0x3f) as usize] as char
+            char::from(ALPHABET[i2])
         } else {
             '='
         });
         out.push(if chunk.len() > 2 {
-            ALPHABET[(n & 0x3f) as usize] as char
+            char::from(ALPHABET[i3])
         } else {
             '='
         });
@@ -218,62 +235,67 @@ fn b64_encode(data: &[u8]) -> String {
     out
 }
 
-fn bs58_decode(input: &str) -> Result<Vec<u8>, ()> {
-    const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    let mut bytes = vec![0u8];
-    for c in input.chars() {
-        let idx = ALPHABET.iter().position(|&a| a == c as u8).ok_or(())?;
-        let mut carry = idx;
-        for b in bytes.iter_mut() {
-            carry += *b as usize * 58;
-            *b = (carry % 256) as u8;
-            carry /= 256;
-        }
-        while carry > 0 {
-            bytes.push((carry % 256) as u8);
-            carry /= 256;
-        }
-    }
-    // Leading '1' characters = leading zero bytes
-    for c in input.chars() {
-        if c == '1' {
-            bytes.push(0);
-        } else {
-            break;
-        }
-    }
-    bytes.reverse();
-    Ok(bytes)
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn bs58_encode(data: &[u8]) -> String {
-    const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    if data.is_empty() {
-        return String::new();
+    #[test]
+    fn b64_encode_empty() {
+        assert_eq!(b64_encode(b""), "");
     }
-    let mut digits = vec![0u32];
-    for &byte in data {
-        let mut carry = byte as u32;
-        for d in digits.iter_mut() {
-            carry += *d * 256;
-            *d = carry % 58;
-            carry /= 58;
+
+    #[test]
+    fn b64_encode_single_byte() {
+        assert_eq!(b64_encode(b"f"), "Zg==");
+    }
+
+    #[test]
+    fn b64_encode_two_bytes() {
+        assert_eq!(b64_encode(b"fo"), "Zm8=");
+    }
+
+    #[test]
+    fn b64_encode_three_bytes() {
+        assert_eq!(b64_encode(b"foo"), "Zm9v");
+    }
+
+    #[test]
+    fn b64_encode_rfc4648_vectors() {
+        assert_eq!(b64_encode(b"foobar"), "Zm9vYmFy");
+        assert_eq!(b64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(b64_encode(b"foob"), "Zm9vYg==");
+    }
+
+    #[test]
+    fn b64_encode_binary() {
+        assert_eq!(b64_encode(&[0xFF, 0x00, 0xAA]), "/wCq");
+    }
+
+    #[test]
+    fn is_base58_byte_accepts_valid() {
+        for b in b'1'..=b'9' {
+            assert!(is_base58_byte(b));
         }
-        while carry > 0 {
-            digits.push(carry % 58);
-            carry /= 58;
+        for b in b'A'..=b'H' {
+            assert!(is_base58_byte(b));
         }
+        assert!(is_base58_byte(b'a'));
+        assert!(is_base58_byte(b'z'));
     }
-    let mut result = String::new();
-    for &b in data {
-        if b == 0 {
-            result.push(ALPHABET[0] as char);
-        } else {
-            break;
-        }
+
+    #[test]
+    fn is_base58_byte_rejects_invalid() {
+        assert!(!is_base58_byte(b'0'));
+        assert!(!is_base58_byte(b'I'));
+        assert!(!is_base58_byte(b'O'));
+        assert!(!is_base58_byte(b'l'));
+        assert!(!is_base58_byte(b' '));
+        assert!(!is_base58_byte(b'@'));
     }
-    for &d in digits.iter().rev() {
-        result.push(ALPHABET[d as usize] as char);
+
+    #[test]
+    fn copy_to_clipboard_returns_bool() {
+        // Just verify it doesn't panic; result depends on environment
+        let _ = copy_to_clipboard("test clipboard content");
     }
-    result
 }

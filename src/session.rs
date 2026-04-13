@@ -1,14 +1,17 @@
 use crate::conversation::{
-    Channel, ChannelInfo, Group, InboxMessage, NewMessage, Thread, ThreadMessage,
+    Channel, ChannelInfo, Conversation, Group, InboxMessage, NewMessage, Thread, ThreadMessage,
 };
 use crate::db::Db;
 use crate::error::{Result, SdkError};
+use crate::secret::{DecryptionKeys, Seed, SigningKey};
 use crate::types::{BlockRef, Pubkey};
 use chrono::{DateTime, Utc};
-use schnorrkel::keys::{ExpansionMode, MiniSecretKey};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::mpsc;
 use zeroize::Zeroizing;
+
+pub const MAX_GROUP_MEMBERS: usize = 20;
 
 fn rand_nonce() -> [u8; 12] {
     let mut nonce = [0u8; 12];
@@ -33,10 +36,12 @@ fn reindex(index: &mut HashMap<BlockRef, usize>, removed: usize) {
 }
 
 pub struct Session {
-    pub keypair: schnorrkel::Keypair,
+    signing: Option<Arc<SigningKey>>,
+    pubkey: Pubkey,
     pub my_ss58: String,
-    seed: Zeroizing<[u8; 32]>,
-    pub node_url: String,
+    seed: Option<Zeroizing<[u8; 32]>>,
+    view_scalar: Zeroizing<[u8; 32]>,
+    pub node_url: crate::types::NodeUrl,
     pub chain_info: crate::extrinsic::ChainInfo,
     pub block_number: u64,
     pub inbox: Vec<InboxMessage>,
@@ -59,18 +64,31 @@ pub struct Session {
 
 impl Session {
     pub fn new(
-        keypair: schnorrkel::Keypair,
+        signing: SigningKey,
         seed: Zeroizing<[u8; 32]>,
-        node_url: String,
+        keep_seed: bool,
+        node_url: crate::types::NodeUrl,
         chain_info: crate::extrinsic::ChainInfo,
         db: Db,
     ) -> Self {
-        let pk = Pubkey(keypair.public.to_bytes());
-        let my_ss58 = crate::util::ss58_from_pubkey(&pk);
+        let pubkey = signing.public_key();
+        let my_ss58 = crate::util::ss58_from_pubkey(&pubkey);
+        let view_scalar = Zeroizing::new(
+            *samp::sr25519_signing_scalar(&samp::Seed::from_bytes(*seed)).expose_secret(),
+        );
+        let signing = if keep_seed {
+            Some(Arc::new(signing))
+        } else {
+            drop(signing);
+            None
+        };
+        let seed = if keep_seed { Some(seed) } else { None };
         Self {
-            keypair,
+            signing,
+            pubkey,
             my_ss58,
             seed,
+            view_scalar,
             node_url,
             chain_info,
             block_number: 0,
@@ -97,8 +115,9 @@ impl Session {
         seed: &[u8; 32],
         node_url: &str,
         wallet_name: &str,
+        keep_seed: bool,
     ) -> Result<(Self, mpsc::Receiver<crate::event::Event>)> {
-        Self::start_with_mirrors(seed, node_url, wallet_name, &[]).await
+        Self::start_with_mirrors(seed, node_url, wallet_name, &[], keep_seed).await
     }
 
     pub async fn start_with_mirrors(
@@ -106,27 +125,28 @@ impl Session {
         node_url: &str,
         wallet_name: &str,
         mirror_urls: &[String],
+        keep_seed: bool,
     ) -> Result<(Self, mpsc::Receiver<crate::event::Event>)> {
-        let msk = MiniSecretKey::from_bytes(seed)
-            .map_err(|e| SdkError::Wallet(format!("Invalid seed: {e}")))?;
-        let keypair = msk.expand_to_keypair(ExpansionMode::Ed25519);
-        let my_pubkey = Pubkey(keypair.public.to_bytes());
+        let signing = Seed::from_bytes(*seed).derive_signing_key();
+        let my_pubkey = signing.public_key();
 
-        let chain_info = crate::extrinsic::fetch_chain_info(node_url)
-            .await
-            .map_err(|e| SdkError::Chain(format!("Failed to fetch chain info: {e}")))?;
+        let chain_info = crate::extrinsic::fetch_chain_info(node_url).await?;
 
         let (symbol, decimals) = crate::extrinsic::fetch_token_info(node_url)
             .await
             .unwrap_or_else(|_| ("TAO".into(), 9));
 
-        let db = Db::open(wallet_name, seed, &chain_info.genesis_hash)
-            .map_err(|e| SdkError::Database(e.to_string()))?;
+        let db = Db::open(
+            wallet_name,
+            seed,
+            chain_info.chain_params.genesis_hash().as_bytes(),
+        )?;
 
         let mut session = Self::new(
-            keypair,
+            signing,
             Zeroizing::new(*seed),
-            node_url.to_string(),
+            keep_seed,
+            crate::types::NodeUrl::parse(node_url).map_err(|e| SdkError::Other(e.to_string()))?,
             chain_info,
             db,
         );
@@ -137,7 +157,7 @@ impl Session {
         if let Ok(bal) = crate::extrinsic::fetch_balance(
             node_url,
             &my_pubkey,
-            &session.chain_info.account_info_layout,
+            &session.chain_info.account_storage,
         )
         .await
         {
@@ -146,38 +166,63 @@ impl Session {
 
         let (tx, rx) = mpsc::channel();
 
-        // Chain subscription
         {
             let url = node_url.to_string();
             let etx = tx.clone();
-            let sc = zeroize::Zeroizing::new(*seed);
+            let keys = session.decryption_keys();
             tokio::spawn(async move {
-                crate::chain::subscribe_blocks(&url, my_pubkey, sc, etx).await;
+                crate::chain::subscribe_blocks(&url, my_pubkey, keys, etx).await;
             });
         }
 
-        // Mirror sync
         session.has_mirror = !mirror_urls.is_empty();
         if session.has_mirror {
             let subscribed: Vec<BlockRef> =
                 session.channels.iter().map(|c| c.channel_ref).collect();
-            for mirror_url in mirror_urls {
-                let url = mirror_url.clone();
-                let sc = zeroize::Zeroizing::new(*seed);
-                let pk = my_pubkey;
-                let channels = subscribed.clone();
-                let etx = tx.clone();
-                tokio::spawn(async move {
-                    crate::mirror::sync(&url, 42, &sc, &pk, channels, 0, etx).await;
-                });
-            }
+            let urls: Vec<String> = mirror_urls.iter().map(|u| u.to_string()).collect();
+            let node = node_url.to_string();
+            let keys = session.decryption_keys();
+            let pk = my_pubkey;
+            let etx = tx.clone();
+            let chain_name = session.chain_info.name.clone();
+            let ss58_prefix = session.chain_info.ss58_prefix;
+            tokio::spawn(async move {
+                crate::mirror::sync(
+                    urls,
+                    &node,
+                    &chain_name,
+                    ss58_prefix,
+                    &keys,
+                    &pk,
+                    subscribed,
+                    0,
+                    etx,
+                )
+                .await;
+            });
         }
 
         Ok((session, rx))
     }
 
     pub fn pubkey(&self) -> Pubkey {
-        Pubkey(self.keypair.public.to_bytes())
+        self.pubkey
+    }
+
+    pub fn signing(&self) -> Option<Arc<SigningKey>> {
+        self.signing.as_ref().map(Arc::clone)
+    }
+
+    pub fn view_scalar(&self) -> samp::ViewScalar {
+        samp::ViewScalar::from_bytes(*self.view_scalar)
+    }
+
+    pub fn decryption_keys(&self) -> DecryptionKeys {
+        DecryptionKeys::new(*self.view_scalar, self.seed.as_deref().copied())
+    }
+
+    pub fn cached_seed(&self) -> Option<&[u8; 32]> {
+        self.seed.as_deref()
     }
 
     pub fn ss58(&self) -> &str {
@@ -206,7 +251,7 @@ impl Session {
                 draft: String::new(),
                 last_read: msg_count,
             });
-            self.refresh_gaps(i);
+            self.refresh_gaps(crate::db::ConversationKind::Thread, i);
         }
 
         for (channel_ref, name, description, creator_ss58, messages) in self.db.load_channels() {
@@ -222,7 +267,7 @@ impl Session {
                 draft: String::new(),
                 last_read: msg_count,
             });
-            self.refresh_channel_gaps(i);
+            self.refresh_gaps(crate::db::ConversationKind::Channel, i);
         }
 
         for (channel_ref, name, description, creator_ss58) in self.db.load_known_channels() {
@@ -261,7 +306,31 @@ impl Session {
                 draft: String::new(),
                 last_read: msg_count,
             });
-            self.refresh_group_gaps(i);
+            self.refresh_gaps(crate::db::ConversationKind::Group, i);
+        }
+
+        for (kind, bref, body) in self.db.load_drafts() {
+            if body.is_empty() {
+                continue;
+            }
+            match kind {
+                crate::db::ConversationKind::Thread => {
+                    if let Some(t) = self.threads.iter_mut().find(|t| t.thread_ref == bref) {
+                        t.draft = body;
+                    }
+                }
+                crate::db::ConversationKind::Channel => {
+                    if let Some(c) = self.channels.iter_mut().find(|c| c.channel_ref == bref) {
+                        c.draft = body;
+                    }
+                }
+                crate::db::ConversationKind::Group => {
+                    if let Some(g) = self.groups.iter_mut().find(|g| g.group_ref == bref) {
+                        g.draft = body;
+                    }
+                }
+                crate::db::ConversationKind::Inbox => {}
+            }
         }
     }
 
@@ -280,7 +349,7 @@ impl Session {
         self.peer_pubkeys.insert(peer_ss58.clone(), peer);
         self.db.upsert_peer(&peer_ss58, &peer);
 
-        let (block_number, ext_index) = (block_ref.block, block_ref.index);
+        let (block_number, ext_index) = (block_ref.block().get(), block_ref.index().get());
         if block_number > 0 {
             let already = if is_mine {
                 self.outbox
@@ -331,18 +400,15 @@ impl Session {
         self.peer_pubkeys.insert(peer_ss58.clone(), peer);
         self.db.upsert_peer(&peer_ss58, &peer);
 
-        if self.db.has_message_at(BlockRef {
-            block: msg.block_number,
-            index: msg.ext_index,
-        }) {
+        if self.db.has_message_at(
+            crate::db::ConversationKind::Thread,
+            BlockRef::from_parts(msg.block_number, msg.ext_index),
+        ) {
             return;
         }
 
         if thread_ref == BlockRef::ZERO {
-            thread_ref = BlockRef {
-                block: msg.block_number,
-                index: msg.ext_index,
-            };
+            thread_ref = BlockRef::from_parts(msg.block_number, msg.ext_index);
         }
 
         let idx = if let Some(&i) = self.thread_index.get(&thread_ref) {
@@ -380,20 +446,13 @@ impl Session {
             i
         };
 
-        let has_gap = (msg.reply_to != BlockRef::ZERO && !self.db.has_message_at(msg.reply_to))
-            || (msg.continues != BlockRef::ZERO && !self.db.has_message_at(msg.continues));
+        let has_gap = self.db.has_gap(
+            crate::db::ConversationKind::Thread,
+            msg.reply_to,
+            msg.continues,
+        );
 
-        let tm = ThreadMessage {
-            sender_ss58: msg.sender_ss58,
-            timestamp: msg.timestamp,
-            body: msg.body,
-            is_mine,
-            reply_to: msg.reply_to,
-            continues: msg.continues,
-            block_number: msg.block_number,
-            ext_index: msg.ext_index,
-            has_gap,
-        };
+        let tm = ThreadMessage::from_new(msg, is_mine, has_gap);
 
         self.db
             .insert_thread_message(thread_ref, &peer_ss58, &tm, tm.block_number, tm.ext_index);
@@ -404,10 +463,10 @@ impl Session {
     }
 
     pub fn add_channel_message(&mut self, channel_ref: BlockRef, msg: NewMessage) {
-        if self.db.has_channel_message_at(BlockRef {
-            block: msg.block_number,
-            index: msg.ext_index,
-        }) {
+        if self.db.has_message_at(
+            crate::db::ConversationKind::Channel,
+            BlockRef::from_parts(msg.block_number, msg.ext_index),
+        ) {
             return;
         }
         let idx = match self.channel_index.get(&channel_ref) {
@@ -417,24 +476,21 @@ impl Session {
 
         let is_mine = msg.sender_ss58 == crate::util::ss58_short(&self.pubkey());
 
-        let has_gap = (msg.reply_to != BlockRef::ZERO
-            && !self.db.has_channel_message_at(msg.reply_to))
-            || (msg.continues != BlockRef::ZERO && !self.db.has_channel_message_at(msg.continues));
+        let has_gap = self.db.has_gap(
+            crate::db::ConversationKind::Channel,
+            msg.reply_to,
+            msg.continues,
+        );
 
-        let tm = ThreadMessage {
-            sender_ss58: msg.sender_ss58,
-            timestamp: msg.timestamp,
-            body: msg.body,
-            is_mine,
-            reply_to: msg.reply_to,
-            continues: msg.continues,
-            block_number: msg.block_number,
-            ext_index: msg.ext_index,
-            has_gap,
-        };
+        let tm = ThreadMessage::from_new(msg, is_mine, has_gap);
 
-        self.db
-            .insert_channel_message(channel_ref, &tm, tm.block_number, tm.ext_index);
+        self.db.insert_threaded_message(
+            crate::db::ConversationKind::Channel,
+            channel_ref,
+            &tm,
+            tm.block_number,
+            tm.ext_index,
+        );
         self.channels[idx].messages.push(tm);
         self.channels[idx]
             .messages
@@ -577,21 +633,19 @@ impl Session {
         i
     }
 
-    pub fn refresh_gaps(&mut self, thread_idx: usize) {
-        if let Some(thread) = self.threads.get_mut(thread_idx) {
-            refresh_message_gaps(&mut thread.messages, |br| self.db.has_message_at(br));
-        }
-    }
-
-    pub fn refresh_channel_gaps(&mut self, chan_idx: usize) {
-        if let Some(ch) = self.channels.get_mut(chan_idx) {
-            refresh_message_gaps(&mut ch.messages, |br| self.db.has_channel_message_at(br));
-        }
-    }
-
-    pub fn refresh_group_gaps(&mut self, group_idx: usize) {
-        if let Some(g) = self.groups.get_mut(group_idx) {
-            refresh_message_gaps(&mut g.messages, |br| self.db.has_group_message_at(br));
+    pub fn refresh_gaps(&mut self, kind: crate::db::ConversationKind, idx: usize) {
+        let messages: Option<&mut Vec<ThreadMessage>> = match kind {
+            crate::db::ConversationKind::Thread => {
+                self.threads.get_mut(idx).map(|t| &mut t.messages)
+            }
+            crate::db::ConversationKind::Channel => {
+                self.channels.get_mut(idx).map(|c| &mut c.messages)
+            }
+            crate::db::ConversationKind::Group => self.groups.get_mut(idx).map(|g| &mut g.messages),
+            crate::db::ConversationKind::Inbox => None,
+        };
+        if let Some(messages) = messages {
+            refresh_message_gaps(messages, |br| self.db.has_message_at(kind, br));
         }
     }
 
@@ -635,10 +689,10 @@ impl Session {
     }
 
     pub fn add_group_message(&mut self, group_ref: BlockRef, msg: NewMessage) {
-        if self.db.has_group_message_at(BlockRef {
-            block: msg.block_number,
-            index: msg.ext_index,
-        }) {
+        if self.db.has_message_at(
+            crate::db::ConversationKind::Group,
+            BlockRef::from_parts(msg.block_number, msg.ext_index),
+        ) {
             return;
         }
         let idx = match self.group_index.get(&group_ref) {
@@ -648,24 +702,21 @@ impl Session {
 
         let is_mine = msg.sender_ss58 == crate::util::ss58_short(&self.pubkey());
 
-        let has_gap = (msg.reply_to != BlockRef::ZERO
-            && !self.db.has_group_message_at(msg.reply_to))
-            || (msg.continues != BlockRef::ZERO && !self.db.has_group_message_at(msg.continues));
+        let has_gap = self.db.has_gap(
+            crate::db::ConversationKind::Group,
+            msg.reply_to,
+            msg.continues,
+        );
 
-        let tm = ThreadMessage {
-            sender_ss58: msg.sender_ss58,
-            timestamp: msg.timestamp,
-            body: msg.body,
-            is_mine,
-            reply_to: msg.reply_to,
-            continues: msg.continues,
-            block_number: msg.block_number,
-            ext_index: msg.ext_index,
-            has_gap,
-        };
+        let tm = ThreadMessage::from_new(msg, is_mine, has_gap);
 
-        self.db
-            .insert_group_message(group_ref, &tm, tm.block_number, tm.ext_index);
+        self.db.insert_threaded_message(
+            crate::db::ConversationKind::Group,
+            group_ref,
+            &tm,
+            tm.block_number,
+            tm.ext_index,
+        );
         self.groups[idx].messages.push(tm);
         self.groups[idx]
             .messages
@@ -701,80 +752,104 @@ impl Session {
             .collect()
     }
 
-    // -----------------------------------------------------------------------
-    // Remark builders — encode SAMP messages ready for on-chain submission
-    // -----------------------------------------------------------------------
-
-    pub fn build_public_message(&self, recipient: &Pubkey, body: &str) -> Result<Vec<u8>> {
-        Ok(samp::encode_public(&recipient.0, body.as_bytes()))
+    pub fn build_public_message(
+        &self,
+        recipient: &Pubkey,
+        body: &crate::types::MessageBody,
+    ) -> Result<samp::RemarkBytes> {
+        Ok(samp::encode_public(recipient, body.as_str()))
     }
 
-    pub fn build_encrypted_message(&self, recipient: &Pubkey, body: &str) -> Result<Vec<u8>> {
-        let nonce = rand_nonce();
-        let enc_pk = curve25519_dalek::ristretto::CompressedRistretto(recipient.0);
-        let encrypted = samp::encrypt(body.as_bytes(), &enc_pk, &nonce, &self.seed)
+    pub fn build_encrypted_message(
+        &self,
+        seed: &[u8; 32],
+        recipient: &Pubkey,
+        body: &crate::types::MessageBody,
+    ) -> Result<samp::RemarkBytes> {
+        let nonce = samp::Nonce::from_bytes(rand_nonce());
+        let sender = samp::Seed::from_bytes(*seed);
+        let plaintext = samp::Plaintext::from_bytes(body.as_str().as_bytes().to_vec());
+        let encrypted = samp::encrypt(&plaintext, recipient, &nonce, &sender)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
-        let vt = samp::compute_view_tag(&self.seed, &enc_pk, &nonce)
+        let vt = samp::compute_view_tag(&sender, recipient, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_encrypted(
-            samp::CONTENT_TYPE_ENCRYPTED,
+            samp::ContentType::Encrypted,
             vt,
             &nonce,
             &encrypted,
         ))
     }
 
-    pub fn build_thread_root(&self, recipient: &Pubkey, body: &str) -> Result<Vec<u8>> {
-        let nonce = rand_nonce();
-        let plaintext = samp::encode_thread_content(
+    pub fn build_thread_root(
+        &self,
+        seed: &[u8; 32],
+        recipient: &Pubkey,
+        body: &crate::types::MessageBody,
+    ) -> Result<samp::RemarkBytes> {
+        let nonce = samp::Nonce::from_bytes(rand_nonce());
+        let sender = samp::Seed::from_bytes(*seed);
+        let plaintext = samp::Plaintext::from_bytes(samp::encode_thread_content(
             BlockRef::ZERO,
             BlockRef::ZERO,
             BlockRef::ZERO,
-            body.as_bytes(),
-        );
-        let enc_pk = curve25519_dalek::ristretto::CompressedRistretto(recipient.0);
-        let encrypted = samp::encrypt(&plaintext, &enc_pk, &nonce, &self.seed)
+            body.as_str().as_bytes(),
+        ));
+        let encrypted = samp::encrypt(&plaintext, recipient, &nonce, &sender)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
-        let vt = samp::compute_view_tag(&self.seed, &enc_pk, &nonce)
+        let vt = samp::compute_view_tag(&sender, recipient, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_encrypted(
-            samp::CONTENT_TYPE_THREAD,
+            samp::ContentType::Thread,
             vt,
             &nonce,
             &encrypted,
         ))
     }
 
-    pub fn build_thread_reply(&self, thread_idx: usize, body: &str) -> Result<Vec<u8>> {
+    pub fn build_thread_reply(
+        &self,
+        seed: &[u8; 32],
+        thread_idx: usize,
+        body: &crate::types::MessageBody,
+    ) -> Result<samp::RemarkBytes> {
         let thread = self
             .threads
             .get(thread_idx)
             .ok_or_else(|| SdkError::NotFound("Thread not found".into()))?;
-        let nonce = rand_nonce();
-        let plaintext = samp::encode_thread_content(
+        let nonce = samp::Nonce::from_bytes(rand_nonce());
+        let sender = samp::Seed::from_bytes(*seed);
+        let plaintext = samp::Plaintext::from_bytes(samp::encode_thread_content(
             thread.thread_ref,
             thread.last_ref(),
             thread.my_last_ref(),
-            body.as_bytes(),
-        );
-        let enc_pk = curve25519_dalek::ristretto::CompressedRistretto(thread.peer_pubkey.0);
-        let encrypted = samp::encrypt(&plaintext, &enc_pk, &nonce, &self.seed)
+            body.as_str().as_bytes(),
+        ));
+        let encrypted = samp::encrypt(&plaintext, &thread.peer_pubkey, &nonce, &sender)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
-        let vt = samp::compute_view_tag(&self.seed, &enc_pk, &nonce)
+        let vt = samp::compute_view_tag(&sender, &thread.peer_pubkey, &nonce)
             .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_encrypted(
-            samp::CONTENT_TYPE_THREAD,
+            samp::ContentType::Thread,
             vt,
             &nonce,
             &encrypted,
         ))
     }
 
-    pub fn build_channel_create(&self, name: &str, description: &str) -> Result<Vec<u8>> {
-        samp::encode_channel_create(name, description).map_err(|e| SdkError::Other(e.to_string()))
+    pub fn build_channel_create(
+        &self,
+        name: &samp::ChannelName,
+        description: &samp::ChannelDescription,
+    ) -> Result<samp::RemarkBytes> {
+        Ok(samp::encode_channel_create(name, description))
     }
 
-    pub fn build_channel_message(&self, channel_idx: usize, body: &str) -> Result<Vec<u8>> {
+    pub fn build_channel_message(
+        &self,
+        channel_idx: usize,
+        body: &crate::types::MessageBody,
+    ) -> Result<samp::RemarkBytes> {
         let channel = self
             .channels
             .get(channel_idx)
@@ -783,23 +858,33 @@ impl Session {
             channel.channel_ref,
             channel.last_ref(),
             channel.my_last_ref(),
-            body.as_bytes(),
+            body.as_str(),
         ))
     }
 
-    pub fn build_group_create(&self, members: &[Pubkey], body: &str) -> Result<Vec<u8>> {
-        let nonce = rand_nonce();
-        let raw_members: Vec<[u8; 32]> = members.iter().map(|pk| pk.0).collect();
-        let mut body_bytes = samp::encode_group_members(&raw_members);
-        body_bytes.extend_from_slice(body.as_bytes());
-        let plaintext = samp::encode_thread_content(
+    pub fn build_group_create(
+        &self,
+        seed: &[u8; 32],
+        members: &[Pubkey],
+        body: &crate::types::MessageBody,
+    ) -> Result<samp::RemarkBytes> {
+        if members.len() > MAX_GROUP_MEMBERS {
+            return Err(SdkError::Other(format!(
+                "Group too large: max {MAX_GROUP_MEMBERS} members supported"
+            )));
+        }
+        let nonce = samp::Nonce::from_bytes(rand_nonce());
+        let sender = samp::Seed::from_bytes(*seed);
+        let mut body_bytes = samp::encode_group_members(members);
+        body_bytes.extend_from_slice(body.as_str().as_bytes());
+        let plaintext = samp::Plaintext::from_bytes(samp::encode_thread_content(
             BlockRef::ZERO,
             BlockRef::ZERO,
             BlockRef::ZERO,
             &body_bytes,
-        );
+        ));
         let (eph_pubkey, capsules, ciphertext) =
-            samp::encrypt_for_group(&plaintext, &raw_members, &nonce, &self.seed)
+            samp::encrypt_for_group(&plaintext, members, &nonce, &sender)
                 .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_group(
             &nonce,
@@ -809,21 +894,26 @@ impl Session {
         ))
     }
 
-    pub fn build_group_message(&self, group_idx: usize, body: &str) -> Result<Vec<u8>> {
+    pub fn build_group_message(
+        &self,
+        seed: &[u8; 32],
+        group_idx: usize,
+        body: &crate::types::MessageBody,
+    ) -> Result<samp::RemarkBytes> {
         let group = self
             .groups
             .get(group_idx)
             .ok_or_else(|| SdkError::NotFound("Group not found".into()))?;
-        let nonce = rand_nonce();
-        let plaintext = samp::encode_thread_content(
+        let nonce = samp::Nonce::from_bytes(rand_nonce());
+        let sender = samp::Seed::from_bytes(*seed);
+        let plaintext = samp::Plaintext::from_bytes(samp::encode_thread_content(
             group.group_ref,
             group.last_ref(),
             group.my_last_ref(),
-            body.as_bytes(),
-        );
-        let raw_members: Vec<[u8; 32]> = group.members.iter().map(|pk| pk.0).collect();
+            body.as_str().as_bytes(),
+        ));
         let (eph_pubkey, capsules, ciphertext) =
-            samp::encrypt_for_group(&plaintext, &raw_members, &nonce, &self.seed)
+            samp::encrypt_for_group(&plaintext, &group.members, &nonce, &sender)
                 .map_err(|e| SdkError::Encryption(e.to_string()))?;
         Ok(samp::encode_group(
             &nonce,
@@ -833,38 +923,46 @@ impl Session {
         ))
     }
 
-    pub async fn submit(&self, remark: &[u8]) -> Result<String> {
+    pub async fn submit(&self, remark: &samp::RemarkBytes) -> Result<String> {
+        let signing = self
+            .signing
+            .as_ref()
+            .expect("signing key required for submit");
         crate::extrinsic::submit_remark(
-            &self.node_url,
+            self.node_url.as_str(),
             remark,
-            &self.keypair,
+            signing,
             &self.my_ss58,
             &self.chain_info,
         )
         .await
-        .map_err(SdkError::Chain)
+        .map_err(SdkError::from)
     }
 
     pub async fn fetch_balance(&self) -> Result<u128> {
         let pk = self.pubkey();
-        crate::extrinsic::fetch_balance(&self.node_url, &pk, &self.chain_info.account_info_layout)
-            .await
-            .map_err(SdkError::Chain)
+        Ok(crate::extrinsic::fetch_balance(
+            self.node_url.as_str(),
+            &pk,
+            &self.chain_info.account_storage,
+        )
+        .await?)
     }
 
-    pub async fn estimate_fee(&self, remark: &[u8]) -> Result<u128> {
-        crate::extrinsic::estimate_fee(
-            &self.node_url,
+    pub async fn estimate_fee(&self, remark: &samp::RemarkBytes) -> Result<u128> {
+        let signing = self
+            .signing
+            .as_ref()
+            .expect("signing key required for fee estimation");
+        Ok(crate::extrinsic::estimate_fee(
+            self.node_url.as_str(),
             remark,
-            &self.keypair,
+            signing,
             &self.my_ss58,
             &self.chain_info,
         )
-        .await
-        .map_err(SdkError::Chain)
+        .await?)
     }
-
-    // -----------------------------------------------------------------------
 
     pub fn cleanup_pending(&mut self) -> Option<CleanupResult> {
         let mut removed_thread = None;
