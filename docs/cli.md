@@ -35,6 +35,18 @@ taolk wallet list
 
 Wallets are stored in `~/.samp/wallets/`.
 
+## Database
+
+### Clear
+
+Delete the local database for a wallet. Removes all cached conversations, channel subscriptions, and message history. The wallet file itself is not affected.
+
+```
+taolk db clear --name <name>
+```
+
+On next launch, taolk rebuilds state from the chain. Use this to recover from a corrupted database or to force a full resync.
+
 ## Configuration
 
 Configuration is stored as TOML at the platform config directory:
@@ -102,6 +114,12 @@ If you mistype a key name, taolk suggests the closest match (Levenshtein distanc
 | `network.node` | string | `wss://entrypoint-finney.opentensor.ai:443` | Subtensor node WebSocket URL |
 | `network.mirrors` | string[] | -- | SAMP mirror URLs |
 | `security.lock_timeout` | integer | `300` | Auto-lock timeout in seconds (0 disables) |
+| `security.require_password_per_send` | bool | `false` | Require password confirmation before each send |
+| `notifications.enabled` | bool | `true` | Play notification sounds |
+| `notifications.volume` | integer | `100` | Volume 0-100 |
+| `notifications.dm` | bool | `true` | Sound on direct messages |
+| `notifications.ambient` | bool | `false` | Sound on channel messages |
+| `notifications.mention` | bool | `true` | Sound on mentions |
 | `ui.sidebar_width` | integer | `28` | Sidebar width in columns |
 | `ui.mouse` | boolean | `true` | Enable mouse support |
 | `ui.timestamp_format` | string | `%H:%M` | Message time format (chrono strftime) |
@@ -158,4 +176,22 @@ Use 24-hour timestamps with seconds:
 
 ```
 taolk config set ui.timestamp_format "%H:%M:%S"
+```
+
+Require password before every send:
+
+```
+taolk config set security.require_password_per_send true
+```
+
+Mute channel notification sounds but keep DM and mention alerts:
+
+```
+taolk config set notifications.ambient false
+```
+
+Clear a wallet's local database and resync from chain:
+
+```
+taolk db clear --name alice
 ```

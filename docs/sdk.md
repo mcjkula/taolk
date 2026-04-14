@@ -6,31 +6,84 @@ Add `taolk` as a library dependency. Disable the `tui` feature (enabled by defau
 
 ```toml
 [dependencies]
-taolk = { path = "../taolk", default-features = false }
+taolk = { version = "2", default-features = false }
 ```
 
 The `tui` feature gates `ratatui`, `crossterm`, `rpassword`, and `clap`. Without it, you get the core SDK: session management, wallet operations, SAMP encoding, chain submission.
 
-## Quick start
+## Hello World: Offline
+
+Create a wallet, derive keys, and encode a SAMP public remark -- no chain connection needed.
 
 ```rust
-use taolk::{wallet, Session};
+use taolk::secret::{Password, Phrase, Seed};
+use taolk::wallet;
+
+fn main() {
+    // Generate a fresh mnemonic and derive a seed
+    let phrase = Phrase::generate();
+    println!("Recovery phrase: {}", phrase.words().join(" "));
+
+    let seed = Seed::from_phrase(&phrase);
+    let signing_key = seed.derive_signing_key();
+    let pubkey = signing_key.public_key();
+    println!("Public key: {pubkey:?}");
+
+    // Persist the seed in an encrypted wallet file
+    let password = Password::new("hunter2".into());
+    wallet::create("demo", &password, &seed).expect("create wallet");
+
+    // Re-open the wallet to verify
+    let recovered = wallet::open("demo", &password).expect("open wallet");
+    assert!(seed.ct_eq(&recovered));
+    println!("Wallet round-trip OK");
+}
+```
+
+## Hello World: Connected
+
+Open a wallet, start a session, send an encrypted message, and listen for events.
+
+```rust
+use taolk::secret::Password;
+use taolk::{wallet, Event, Pubkey, Session};
 
 #[tokio::main]
 async fn main() {
-    let seed = wallet::open("default", "hunter2").unwrap();
-    let (session, rx) = Session::start(&seed, "wss://entrypoint-finney.opentensor.ai:443", "default")
-        .await
-        .unwrap();
+    // Open the wallet
+    let password = Password::new("hunter2".into());
+    let seed = wallet::open("demo", &password).expect("open wallet");
+
+    // Start a session (keep_seed = true so we can encrypt later)
+    let (session, rx) = Session::start(
+        seed.as_bytes(),
+        "wss://entrypoint-finney.opentensor.ai:443",
+        "demo",
+        true,
+    )
+    .await
+    .expect("start session");
+
+    println!("Running as {}", session.ss58());
 
     // Send an encrypted message
-    let recipient = /* Pubkey from SS58 or bytes */;
-    let remark = session.build_encrypted_message(&recipient, "hello").unwrap();
-    session.submit(&remark).await.unwrap();
+    let recipient = Pubkey([0xab; 32]); // replace with real pubkey
+    let body = taolk::MessageBody::from("hello");
+    let remark = session
+        .build_encrypted_message(seed.as_bytes(), &recipient, &body)
+        .expect("build message");
+    session.submit(&remark).await.expect("submit");
 
-    // Receive events
+    // Listen for events
     while let Ok(event) = rx.recv() {
-        println!("{event:?}");
+        match event {
+            Event::MessageSent => println!("Message confirmed on-chain"),
+            Event::NewMessage { decrypted_body: Some(body), sender, .. } => {
+                println!("From {sender:?}: {body}");
+            }
+            Event::Error(e) => eprintln!("Error: {e}"),
+            _ => {}
+        }
     }
 }
 ```
@@ -46,10 +99,11 @@ pub async fn start(
     seed: &[u8; 32],
     node_url: &str,
     wallet_name: &str,
+    keep_seed: bool,
 ) -> Result<(Self, mpsc::Receiver<Event>)>
 ```
 
-Derives an SR25519 keypair from the seed, connects to the subtensor node at `node_url`, opens the local database for `wallet_name`, loads persisted conversations, fetches the on-chain balance, and spawns a background task that subscribes to new blocks. Returns the session and a channel receiver for incoming events.
+Derives an SR25519 keypair from the seed, connects to the subtensor node at `node_url`, opens the local database for `wallet_name`, loads persisted conversations, fetches the on-chain balance, and spawns a background task that subscribes to new blocks. When `keep_seed` is `true`, the session retains the seed in memory for encryption operations. Returns the session and a channel receiver for incoming events.
 
 ```rust
 pub async fn start_with_mirrors(
@@ -57,6 +111,7 @@ pub async fn start_with_mirrors(
     node_url: &str,
     wallet_name: &str,
     mirror_urls: &[String],
+    keep_seed: bool,
 ) -> Result<(Self, mpsc::Receiver<Event>)>
 ```
 
@@ -64,12 +119,14 @@ Same as `start`, but also spawns mirror sync tasks for each URL in `mirror_urls`
 
 ### Sending messages
 
-All `build_*` methods return `Result<Vec<u8>>` -- a SAMP-encoded remark ready for on-chain submission via `submit`. None of them touch the network; they only encode bytes.
+All `build_*` methods return `Result<RemarkBytes>` -- a SAMP-encoded remark ready for on-chain submission via `submit`. None of them touch the network; they only encode bytes. `RemarkBytes` is re-exported from the `samp` crate.
+
+Encrypted methods require `seed: &[u8; 32]`. Unencrypted methods do not.
 
 #### `build_public_message`
 
 ```rust
-pub fn build_public_message(&self, recipient: &Pubkey, body: &str) -> Result<Vec<u8>>
+pub fn build_public_message(&self, recipient: &Pubkey, body: &MessageBody) -> Result<RemarkBytes>
 ```
 
 Encodes a plaintext (unencrypted) message to `recipient`. The body is visible to anyone scanning the chain.
@@ -77,23 +134,23 @@ Encodes a plaintext (unencrypted) message to `recipient`. The body is visible to
 #### `build_encrypted_message`
 
 ```rust
-pub fn build_encrypted_message(&self, recipient: &Pubkey, body: &str) -> Result<Vec<u8>>
+pub fn build_encrypted_message(&self, seed: &[u8; 32], recipient: &Pubkey, body: &MessageBody) -> Result<RemarkBytes>
 ```
 
-Encrypts `body` for `recipient` using X25519 ECDH with a random 12-byte nonce. Produces a `0x11` (encrypted direct) SAMP envelope. Returns `SdkError::Encryption` if the recipient public key is invalid.
+Encrypts `body` for `recipient` using Ristretto255 ECDH + ChaCha20-Poly1305. Returns `SdkError::Encryption` if the recipient public key is invalid.
 
 #### `build_thread_root`
 
 ```rust
-pub fn build_thread_root(&self, recipient: &Pubkey, body: &str) -> Result<Vec<u8>>
+pub fn build_thread_root(&self, seed: &[u8; 32], recipient: &Pubkey, body: &MessageBody) -> Result<RemarkBytes>
 ```
 
-Creates a new encrypted thread with `recipient`. The on-chain extrinsic that includes this remark becomes the thread's `BlockRef` anchor. Produces a `0x12` (encrypted thread) SAMP envelope with all ref fields set to `BlockRef::ZERO` (no parent, no reply-to, no continues).
+Creates a new encrypted thread with `recipient`. The on-chain extrinsic that includes this remark becomes the thread's `BlockRef` anchor. Produces an encrypted thread SAMP envelope with all ref fields set to `BlockRef::ZERO` (no parent, no reply-to, no continues).
 
 #### `build_thread_reply`
 
 ```rust
-pub fn build_thread_reply(&self, thread_idx: usize, body: &str) -> Result<Vec<u8>>
+pub fn build_thread_reply(&self, seed: &[u8; 32], thread_idx: usize, body: &MessageBody) -> Result<RemarkBytes>
 ```
 
 Appends an encrypted reply to the thread at index `thread_idx` in `session.threads`. Automatically fills in the thread ref, reply-to (last message in thread), and continues (last message sent by you). Returns `SdkError::NotFound` if `thread_idx` is out of bounds.
@@ -101,7 +158,7 @@ Appends an encrypted reply to the thread at index `thread_idx` in `session.threa
 #### `build_channel_create`
 
 ```rust
-pub fn build_channel_create(&self, name: &str, description: &str) -> Result<Vec<u8>>
+pub fn build_channel_create(&self, name: &str, description: &str) -> Result<RemarkBytes>
 ```
 
 Encodes a channel creation remark. `name` and `description` are plaintext and visible on-chain. The resulting extrinsic's `BlockRef` becomes the channel's permanent identifier.
@@ -109,7 +166,7 @@ Encodes a channel creation remark. `name` and `description` are plaintext and vi
 #### `build_channel_message`
 
 ```rust
-pub fn build_channel_message(&self, channel_idx: usize, body: &str) -> Result<Vec<u8>>
+pub fn build_channel_message(&self, channel_idx: usize, body: &str) -> Result<RemarkBytes>
 ```
 
 Encodes a plaintext message to the channel at index `channel_idx` in `session.channels`. Includes reply-to and continues refs for ordering. Returns `SdkError::NotFound` if the index is invalid.
@@ -117,7 +174,7 @@ Encodes a plaintext message to the channel at index `channel_idx` in `session.ch
 #### `build_group_create`
 
 ```rust
-pub fn build_group_create(&self, members: &[Pubkey], body: &str) -> Result<Vec<u8>>
+pub fn build_group_create(&self, seed: &[u8; 32], members: &[Pubkey], body: &MessageBody) -> Result<RemarkBytes>
 ```
 
 Creates an encrypted group with the given members. The body is the first message. Each member can decrypt independently. The member list is encoded into the encrypted payload.
@@ -125,7 +182,7 @@ Creates an encrypted group with the given members. The body is the first message
 #### `build_group_message`
 
 ```rust
-pub fn build_group_message(&self, group_idx: usize, body: &str) -> Result<Vec<u8>>
+pub fn build_group_message(&self, seed: &[u8; 32], group_idx: usize, body: &MessageBody) -> Result<RemarkBytes>
 ```
 
 Sends an encrypted message to the group at index `group_idx` in `session.groups`. Each member can decrypt independently. Returns `SdkError::NotFound` if the index is invalid.
@@ -133,12 +190,10 @@ Sends an encrypted message to the group at index `group_idx` in `session.groups`
 #### `submit`
 
 ```rust
-pub async fn submit(&self, remark: &[u8]) -> Result<String>
+pub async fn submit(&self, remark: &samp::RemarkBytes) -> Result<String>
 ```
 
 Submits a `system.remark` extrinsic containing `remark` to the connected subtensor node. Returns the extrinsic hash as a hex string on success, or `SdkError::Chain` on failure. This is the only method that touches the network.
-
-You can also use `submit` with arbitrary bytes if you encode your own SAMP remarks.
 
 ### Queries
 
@@ -184,10 +239,11 @@ Events arrive on the `mpsc::Receiver<Event>` returned by `Session::start`. All `
 | Variant | Fields | Description |
 |---|---|---|
 | `NewMessage` | `sender: Pubkey`, `content_type: u8`, `recipient: Pubkey`, `decrypted_body: Option<String>`, `thread_ref: BlockRef`, `reply_to: BlockRef`, `continues: BlockRef`, `block_number: u32`, `ext_index: u16`, `timestamp: u64` | Incoming direct or thread message. `decrypted_body` is `None` if decryption failed or the message was not for you. `thread_ref` is `BlockRef::ZERO` for non-thread messages. |
-| `NewChannelMessage` | `sender_ss58: String`, `channel_ref: BlockRef`, `body: String`, `reply_to: BlockRef`, `continues: BlockRef`, `block_number: u32`, `ext_index: u16`, `timestamp: u64` | Message in a subscribed channel. |
+| `NewChannelMessage` | `sender: Pubkey`, `sender_ss58: String`, `channel_ref: BlockRef`, `body: String`, `reply_to: BlockRef`, `continues: BlockRef`, `block_number: u32`, `ext_index: u16`, `timestamp: u64` | Message in a subscribed channel. |
 | `ChannelDiscovered` | `name: String`, `description: String`, `creator_ss58: String`, `channel_ref: BlockRef` | A channel creation was seen on-chain. |
 | `GroupDiscovered` | `creator_pubkey: Pubkey`, `group_ref: BlockRef`, `members: Vec<Pubkey>` | A group was created that includes you. |
-| `NewGroupMessage` | `sender_ss58: String`, `group_ref: BlockRef`, `body: String`, `reply_to: BlockRef`, `continues: BlockRef`, `block_number: u32`, `ext_index: u16`, `timestamp: u64` | Message in a group you belong to. |
+| `NewGroupMessage` | `sender: Pubkey`, `sender_ss58: String`, `group_ref: BlockRef`, `body: String`, `reply_to: BlockRef`, `continues: BlockRef`, `block_number: u32`, `ext_index: u16`, `timestamp: u64` | Message in a group you belong to. |
+| `LockedOutbound` | `sender: Pubkey`, `block_number: u32`, `ext_index: u16`, `timestamp: u64`, `remark_bytes: Vec<u8>` | An outbound message was observed but could not be decrypted (seed not retained). |
 | `MessageSent` | (none) | Confirmation that a submitted extrinsic was included in a block. |
 | `BlockUpdate` | `u64` | New block number observed. |
 | `FetchBlock` | `block_ref: BlockRef` | Request to fetch a specific block (gap fill). |
@@ -196,19 +252,22 @@ Events arrive on the `mpsc::Receiver<Event>` returned by `Session::start`. All `
 | `GapsRefreshed` | (none) | Thread/channel gap detection completed. |
 | `FeeEstimated` | `fee_display: String`, `fee_raw: Option<u128>` | Result of a fee estimation. |
 | `BalanceUpdated` | `u128` | Account balance changed. |
+| `ChainSnapshotRefreshed` | `info: String`, `token_symbol: String`, `token_decimals: u32` | Chain metadata refreshed (occurs on connect and reconnect). |
+| `GenesisMismatch` | (none) | Connected node's genesis hash does not match the expected chain. |
+| `ConnectionStatus` | `ConnState` | Connection state change. `ConnState::Connected` or `ConnState::Reconnecting { in_secs }`. |
 | `Status` | `String` | Human-readable status message (e.g. "Connected to node"). |
 | `Error` | `String` | Non-fatal error description. |
+| `CatchupComplete` | (none) | Historical block scan finished; the session is fully synced. |
 
 ## Types
 
 ### Pubkey
 
 ```rust
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct Pubkey(pub [u8; 32]);
+pub use samp::Pubkey;
 ```
 
-A 32-byte SR25519 public key. The inner `[u8; 32]` is public.
+A 32-byte SR25519 public key, re-exported from the `samp` crate.
 
 - `Pubkey::ZERO` -- all-zero constant, used as a sentinel.
 - `Deref<Target = [u8; 32]>` -- you can use a `Pubkey` anywhere a `&[u8; 32]` is expected.
@@ -224,16 +283,58 @@ let pk2 = Pubkey::from(some_bytes);
 ### BlockRef
 
 ```rust
-pub struct BlockRef {
-    pub block: u32,
-    pub index: u16,
-}
+pub use samp::BlockRef;
 ```
 
-On-chain reference: a block number and extrinsic index within that block. Every thread, channel, group, and message is identified by the `BlockRef` of the extrinsic that created it.
+On-chain reference: a block number and extrinsic index within that block, re-exported from the `samp` crate. Every thread, channel, group, and message is identified by the `BlockRef` of the extrinsic that created it.
 
 - `BlockRef::ZERO` -- `{ block: 0, index: 0 }`. Used to indicate "no reference" (e.g. a thread root has no parent).
 - `is_zero(&self) -> bool` -- returns `true` if both fields are zero.
+
+### Secret types
+
+All secret wrapper types live in the `taolk::secret` module. They use `zeroize` to clear memory on drop.
+
+#### Seed
+
+Wraps `Zeroizing<[u8; 32]>`.
+
+| Method | Description |
+|---|---|
+| `from_bytes([u8; 32])` | Wrap raw bytes |
+| `from_phrase(&Phrase)` | Derive from mnemonic |
+| `from_hex(&str)` | Parse hex string |
+| `as_bytes() -> &[u8; 32]` | Borrow inner bytes |
+| `derive_signing_key() -> SigningKey` | Derive SR25519 keypair |
+| `ct_eq(&Self) -> bool` | Constant-time equality |
+
+#### Password
+
+Wraps `Zeroizing<String>`.
+
+| Method | Description |
+|---|---|
+| `new(String)` | Wrap a password string |
+| `as_str() -> &str` | Borrow inner string |
+
+#### Phrase
+
+Wraps `Zeroizing<String>`.
+
+| Method | Description |
+|---|---|
+| `generate()` | Random 12-word BIP-39 mnemonic |
+| `parse(&str)` | Parse and validate a mnemonic |
+| `words() -> Vec<&str>` | Split into word list |
+
+#### SigningKey
+
+Wraps a schnorrkel `Keypair`.
+
+| Method | Description |
+|---|---|
+| `sign(&[u8]) -> [u8; 64]` | SR25519 signature |
+| `public_key() -> Pubkey` | Extract public key |
 
 ### SdkError
 
@@ -270,43 +371,16 @@ Wallet files are stored at `~/.samp/wallets/{name}.key`. Each file is 93 bytes: 
 ### Opening and creating wallets
 
 ```rust
-pub fn open(name: &str, password: &str) -> Result<Zeroizing<[u8; 32]>, WalletError>
+pub fn open(name: &str, password: &Password) -> Result<Seed, WalletError>
 ```
 
 Decrypts and returns the seed from `~/.samp/wallets/{name}.key`. Returns `WalletError::WrongPassword` if the password is incorrect, `WalletError::CorruptFile` if the file is malformed.
 
 ```rust
-pub fn create(name: &str, password: &str, seed: &[u8; 32]) -> Result<(), WalletError>
+pub fn create(name: &str, password: &Password, seed: &Seed) -> Result<(), WalletError>
 ```
 
 Encrypts `seed` and writes it to `~/.samp/wallets/{name}.key`. Creates the directory if needed.
-
-```rust
-pub fn open_at(path: &Path, password: &str) -> Result<Zeroizing<[u8; 32]>, WalletError>
-pub fn create_at(path: &Path, password: &str, seed: &[u8; 32]) -> Result<(), WalletError>
-```
-
-Same as `open`/`create` but at an arbitrary filesystem path.
-
-### Seed derivation
-
-```rust
-pub fn generate_mnemonic() -> Mnemonic
-```
-
-Generates a random 12-word BIP-39 mnemonic from 128 bits of OS entropy.
-
-```rust
-pub fn seed_from_mnemonic(mnemonic: &Mnemonic) -> [u8; 32]
-```
-
-Derives a 32-byte seed from a BIP-39 mnemonic using PBKDF2-HMAC-SHA512 (2048 rounds, salt `b"mnemonic"`). Takes the first 32 bytes of the 64-byte output. This matches Substrate's mini-secret derivation.
-
-```rust
-pub fn seed_from_hex(hex_str: &str) -> Result<[u8; 32], String>
-```
-
-Parses a hex string (with or without `0x` prefix) into a 32-byte seed. Returns an error if the input is not exactly 64 hex characters.
 
 ## Configuration
 
@@ -338,66 +412,13 @@ Available keys:
 | `network.node` | string | `wss://entrypoint-finney.opentensor.ai:443` |
 | `network.mirrors` | string[] | (none) |
 | `security.lock_timeout` | u64 | `300` |
+| `security.require_password_per_send` | bool | `false` |
+| `notifications.enabled` | bool | `true` |
+| `notifications.volume` | u8 | `100` |
+| `notifications.dm` | bool | `true` |
+| `notifications.ambient` | bool | `false` |
+| `notifications.mention` | bool | `true` |
 | `ui.sidebar_width` | u16 | `28` |
 | `ui.mouse` | bool | `true` |
 | `ui.timestamp_format` | string | `%H:%M` |
 | `ui.date_format` | string | `%Y-%m-%d %H:%M` |
-
-## Example: Echo bot
-
-A bot that listens for encrypted thread messages and replies with the same text:
-
-```rust
-use taolk::{wallet, Session, Event, Pubkey, BlockRef};
-
-#[tokio::main]
-async fn main() {
-    let seed = wallet::open("bot", "password").expect("open wallet");
-    let (mut session, rx) = Session::start(&seed, "wss://entrypoint-finney.opentensor.ai:443", "bot")
-        .await
-        .expect("start session");
-
-    println!("Bot running as {}", session.ss58());
-
-    loop {
-        let event = match rx.recv() {
-            Ok(e) => e,
-            Err(_) => break,
-        };
-
-        match event {
-            Event::NewMessage {
-                sender,
-                decrypted_body: Some(body),
-                thread_ref,
-                block_number,
-                ext_index,
-                timestamp,
-                ..
-            } => {
-                // Ingest the message so session state is up to date
-                let msg_ref = BlockRef { block: block_number, index: ext_index };
-                let new_msg = taolk::conversation::NewMessage {
-                    sender_ss58: taolk::util::ss58_short(&sender),
-                    timestamp: chrono::DateTime::from_timestamp(timestamp as i64, 0)
-                        .unwrap_or_default(),
-                    body: body.clone(),
-                    reply_to: BlockRef::ZERO,
-                    continues: BlockRef::ZERO,
-                    block_number,
-                    ext_index,
-                };
-                session.add_thread_message(sender, session.pubkey(), thread_ref, new_msg);
-
-                // Find the thread and reply
-                let thread_idx = session.threads.len() - 1;
-                let remark = session.build_thread_reply(thread_idx, &body)
-                    .expect("build reply");
-                session.submit(&remark).await.expect("submit");
-            }
-            Event::Error(e) => eprintln!("error: {e}"),
-            _ => {}
-        }
-    }
-}
-```

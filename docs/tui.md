@@ -2,10 +2,14 @@
 
 ## Getting started
 
-Install from source:
+```
+brew install mcjkula/tap/taolk
+```
+
+Or via Cargo:
 
 ```
-cargo install --path .
+cargo install taolk
 ```
 
 Create a wallet:
@@ -27,6 +31,17 @@ Optional flags:
 - `--mirror <url>` -- SAMP mirror URL (repeatable)
 
 If no wallet is specified, taolk checks `wallet.default` in config, then auto-discovers. If no wallets exist, it exits with an error.
+
+Minimum terminal size: 60 columns x 16 rows.
+
+## Focus model
+
+taolk uses a focus model with explicit transitions. There is no modal Normal/Insert distinction.
+
+- **Composer focus** -- the default after unlocking. Text input goes to the composer. Press `Esc` to save draft and move focus to the timeline.
+- **Timeline focus** -- keyboard shortcuts navigate the sidebar, scroll messages, and open overlays. Press any composing key (typing in an active conversation) to return focus to the composer.
+
+Focus changes are always explicit. Nothing transitions silently.
 
 ## Lock screen
 
@@ -61,7 +76,7 @@ Move between items: `j`/`k`, `Up`/`Down`, `Tab`/`Shift+Tab`.
 
 Toggle sidebar visibility: `Space`.
 
-Mouse: click a sidebar item to select it. Click the input area to enter Insert mode.
+Mouse: click a sidebar item to select it. Click the input area to focus the composer.
 
 ### Message scroll
 
@@ -87,9 +102,9 @@ Messages display bottom-up (newest at bottom). Scroll controls:
 
 ## Messaging
 
-### Insert mode
+### Composer
 
-Press `i` in a thread, channel, or group to enter Insert mode. The cursor appears in the input area.
+When the composer is focused, the cursor appears in the input area.
 
 Type your message. Editing keys:
 
@@ -100,9 +115,9 @@ Type your message. Editing keys:
 | `Delete` | Delete after cursor |
 | `Left`/`Right` | Move cursor |
 | `Ctrl+Left`/`Ctrl+Right` | Jump by word |
-| `Home`/`End` | Start/end of line |
+| `Home`/`End` | Start/end of input |
 | `Up`/`Down` | Move between lines (multiline) |
-| `Ctrl+N` | Insert newline |
+| `Shift+Enter` | Insert newline |
 
 Press `Enter` to send. This builds the SAMP remark and enters Confirm mode, which shows the estimated transaction fee.
 
@@ -110,23 +125,41 @@ In Confirm mode:
 - `Enter` submits the extrinsic
 - `Esc` cancels and returns to editing
 
-Press `Esc` in Insert mode to save the draft and return to Normal mode.
+Press `Esc` to save the draft and focus the timeline.
 
 ### Drafts
 
-Drafts auto-save when you press `Esc` from Insert mode or switch conversations. Each thread, channel, and group has its own draft. Drafts restore when you return to the conversation and press `i`.
+Drafts auto-save when you press `Esc` from the composer or switch conversations. Each thread, channel, and group has its own draft. Drafts restore when you return to the conversation.
 
 If you quit with unsaved drafts, taolk warns and requires a second `q` to confirm.
+
+## Command palette
+
+Press `/` (from timeline focus, or from an empty composer) to open the command palette. The palette provides 16 commands, fuzzy-matched as you type:
+
+- `Tab`/`Shift+Tab` (or `BackTab`) to cycle through matches
+- `Enter` to execute the selected command
+- `Esc` to dismiss
+
+Available commands include `/get` for mirrorless block:index discovery, thread and channel operations, lock, quit, and others. Type a few characters to narrow the list.
+
+## Search
+
+Press `Ctrl+F` to search within the current view. Type a query; results highlight as you type. Press `Enter` to keep the search active and return to the timeline. Press `Esc` to clear the search.
+
+## Fuzzy jump
+
+Press `Ctrl+J` to open the fuzzy jump overlay. Type to filter across all conversations (threads, channels, groups) by name or address. Select with `Enter` to jump directly to that conversation.
 
 ## Threads
 
 ### New thread
 
-Press `n` in Normal mode to enter Compose mode. This shows a contact picker.
+Press `n` (timeline focus) to open the contact picker.
 
 - Type to filter contacts by SS58 address
 - `j`/`k` or `Up`/`Down` to move through the contact list
-- `Enter` selects the contact and enters Insert mode
+- `Enter` selects the contact and focuses the composer
 - Paste a full SS58 address directly
 
 Write your message and press `Enter`. After confirming the fee, the thread is created on-chain.
@@ -137,16 +170,16 @@ Within a thread, every message you send is a reply. The protocol references the 
 
 ### Fetching gaps
 
-Press `r` in a thread to fetch any missing messages from the chain. If a mirror is configured, channel views also fetch from the mirror.
+Press `r` (timeline focus) to fetch any missing messages from the chain. If a mirror is configured, channel views also fetch from the mirror.
 
 ## Standalone messages
 
-Press `m` in Normal mode to send a standalone message (not part of a thread).
+Press `m` (timeline focus) to send a standalone message (not part of a thread).
 
-1. Select or enter an address (same contact picker as Compose)
+1. Select or enter an address (same contact picker as new thread)
 2. Choose message type:
    - `p` -- public (plaintext on chain)
-   - `e` -- encrypted (X25519 + ChaCha20Poly1305)
+   - `e` -- encrypted (Ristretto255 ECDH + ChaCha20-Poly1305)
 3. Write the message and confirm
 
 Standalone messages appear in the recipient's Inbox and your Outbox.
@@ -155,7 +188,7 @@ Standalone messages appear in the recipient's Inbox and your Outbox.
 
 ### Channel directory
 
-Press `c` in Normal mode to open the Channel Directory. This lists all channels discovered from the chain.
+Press `c` (timeline focus) to open the Channel Directory. This lists all channels discovered from the chain.
 
 - `Up`/`Down` to browse
 - `Enter` to subscribe or unsubscribe (toggles)
@@ -181,7 +214,7 @@ Encrypted multi-party conversations. All members are fixed at creation time.
 
 ### Creating a group
 
-Press `g` in Normal mode:
+Press `g` (timeline focus):
 
 1. A member picker appears (you are always included)
 2. Type to filter contacts, `Enter` to toggle a member, `Up`/`Down` to navigate
@@ -193,17 +226,13 @@ The group creation extrinsic includes the member list and first message. Each me
 
 ### Group messages
 
-Same as thread messaging: `i` to compose, `Enter` to send, `Esc` to save draft.
-
-## Search
-
-Press `/` in Normal mode to search within the current view. Type a query; results highlight as you type. Press `Enter` to keep the search active and return to Normal mode. Press `Esc` to clear the search.
+Same as thread messaging: compose in the focused composer, `Enter` to send, `Esc` to save draft.
 
 ## Copy a sender's SS58
 
-Press `y` in Normal mode while viewing any chat to open the sender picker: a
+Press `y` (timeline focus) while viewing any chat to open the sender picker: a
 list of unique senders from the current view, sorted by most recent activity.
-Navigate with `↑`/`↓` (or `j`/`k`), press `Enter` to copy the highlighted
+Navigate with `Up`/`Down` (or `j`/`k`), press `Enter` to copy the highlighted
 sender's full 48-character SS58 to the system clipboard, `Esc` to cancel. The
 clipboard payload is delivered via OSC 52 escape sequence and works in
 WezTerm, macOS Terminal.app, iTerm2, Alacritty, Kitty, and tmux (with
@@ -211,27 +240,27 @@ WezTerm, macOS Terminal.app, iTerm2, Alacritty, Kitty, and tmux (with
 on the client terminal.
 
 You can also click directly on a sender's name in any rendered message to
-copy their SS58 in one click — no picker required.
+copy their SS58 in one click -- no picker required.
 
 ## Keyboard reference
 
-### Normal mode
+### Timeline focus (no overlay)
 
 | Key | Action |
 |-----|--------|
 | `j` / `Down` / `Tab` | Next sidebar item |
 | `k` / `Up` / `Shift+Tab` | Previous sidebar item |
-| `i` | Enter Insert mode (thread/channel/group) |
-| `n` | New thread (Compose mode) |
-| `m` | Standalone message (Message mode) |
-| `c` | Open Channel Directory |
+| `n` | New thread |
+| `m` | Standalone message |
+| `c` | Channel directory |
 | `g` | Create group |
-| `r` | Fetch missing messages from chain |
-| `/` | Search |
-| `y` | Open sender picker (copy SS58 from chat) |
+| `r` | Fetch gaps from chain |
+| `/` | Command palette |
+| `Ctrl+J` | Fuzzy jump |
+| `Ctrl+F` | Search |
+| `y` | Sender picker (copy SS58) |
 | `Space` | Toggle sidebar |
-| `Ctrl+U` | Scroll up |
-| `Ctrl+D` | Scroll down |
+| `Ctrl+U` / `Ctrl+D` | Scroll up/down |
 | `PageUp` / `PageDown` | Scroll up/down (large) |
 | `Home` | Scroll to top |
 | `G` / `End` | Scroll to bottom |
@@ -239,7 +268,7 @@ copy their SS58 in one click — no picker required.
 | `q` | Quit (double-tap if drafts exist) |
 | `Ctrl+C` | Quit immediately |
 
-### Insert mode
+### Composer focus
 
 | Key | Action |
 |-----|--------|
@@ -249,9 +278,10 @@ copy their SS58 in one click — no picker required.
 | `Ctrl+Left` / `Ctrl+Right` | Move by word |
 | `Home` / `End` | Start/end of input |
 | `Up` / `Down` | Move between lines |
-| `Ctrl+N` | Insert newline |
+| `Shift+Enter` | Insert newline |
 | `Enter` | Send (enter Confirm mode) |
-| `Esc` | Save draft, return to Normal |
+| `/` | Command palette (when input empty) |
+| `Esc` | Save draft, focus timeline |
 
 ### Confirm mode
 
@@ -260,7 +290,7 @@ copy their SS58 in one click — no picker required.
 | `Enter` | Submit extrinsic |
 | `Esc` | Cancel |
 
-### Compose mode (new thread)
+### New thread / Standalone (contact picker)
 
 | Key | Action |
 |-----|--------|
@@ -270,11 +300,7 @@ copy their SS58 in one click — no picker required.
 | `Backspace` | Clear filter |
 | `Esc` | Clear filter or exit |
 
-### Message mode (standalone)
-
-Phase 1 (address): same as Compose mode.
-
-Phase 2 (type selection):
+### Standalone (type selection)
 
 | Key | Action |
 |-----|--------|
@@ -308,8 +334,17 @@ Phase 2 (type selection):
 | Characters | Filter contacts |
 | `Up` / `Down` | Navigate contact list |
 | `Enter` | Toggle member / add address |
-| `Tab` | Finalize members, enter Insert mode |
+| `Tab` | Finalize members, focus composer |
 | `Esc` | Clear filter or cancel |
+
+### Command palette
+
+| Key | Action |
+|-----|--------|
+| Characters | Filter commands (fuzzy match) |
+| `Tab` / `Shift+Tab` | Cycle through matches |
+| `Enter` | Execute selected command |
+| `Esc` | Dismiss |
 
 ### Lock screen
 
