@@ -1,6 +1,6 @@
 [package]
 name = "taolk"
-version = "2.0.0"
+version = "2.0.1"
 edition = "2024"
 license = "MIT"
 description = "Encrypted messaging client for Bittensor"
