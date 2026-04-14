@@ -45,6 +45,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 pub fn should_render(app: &App) -> bool {
     use crate::app::View;
     app.view == View::Inbox
+        && app.msg_recipient.is_none()
         && app.session.inbox.is_empty()
         && app.session.outbox.is_empty()
         && app.session.threads.is_empty()
