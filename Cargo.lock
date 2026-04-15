@@ -3020,7 +3020,7 @@ dependencies = [
 
 [[package]]
 name = "taolk"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "argon2",
  "bip39",
