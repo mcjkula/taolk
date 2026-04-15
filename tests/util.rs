@@ -67,9 +67,10 @@ fn truncate_short_string() {
 
 #[test]
 fn truncate_long_string() {
+    use unicode_width::UnicodeWidthStr;
     let result = util::truncate("hello world, this is a long string", 16);
-    assert!(result.contains("..."));
-    assert!(result.len() <= 16);
+    assert!(result.contains('\u{2026}'));
+    assert!(result.width() <= 16);
 }
 
 #[test]
@@ -311,22 +312,44 @@ fn truncate_exact_boundary() {
 
 #[test]
 fn truncate_max_below_10() {
+    use unicode_width::UnicodeWidthStr;
     let result = util::truncate("abcdefghijklmnop", 5);
-    assert_eq!(result, "abcde");
-    assert_eq!(result.len(), 5);
+    assert!(result.contains('\u{2026}'));
+    assert!(result.width() <= 5);
 }
 
 #[test]
 fn truncate_max_1() {
     let result = util::truncate("hello world", 1);
-    assert_eq!(result, "h");
+    assert_eq!(result, "\u{2026}");
 }
 
 #[test]
 fn truncate_max_9() {
+    use unicode_width::UnicodeWidthStr;
     let result = util::truncate("this is a long string", 9);
-    assert_eq!(result, "this is a");
-    assert_eq!(result.len(), 9);
+    assert!(result.contains('\u{2026}'));
+    assert!(result.width() <= 9);
+}
+
+// --- truncate with multi-byte UTF-8 ---
+
+#[test]
+fn truncate_multibyte_no_panic() {
+    // Reproduces the crash: gap hint contains a Nerd Font icon + middle dot
+    let gap = " \u{f1da} Earlier messages may be missing \u{00B7} press r to load".to_string();
+    // Should not panic at any width
+    for w in 0..=gap.len() + 5 {
+        let _ = util::truncate(&gap, w);
+    }
+}
+
+#[test]
+fn truncate_emoji_boundary() {
+    let s = "hello 🌍 world, this is long";
+    let result = util::truncate(s, 12);
+    assert!(!result.is_empty());
+    // Must not panic — 🌍 is 4 bytes
 }
 
 // --- ss58_short with short address ---

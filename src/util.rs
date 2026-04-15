@@ -16,14 +16,43 @@ pub fn ss58_short(pubkey: &Pubkey) -> String {
     }
 }
 
-pub fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
+pub fn truncate(s: &str, max_cols: usize) -> String {
+    use unicode_width::UnicodeWidthChar;
+    use unicode_width::UnicodeWidthStr;
+
+    if s.width() <= max_cols {
         return s.to_string();
     }
-    if max < 10 {
-        return s[..max].to_string();
+
+    let remaining = max_cols.saturating_sub(1); // 1 column for '\u{2026}'
+    let tail_budget = remaining / 3;
+    let head_budget = remaining - tail_budget;
+
+    let mut head = String::new();
+    let mut head_w = 0;
+    for ch in s.chars() {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if head_w + cw > head_budget {
+            break;
+        }
+        head.push(ch);
+        head_w += cw;
     }
-    format!("{}...{}", &s[..max - 7], &s[s.len() - 4..])
+
+    let mut tail_chars: Vec<char> = Vec::new();
+    let mut tail_w = 0;
+    for ch in s.chars().rev() {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if tail_w + cw > tail_budget {
+            break;
+        }
+        tail_chars.push(ch);
+        tail_w += cw;
+    }
+    tail_chars.reverse();
+    let tail: String = tail_chars.into_iter().collect();
+
+    format!("{head}\u{2026}{tail}")
 }
 
 pub fn format_balance(plancks: u128, decimals: u32, symbol: &str) -> String {
