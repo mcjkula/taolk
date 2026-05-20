@@ -513,7 +513,7 @@ impl App {
             View::ChannelDir => {}
         }
         let mut entries: Vec<(String, BlockRef)> = last_seen.into_iter().collect();
-        entries.sort_by(|a, b| b.1.cmp(&a.1));
+        entries.sort_by_key(|(_, at)| std::cmp::Reverse(*at));
         entries
             .into_iter()
             .map(|(ss58, _)| {
