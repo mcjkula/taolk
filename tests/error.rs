@@ -79,6 +79,14 @@ fn chain_error_missing_field_carries_field_name() {
 }
 
 #[test]
+fn chain_error_runtime_call_missing_names_call() {
+    assert_eq!(
+        ChainError::RuntimeCallMissing("System", "remark_with_event").to_string(),
+        "runtime does not expose System.remark_with_event"
+    );
+}
+
+#[test]
 fn chain_error_message_too_long_carries_length() {
     let err = ChainError::MessageTooLong { len: 5_000_000_000 };
     assert!(err.to_string().contains("5000000000"));

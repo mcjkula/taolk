@@ -170,8 +170,9 @@ impl Session {
             let url = node_url.to_string();
             let etx = tx.clone();
             let keys = session.decryption_keys();
+            let remark_calls = session.chain_info.remark_calls;
             tokio::spawn(async move {
-                crate::chain::subscribe_blocks(&url, my_pubkey, keys, etx).await;
+                crate::chain::subscribe_blocks(&url, my_pubkey, keys, remark_calls, etx).await;
             });
         }
 
@@ -186,6 +187,7 @@ impl Session {
             let etx = tx.clone();
             let chain_name = session.chain_info.name.clone();
             let ss58_prefix = session.chain_info.ss58_prefix;
+            let remark_calls = session.chain_info.remark_calls;
             tokio::spawn(async move {
                 crate::mirror::sync(
                     urls,
@@ -194,6 +196,7 @@ impl Session {
                     ss58_prefix,
                     &keys,
                     &pk,
+                    remark_calls,
                     subscribed,
                     0,
                     etx,

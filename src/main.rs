@@ -949,9 +949,10 @@ fn run_session(
         let url = node_url.to_string();
         let tx = event_tx.clone();
         let keys = app.session.decryption_keys();
+        let remark_calls = chain_info.remark_calls;
         rt.spawn(async move {
             let _ = tx.send(event::Event::Status("Connected".into()));
-            chain::subscribe_blocks(url.as_str(), my_pubkey, keys, tx).await;
+            chain::subscribe_blocks(url.as_str(), my_pubkey, keys, remark_calls, tx).await;
         });
     }
 
@@ -966,6 +967,7 @@ fn run_session(
         let tx = event_tx.clone();
         let chain_name = chain_info.name.clone();
         let ss58_prefix = chain_info.ss58_prefix;
+        let remark_calls = chain_info.remark_calls;
         rt.spawn(async move {
             mirror::sync(
                 urls,
@@ -974,6 +976,7 @@ fn run_session(
                 ss58_prefix,
                 &keys,
                 &pubkey,
+                remark_calls,
                 subscribed,
                 0,
                 tx,
@@ -1299,6 +1302,7 @@ fn run_session(
                     let keys = app.session.decryption_keys();
                     let chain_name = chain_info.name.clone();
                     let ss58_prefix = chain_info.ss58_prefix;
+                    let remark_calls = chain_info.remark_calls;
                     rt.spawn(async move {
                         mirror::fetch_channel(
                             urls,
@@ -1308,6 +1312,7 @@ fn run_session(
                             channel_ref,
                             &pk,
                             &keys,
+                            remark_calls,
                             tx,
                         )
                         .await;
@@ -1319,6 +1324,7 @@ fn run_session(
                 let url = node_url.to_string();
                 let tx = event_tx.clone();
                 let keys = app.session.decryption_keys();
+                let remark_calls = chain_info.remark_calls;
                 rt.spawn(async move {
                     chain::fetch_and_process_extrinsic(
                         &url,
@@ -1326,6 +1332,7 @@ fn run_session(
                         block_ref.index().get(),
                         my_pubkey,
                         keys,
+                        remark_calls,
                         tx.clone(),
                     )
                     .await;

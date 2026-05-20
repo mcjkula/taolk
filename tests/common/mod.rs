@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use samp::extrinsic::ChainParams;
 use samp::metadata::StorageLayout;
 use taolk::db::Db;
-use taolk::extrinsic::ChainInfo;
+use taolk::extrinsic::{ChainInfo, RemarkCallIds};
 use taolk::secret::{Seed, SigningKey};
 use taolk::session::Session;
 use taolk::types::{BlockRef, Pubkey};
@@ -44,11 +44,19 @@ pub fn test_chain_info() -> ChainInfo {
             samp::SpecVersion::new(1),
             samp::TxVersion::new(1),
         ),
+        remark_calls: test_remark_call_ids(),
         account_storage: StorageLayout {
             offset: 16,
             width: 8,
         },
         errors: Default::default(),
+    }
+}
+
+pub fn test_remark_call_ids() -> RemarkCallIds {
+    RemarkCallIds {
+        remark: Some((0, 9)),
+        remark_with_event: (0, 7),
     }
 }
 
@@ -93,14 +101,23 @@ pub fn build_remark_ext(
     sk: &SigningKey,
     nonce: u32,
 ) -> samp::ExtrinsicBytes {
+    build_remark_ext_with_call(remark, sk, nonce, test_remark_call_ids().remark_with_event)
+}
+
+pub fn build_remark_ext_with_call(
+    remark: &samp::RemarkBytes,
+    sk: &SigningKey,
+    nonce: u32,
+    call_id: (u8, u8),
+) -> samp::ExtrinsicBytes {
     let mut args = Vec::new();
     samp::scale::encode_compact(remark.len() as u64, &mut args);
     args.extend_from_slice(remark.as_bytes());
     let ci = test_chain_info();
     let pk = sk.public_key();
     samp::extrinsic::build_signed_extrinsic(
-        samp::PalletIdx::new(0),
-        samp::CallIdx::new(7),
+        samp::PalletIdx::new(call_id.0),
+        samp::CallIdx::new(call_id.1),
         &samp::CallArgs::from_bytes(args),
         &pk,
         |msg| samp::Signature::from_bytes(sk.sign(msg)),

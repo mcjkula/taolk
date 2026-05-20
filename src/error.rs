@@ -51,6 +51,8 @@ pub enum ChainError {
     BadShape,
     #[error("metadata: {0}")]
     Metadata(#[from] samp::metadata::Error),
+    #[error("runtime does not expose {0}.{1}")]
+    RuntimeCallMissing(&'static str, &'static str),
     #[error("extrinsic: {0}")]
     ExtrinsicBuild(#[from] samp::extrinsic::Error),
     #[error("message too long: {len} bytes (max u32::MAX)")]
