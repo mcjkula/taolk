@@ -138,7 +138,7 @@ impl JumpState {
                 ranked.push(RankedTarget { idx, score });
             }
         }
-        ranked.sort_by(|a, b| b.score.cmp(&a.score));
+        ranked.sort_by_key(|target| std::cmp::Reverse(target.score));
         self.ranking = ranked;
         if self.cursor >= self.ranking.len() {
             self.cursor = self.ranking.len().saturating_sub(1);

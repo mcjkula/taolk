@@ -50,18 +50,13 @@ impl TuiEventHandler {
         std::thread::spawn(move || {
             loop {
                 if term_event::poll(tick_rate).unwrap_or(false) {
-                    match term_event::read() {
-                        Ok(TermEvent::Key(key)) => {
-                            if poll_tx.send(TuiEvent::Key(key)).is_err() {
-                                return;
-                            }
-                        }
-                        Ok(TermEvent::Mouse(mouse)) => {
-                            if poll_tx.send(TuiEvent::Mouse(mouse)).is_err() {
-                                return;
-                            }
-                        }
-                        _ => {}
+                    let event = match term_event::read() {
+                        Ok(TermEvent::Key(key)) => Some(TuiEvent::Key(key)),
+                        Ok(TermEvent::Mouse(mouse)) => Some(TuiEvent::Mouse(mouse)),
+                        Ok(_) | Err(_) => None,
+                    };
+                    if event.is_some_and(|event| poll_tx.send(event).is_err()) {
+                        return;
                     }
                 }
                 if poll_tx.send(TuiEvent::Tick).is_err() {
@@ -2310,26 +2305,22 @@ fn handle_search_key(app: &mut App, key: crossterm::event::KeyEvent) {
 
 fn handle_sender_picker_key(app: &mut App, key: crossterm::event::KeyEvent) {
     let len = app.picker_senders.len();
-    match key.code {
-        KeyCode::Esc => {
+    match (key.code, len) {
+        (KeyCode::Esc, _) => {
             app.picker_senders.clear();
             app.close_overlay();
         }
-        KeyCode::Up | KeyCode::Char('k') => {
-            if len > 0 {
-                app.contact_idx = if app.contact_idx == 0 {
-                    len - 1
-                } else {
-                    app.contact_idx - 1
-                };
-            }
+        (KeyCode::Up | KeyCode::Char('k'), 1..) => {
+            app.contact_idx = if app.contact_idx == 0 {
+                len - 1
+            } else {
+                app.contact_idx - 1
+            };
         }
-        KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => {
-            if len > 0 {
-                app.contact_idx = (app.contact_idx + 1) % len;
-            }
+        (KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab, 1..) => {
+            app.contact_idx = (app.contact_idx + 1) % len;
         }
-        KeyCode::Enter => {
+        (KeyCode::Enter, _) => {
             if let Some((short, pk)) = app.picker_senders.get(app.contact_idx).cloned() {
                 copy_sender(app, &short, pk.as_ref());
             }
