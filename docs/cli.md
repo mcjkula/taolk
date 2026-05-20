@@ -116,9 +116,9 @@ If you mistype a key name, taolk suggests the closest match (Levenshtein distanc
 | `security.lock_timeout` | integer | `300` | Auto-lock timeout in seconds (0 disables) |
 | `security.require_password_per_send` | bool | `false` | Require password confirmation before each send |
 | `notifications.enabled` | bool | `true` | Play notification sounds |
-| `notifications.volume` | integer | `100` | Volume 0-100 |
+| `notifications.volume` | integer | `70` | Volume 0-100 |
 | `notifications.dm` | bool | `true` | Sound on direct messages |
-| `notifications.ambient` | bool | `false` | Sound on channel messages |
+| `notifications.ambient` | bool | `true` | Sound on channel messages |
 | `notifications.mention` | bool | `true` | Sound on mentions |
 | `ui.sidebar_width` | integer | `28` | Sidebar width in columns |
 | `ui.mouse` | boolean | `true` | Enable mouse support |

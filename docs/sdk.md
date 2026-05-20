@@ -11,82 +11,17 @@ taolk = { version = "2", default-features = false }
 
 The `tui` feature gates `ratatui`, `crossterm`, `rpassword`, and `clap`. Without it, you get the core SDK: session management, wallet operations, SAMP encoding, chain submission.
 
-## Hello World: Offline
+## Offline Example
 
-Create a wallet, derive keys, and encode a SAMP public remark -- no chain connection needed.
+Create keys and encode a SAMP public remark without connecting to a node:
 
-```rust
-use taolk::secret::{Password, Phrase, Seed};
-use taolk::wallet;
+See `examples/sdk_offline.rs`. It is compile-checked with `cargo test --example sdk_offline`.
 
-fn main() {
-    // Generate a fresh mnemonic and derive a seed
-    let phrase = Phrase::generate();
-    println!("Recovery phrase: {}", phrase.words().join(" "));
+## Connected Example
 
-    let seed = Seed::from_phrase(&phrase);
-    let signing_key = seed.derive_signing_key();
-    let pubkey = signing_key.public_key();
-    println!("Public key: {pubkey:?}");
+Open a wallet, start a session, send an encrypted message, and listen for events:
 
-    // Persist the seed in an encrypted wallet file
-    let password = Password::new("hunter2".into());
-    wallet::create("demo", &password, &seed).expect("create wallet");
-
-    // Re-open the wallet to verify
-    let recovered = wallet::open("demo", &password).expect("open wallet");
-    assert!(seed.ct_eq(&recovered));
-    println!("Wallet round-trip OK");
-}
-```
-
-## Hello World: Connected
-
-Open a wallet, start a session, send an encrypted message, and listen for events.
-
-```rust
-use taolk::secret::Password;
-use taolk::{wallet, Event, Pubkey, Session};
-
-#[tokio::main]
-async fn main() {
-    // Open the wallet
-    let password = Password::new("hunter2".into());
-    let seed = wallet::open("demo", &password).expect("open wallet");
-
-    // Start a session (keep_seed = true so we can encrypt later)
-    let (session, rx) = Session::start(
-        seed.as_bytes(),
-        "wss://entrypoint-finney.opentensor.ai:443",
-        "demo",
-        true,
-    )
-    .await
-    .expect("start session");
-
-    println!("Running as {}", session.ss58());
-
-    // Send an encrypted message
-    let recipient = Pubkey([0xab; 32]); // replace with real pubkey
-    let body = taolk::MessageBody::from("hello");
-    let remark = session
-        .build_encrypted_message(seed.as_bytes(), &recipient, &body)
-        .expect("build message");
-    session.submit(&remark).await.expect("submit");
-
-    // Listen for events
-    while let Ok(event) = rx.recv() {
-        match event {
-            Event::MessageSent => println!("Message confirmed on-chain"),
-            Event::NewMessage { decrypted_body: Some(body), sender, .. } => {
-                println!("From {sender:?}: {body}");
-            }
-            Event::Error(e) => eprintln!("Error: {e}"),
-            _ => {}
-        }
-    }
-}
-```
+See `examples/sdk_connected.rs`. It is compile-checked with `cargo test --example sdk_connected`.
 
 ## Session
 
@@ -158,7 +93,11 @@ Appends an encrypted reply to the thread at index `thread_idx` in `session.threa
 #### `build_channel_create`
 
 ```rust
-pub fn build_channel_create(&self, name: &str, description: &str) -> Result<RemarkBytes>
+pub fn build_channel_create(
+    &self,
+    name: &samp::ChannelName,
+    description: &samp::ChannelDescription,
+) -> Result<RemarkBytes>
 ```
 
 Encodes a channel creation remark. `name` and `description` are plaintext and visible on-chain. The resulting extrinsic's `BlockRef` becomes the channel's permanent identifier.
@@ -166,7 +105,7 @@ Encodes a channel creation remark. `name` and `description` are plaintext and vi
 #### `build_channel_message`
 
 ```rust
-pub fn build_channel_message(&self, channel_idx: usize, body: &str) -> Result<RemarkBytes>
+pub fn build_channel_message(&self, channel_idx: usize, body: &MessageBody) -> Result<RemarkBytes>
 ```
 
 Encodes a plaintext message to the channel at index `channel_idx` in `session.channels`. Includes reply-to and continues refs for ordering. Returns `SdkError::NotFound` if the index is invalid.
@@ -248,11 +187,11 @@ Events arrive on the `mpsc::Receiver<Event>` returned by `Session::start`. All `
 | `BlockUpdate` | `u64` | New block number observed. |
 | `FetchBlock` | `block_ref: BlockRef` | Request to fetch a specific block (gap fill). |
 | `FetchChannelMirror` | `channel_ref: BlockRef` | Request to fetch channel history from a mirror. |
-| `SubmitRemark` | `remark: Vec<u8>` | Internal: a remark needs to be submitted (used by mirror sync). |
+| `SubmitRemark` | `remark: samp::RemarkBytes` | Internal: a remark needs to be submitted (used by mirror sync). |
 | `GapsRefreshed` | (none) | Thread/channel gap detection completed. |
 | `FeeEstimated` | `fee_display: String`, `fee_raw: Option<u128>` | Result of a fee estimation. |
 | `BalanceUpdated` | `u128` | Account balance changed. |
-| `ChainSnapshotRefreshed` | `info: String`, `token_symbol: String`, `token_decimals: u32` | Chain metadata refreshed (occurs on connect and reconnect). |
+| `ChainSnapshotRefreshed` | `info: ChainInfo`, `token_symbol: String`, `token_decimals: u32` | Chain metadata refreshed (occurs on connect and reconnect). |
 | `GenesisMismatch` | (none) | Connected node's genesis hash does not match the expected chain. |
 | `ConnectionStatus` | `ConnState` | Connection state change. `ConnState::Connected` or `ConnState::Reconnecting { in_secs }`. |
 | `Status` | `String` | Human-readable status message (e.g. "Connected to node"). |
@@ -276,8 +215,8 @@ A 32-byte SR25519 public key, re-exported from the `samp` crate.
 Construct from bytes:
 
 ```rust
-let pk = Pubkey([0xab; 32]);
-let pk2 = Pubkey::from(some_bytes);
+let pk = Pubkey::from_bytes([0xab; 32]);
+let pk2 = Pubkey::from_bytes(some_bytes);
 ```
 
 ### BlockRef
@@ -323,9 +262,9 @@ Wraps `Zeroizing<String>`.
 
 | Method | Description |
 |---|---|
-| `generate()` | Random 12-word BIP-39 mnemonic |
+| `generate() -> Result<Phrase, PhraseError>` | Random 12-word BIP-39 mnemonic |
 | `parse(&str)` | Parse and validate a mnemonic |
-| `words() -> Vec<&str>` | Split into word list |
+| `words() -> &str` | Borrow the mnemonic words |
 
 #### SigningKey
 
@@ -342,27 +281,31 @@ Wraps a schnorrkel `Keypair`.
 pub enum SdkError {
     Encryption(String),
     Decryption(String),
-    InvalidAddress(String),
-    Chain(String),
-    NotFound(String),
+    Address(AddressError),
+    Chain(ChainError),
+    Wallet(WalletError),
+    Config(ConfigError),
+    Metadata(samp::metadata::Error),
     Database(String),
-    Wallet(String),
+    NotFound(String),
     Other(String),
 }
 ```
 
-All variants carry a `String` message. The SDK uses `type Result<T> = std::result::Result<T, SdkError>`.
+The SDK uses `type Result<T> = std::result::Result<T, SdkError>`.
 
 | Variant | When it occurs |
 |---|---|
 | `Encryption` | `build_encrypted_message`, `build_thread_root`, `build_thread_reply`, `build_group_create`, `build_group_message` -- invalid recipient key or internal crypto failure. |
 | `Decryption` | Decryption of an incoming message failed. |
-| `InvalidAddress` | An SS58 address could not be parsed. |
+| `Address` | An SS58 address could not be parsed. |
 | `Chain` | RPC call to the subtensor node failed (`submit`, `fetch_balance`, `estimate_fee`, `start`). |
 | `NotFound` | Index out of bounds for `build_thread_reply`, `build_channel_message`, `build_group_message`. |
 | `Database` | SQLite error during `start` or persistence operations. |
-| `Wallet` | Invalid seed bytes passed to `start` or `start_with_mirrors`. |
-| `Other` | Everything else (e.g. `build_channel_create` encoding failure). |
+| `Wallet` | Wallet open/create errors. |
+| `Config` | Invalid or unwritable configuration. |
+| `Metadata` | Runtime metadata parse/layout errors. |
+| `Other` | Everything else. |
 
 ## Wallet
 
@@ -414,9 +357,9 @@ Available keys:
 | `security.lock_timeout` | u64 | `300` |
 | `security.require_password_per_send` | bool | `false` |
 | `notifications.enabled` | bool | `true` |
-| `notifications.volume` | u8 | `100` |
+| `notifications.volume` | u8 | `70` |
 | `notifications.dm` | bool | `true` |
-| `notifications.ambient` | bool | `false` |
+| `notifications.ambient` | bool | `true` |
 | `notifications.mention` | bool | `true` |
 | `ui.sidebar_width` | u16 | `28` |
 | `ui.mouse` | bool | `true` |
