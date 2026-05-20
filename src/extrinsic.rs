@@ -544,6 +544,16 @@ mod tests {
     }
 
     #[test]
+    fn push_strings_encodes_non_empty_vectors() {
+        let mut bytes = Vec::new();
+        push_strings(&mut bytes, &["doc"]);
+
+        assert_eq!(bytes[0], 4);
+        assert_eq!(bytes[1], 12);
+        assert_eq!(&bytes[2..], b"doc");
+    }
+
+    #[test]
     fn twox128_system() {
         let hash = twox128(b"System");
         assert_eq!(hex::encode(hash), "26aa394eea5630e07c48ae0c9558cef7");

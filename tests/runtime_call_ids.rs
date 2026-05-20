@@ -3,7 +3,8 @@ mod common;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use taolk::event::{ConnState, Event};
 use taolk::extrinsic::RemarkCallIds;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -208,6 +209,7 @@ async fn start_with_mirrors_uses_metadata_resolved_remark_calls() {
         ],
         vec![("system_properties", system_properties())],
         vec![("state_getStorage", Value::Null)],
+        vec![("chain_subscribeNewHeads", json!("test-subscription"))],
     ];
     let (node_url, server) = scripted_rpc_server(scripts).await;
     let wallet_name = format!(
@@ -230,16 +232,33 @@ async fn start_with_mirrors_uses_metadata_resolved_remark_calls() {
         true,
     )
     .await;
+    let _ = std::fs::remove_dir_all(wallet_dir);
+
+    let (session, events) = result.expect("session startup must succeed");
+    assert_eq!(session.chain_info.remark_calls.remark, Some((3, 4)));
+    assert_eq!(session.chain_info.remark_calls.remark_with_event, (3, 6));
+    assert!(session.has_mirror);
+
+    let mut saw_chain_reader = false;
+    let mut saw_mirror_reader = false;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline && !(saw_chain_reader && saw_mirror_reader) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        while let Ok(event) = events.try_recv() {
+            match event {
+                Event::ConnectionStatus(ConnState::Connected) => saw_chain_reader = true,
+                Event::Status(status) if status == "Catching up..." => saw_mirror_reader = true,
+                _ => {}
+            }
+        }
+    }
+    assert!(saw_chain_reader);
+    assert!(saw_mirror_reader);
+
     tokio::time::timeout(Duration::from_secs(2), server)
         .await
         .expect("RPC server must finish")
         .expect("RPC server must not panic");
-    let _ = std::fs::remove_dir_all(wallet_dir);
-
-    let (session, _events) = result.expect("session startup must succeed");
-    assert_eq!(session.chain_info.remark_calls.remark, Some((3, 4)));
-    assert_eq!(session.chain_info.remark_calls.remark_with_event, (3, 6));
-    assert!(session.has_mirror);
 }
 
 async fn submit_rpc_server() -> (String, tokio::task::JoinHandle<(u8, u8)>) {
