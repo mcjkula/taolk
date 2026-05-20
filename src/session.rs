@@ -13,10 +13,16 @@ use zeroize::Zeroizing;
 
 pub const MAX_GROUP_MEMBERS: usize = 20;
 
-fn rand_nonce() -> [u8; 12] {
+fn rand_nonce_with(
+    fill: impl FnOnce(&mut [u8]) -> std::result::Result<(), getrandom::Error>,
+) -> Result<[u8; 12]> {
     let mut nonce = [0u8; 12];
-    getrandom::fill(&mut nonce).expect("OS RNG");
-    nonce
+    fill(&mut nonce)?;
+    Ok(nonce)
+}
+
+fn rand_nonce() -> Result<[u8; 12]> {
+    rand_nonce_with(getrandom::fill)
 }
 
 fn refresh_message_gaps(messages: &mut [ThreadMessage], has_msg: impl Fn(BlockRef) -> bool) {
@@ -766,7 +772,7 @@ impl Session {
         recipient: &Pubkey,
         body: &crate::types::MessageBody,
     ) -> Result<samp::RemarkBytes> {
-        let nonce = samp::Nonce::from_bytes(rand_nonce());
+        let nonce = samp::Nonce::from_bytes(rand_nonce()?);
         let sender = samp::Seed::from_bytes(*seed);
         let plaintext = samp::Plaintext::from_bytes(body.as_str().as_bytes().to_vec());
         let encrypted = samp::encrypt(&plaintext, recipient, &nonce, &sender)
@@ -787,7 +793,7 @@ impl Session {
         recipient: &Pubkey,
         body: &crate::types::MessageBody,
     ) -> Result<samp::RemarkBytes> {
-        let nonce = samp::Nonce::from_bytes(rand_nonce());
+        let nonce = samp::Nonce::from_bytes(rand_nonce()?);
         let sender = samp::Seed::from_bytes(*seed);
         let plaintext = samp::Plaintext::from_bytes(samp::encode_thread_content(
             BlockRef::ZERO,
@@ -817,7 +823,7 @@ impl Session {
             .threads
             .get(thread_idx)
             .ok_or_else(|| SdkError::NotFound("Thread not found".into()))?;
-        let nonce = samp::Nonce::from_bytes(rand_nonce());
+        let nonce = samp::Nonce::from_bytes(rand_nonce()?);
         let sender = samp::Seed::from_bytes(*seed);
         let plaintext = samp::Plaintext::from_bytes(samp::encode_thread_content(
             thread.thread_ref,
@@ -873,7 +879,7 @@ impl Session {
                 "Group too large: max {MAX_GROUP_MEMBERS} members supported"
             )));
         }
-        let nonce = samp::Nonce::from_bytes(rand_nonce());
+        let nonce = samp::Nonce::from_bytes(rand_nonce()?);
         let sender = samp::Seed::from_bytes(*seed);
         let mut body_bytes = samp::encode_group_members(members);
         body_bytes.extend_from_slice(body.as_str().as_bytes());
@@ -904,7 +910,7 @@ impl Session {
             .groups
             .get(group_idx)
             .ok_or_else(|| SdkError::NotFound("Group not found".into()))?;
-        let nonce = samp::Nonce::from_bytes(rand_nonce());
+        let nonce = samp::Nonce::from_bytes(rand_nonce()?);
         let sender = samp::Seed::from_bytes(*seed);
         let plaintext = samp::Plaintext::from_bytes(samp::encode_thread_content(
             group.group_ref,
@@ -1004,4 +1010,15 @@ pub struct CleanupResult {
     pub removed_thread: Option<usize>,
     pub removed_channel: Option<usize>,
     pub removed_group: Option<usize>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rand_nonce_with_propagates_rng_error() {
+        let err = rand_nonce_with(|_| Err(getrandom::Error::UNSUPPORTED)).unwrap_err();
+        assert!(matches!(err, SdkError::Random(_)));
+    }
 }

@@ -7,6 +7,8 @@ pub enum WalletError {
     WrongPassword,
     #[error("Wallet file is corrupt")]
     CorruptFile,
+    #[error("secure random source failed: {0}")]
+    Random(#[from] getrandom::Error),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -97,6 +99,8 @@ pub enum SdkError {
     Wallet(#[from] WalletError),
     #[error(transparent)]
     Config(#[from] ConfigError),
+    #[error("secure random source failed: {0}")]
+    Random(#[from] getrandom::Error),
     #[error(transparent)]
     Metadata(#[from] samp::metadata::Error),
     #[error("database: {0}")]

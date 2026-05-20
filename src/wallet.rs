@@ -66,6 +66,15 @@ pub fn create_at(
     password: &Password,
     seed: &Seed,
 ) -> Result<(), WalletError> {
+    create_at_with_random(path, password, seed, getrandom::fill)
+}
+
+fn create_at_with_random(
+    path: &std::path::Path,
+    password: &Password,
+    seed: &Seed,
+    mut fill: impl FnMut(&mut [u8]) -> Result<(), getrandom::Error>,
+) -> Result<(), WalletError> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
         #[cfg(unix)]
@@ -76,9 +85,9 @@ pub fn create_at(
     }
 
     let mut salt = [0u8; SALT_LEN];
-    getrandom::fill(&mut salt).expect("OS RNG");
+    fill(&mut salt)?;
     let mut nonce_bytes = [0u8; NONCE_LEN];
-    getrandom::fill(&mut nonce_bytes).expect("OS RNG");
+    fill(&mut nonce_bytes)?;
 
     let mut key = derive_key(password, &salt);
     let cipher = ChaCha20Poly1305::new((&key).into());
@@ -134,4 +143,24 @@ pub fn open_at(path: &std::path::Path, password: &Password) -> Result<Seed, Wall
     bytes.copy_from_slice(&plaintext);
     plaintext.zeroize();
     Ok(Seed::from_bytes(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_at_with_random_propagates_rng_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wallet.key");
+        let password = Password::new("pass".into());
+        let seed = Seed::from_bytes([0xAA; 32]);
+
+        let err = create_at_with_random(&path, &password, &seed, |_| {
+            Err(getrandom::Error::UNSUPPORTED)
+        })
+        .unwrap_err();
+
+        assert!(matches!(err, WalletError::Random(_)));
+    }
 }
