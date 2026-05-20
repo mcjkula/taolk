@@ -88,7 +88,7 @@ impl PaletteState {
                 ranked.push(RankedCommand { idx, score });
             }
         }
-        ranked.sort_by(|a, b| b.score.cmp(&a.score));
+        ranked.sort_by_key(|command| std::cmp::Reverse(command.score));
         self.ranking = ranked;
         if self.cursor >= self.ranking.len() {
             self.cursor = self.ranking.len().saturating_sub(1);
