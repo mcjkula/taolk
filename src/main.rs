@@ -2596,6 +2596,10 @@ mod tests {
                 samp::SpecVersion::new(1),
                 samp::TxVersion::new(1),
             ),
+            remark_calls: extrinsic::RemarkCallIds {
+                remark: Some((0, 9)),
+                remark_with_event: (0, 7),
+            },
             account_storage: StorageLayout {
                 offset: 16,
                 width: 8,
