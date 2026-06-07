@@ -2460,6 +2460,171 @@ fn handle_confirm_key(
 mod tests {
     use super::*;
     use clap::CommandFactory;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use samp::extrinsic::ChainParams;
+    use samp::metadata::StorageLayout;
+    use std::sync::Arc;
+    use std::sync::mpsc;
+    use zeroize::Zeroizing;
+
+    const ALICE_SEED: [u8; 32] = [0xAA; 32];
+    const BOB_SEED: [u8; 32] = [0xBB; 32];
+
+    struct TuiHarness {
+        app: App,
+        tx: mpsc::Sender<event::Event>,
+        rx: mpsc::Receiver<event::Event>,
+        terminal: Terminal<TestBackend>,
+    }
+
+    impl TuiHarness {
+        fn new() -> Self {
+            let (tx, rx) = mpsc::channel();
+            let mut app = App::new(bob_session(), app_config());
+            let alice = pubkey_from_seed(&ALICE_SEED);
+            app.session
+                .peer_pubkeys
+                .insert(util::ss58_short(&alice), alice);
+            app.session.balance = Some(1_000_000_000);
+            app.session.token_symbol = "TAO".into();
+            app.session.token_decimals = 9;
+            Self {
+                app,
+                tx,
+                rx,
+                terminal: Terminal::new(TestBackend::new(90, 28)).unwrap(),
+            }
+        }
+
+        fn press(&mut self, key: KeyEvent) {
+            handle_key(&mut self.app, key, &self.tx);
+        }
+
+        fn press_char(&mut self, c: char) {
+            self.press(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+
+        fn press_ctrl(&mut self, c: char) {
+            self.press(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
+        }
+
+        fn press_enter(&mut self) {
+            self.press(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        }
+
+        fn press_esc(&mut self) {
+            self.press(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        }
+
+        fn press_tab(&mut self) {
+            self.press(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        }
+
+        fn type_text(&mut self, text: &str) {
+            for c in text.chars() {
+                self.press_char(c);
+            }
+        }
+
+        fn screen(&mut self) -> String {
+            self.terminal
+                .draw(|frame| ui::render(frame, &mut self.app))
+                .unwrap();
+            buffer_text(self.terminal.backend().buffer())
+        }
+
+        fn assert_screen_contains(&mut self, needle: &str) {
+            let screen = self.screen();
+            assert!(
+                screen.contains(needle),
+                "expected screen to contain {needle:?}\n{screen}"
+            );
+        }
+
+        fn install_confirm_for_pending_send(&mut self) {
+            let text = self
+                .app
+                .pending_send_text
+                .take()
+                .expect("pending send text");
+            let body = types::MessageBody::parse(text.clone()).unwrap();
+            let remark = build_send_remark(&self.app, &BOB_SEED, &body).unwrap();
+            self.app.pending_remark = Some(remark);
+            self.app.pending_text = Some(text);
+            self.app.pending_fee = Some("0 TAO".into());
+            self.app.last_fee = Some(0);
+            self.app.overlay = Some(Overlay::Confirm);
+        }
+
+        fn next_event(&self) -> event::Event {
+            self.rx.try_recv().expect("emitted event")
+        }
+    }
+
+    fn buffer_text(buffer: &ratatui::buffer::Buffer) -> String {
+        let area = buffer.area;
+        let mut out = String::new();
+        for y in area.y..area.y + area.height {
+            for x in area.x..area.x + area.width {
+                out.push_str(buffer.cell((x, y)).unwrap().symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    fn app_config() -> app::AppConfig {
+        let notifications = config::Notifications {
+            enabled: false,
+            ..Default::default()
+        };
+        app::AppConfig {
+            sidebar_width: 24,
+            timestamp_format: "%H:%M".into(),
+            date_format: "%Y-%m-%d".into(),
+            audio: audio::Audio::from_config(&notifications),
+        }
+    }
+
+    fn test_chain_info() -> extrinsic::ChainInfo {
+        extrinsic::ChainInfo {
+            name: types::ChainName::parse("Test").unwrap(),
+            ss58_prefix: samp::Ss58Prefix::SUBSTRATE_GENERIC,
+            chain_params: ChainParams::new(
+                samp::GenesisHash::from_bytes([0; 32]),
+                samp::SpecVersion::new(1),
+                samp::TxVersion::new(1),
+            ),
+            remark_calls: extrinsic::RemarkCallIds {
+                remark: Some((0, 9)),
+                remark_with_event: (0, 7),
+            },
+            account_storage: StorageLayout {
+                offset: 16,
+                width: 8,
+            },
+            errors: Arc::new(Default::default()),
+        }
+    }
+
+    fn pubkey_from_seed(seed: &[u8; 32]) -> types::Pubkey {
+        taolk::secret::Seed::from_bytes(*seed)
+            .derive_signing_key()
+            .public_key()
+    }
+
+    fn bob_session() -> session::Session {
+        let seed = taolk::secret::Seed::from_bytes(BOB_SEED);
+        session::Session::new(
+            seed.derive_signing_key(),
+            Zeroizing::new(BOB_SEED),
+            true,
+            types::NodeUrl::parse("ws://test").unwrap(),
+            test_chain_info(),
+            db::Db::open_in_memory(&BOB_SEED).unwrap(),
+        )
+    }
 
     #[test]
     fn cli_clap_derive_is_well_formed() {
@@ -2514,5 +2679,177 @@ mod tests {
     #[test]
     fn parse_channel_ref_index_overflow() {
         assert!(parse_channel_ref("100:99999").is_err());
+    }
+
+    #[test]
+    fn e2e_help_overlay_renders_and_closes() {
+        let mut h = TuiHarness::new();
+
+        h.assert_screen_contains("Inbox");
+        h.press_char('?');
+
+        assert_eq!(h.app.overlay, Some(Overlay::Help));
+        h.assert_screen_contains("Actions");
+        h.assert_screen_contains("Standalone message");
+
+        h.press_char('x');
+
+        assert_eq!(h.app.overlay, None);
+        h.assert_screen_contains("Inbox");
+    }
+
+    #[test]
+    fn e2e_new_thread_flow_reaches_confirm_and_submits() {
+        let mut h = TuiHarness::new();
+
+        h.press_char('n');
+        assert_eq!(h.app.overlay, Some(Overlay::Compose));
+        h.assert_screen_contains("Contacts");
+        h.assert_screen_contains("To: type to search or paste address");
+
+        h.press_enter();
+        assert_eq!(h.app.overlay, None);
+        assert_eq!(h.app.focus, Focus::Composer);
+        assert!(h.app.msg_recipient.is_some());
+
+        h.type_text("hello thread");
+        h.press_enter();
+        h.install_confirm_for_pending_send();
+
+        assert_eq!(h.app.overlay, Some(Overlay::Confirm));
+        h.assert_screen_contains("Send? Fee: 0 TAO");
+
+        h.press_enter();
+
+        match h.next_event() {
+            event::Event::SubmitRemark { remark } => assert!(!remark.as_bytes().is_empty()),
+            _ => panic!("expected SubmitRemark"),
+        }
+        assert!(h.app.sending);
+        assert!(matches!(h.app.view, app::View::Thread(_)));
+    }
+
+    #[test]
+    fn e2e_standalone_public_message_flow_submits_to_outbox() {
+        let mut h = TuiHarness::new();
+
+        h.press_char('m');
+        assert_eq!(h.app.overlay, Some(Overlay::Message));
+
+        h.press_enter();
+        assert!(h.app.msg_recipient.is_some());
+        assert_eq!(h.app.overlay, Some(Overlay::Message));
+
+        h.press_char('p');
+        assert_eq!(h.app.overlay, None);
+        assert_eq!(h.app.focus, Focus::Composer);
+        assert_eq!(h.app.msg_type, Some(samp::ContentType::Public));
+
+        h.type_text("hello public");
+        h.press_enter();
+        h.install_confirm_for_pending_send();
+        h.press_enter();
+
+        match h.next_event() {
+            event::Event::SubmitRemark { remark } => assert_eq!(remark.as_bytes()[0], 0x10),
+            _ => panic!("expected SubmitRemark"),
+        }
+        assert!(h.app.sending);
+        assert_eq!(h.app.view, app::View::Outbox);
+    }
+
+    #[test]
+    fn e2e_channel_directory_typed_ref_subscribes_and_fetches() {
+        let mut h = TuiHarness::new();
+
+        h.press_char('c');
+        assert_eq!(h.app.view, app::View::ChannelDir);
+        h.assert_screen_contains("Channels");
+        h.assert_screen_contains("No channels discovered yet");
+
+        h.type_text("123:4");
+        h.press_enter();
+
+        assert!(matches!(h.app.view, app::View::Channel(0)));
+        assert_eq!(
+            h.app.session.channels[0].channel_ref,
+            types::BlockRef::from_parts(123, 4)
+        );
+        match h.next_event() {
+            event::Event::FetchBlock { block_ref } => {
+                assert_eq!(block_ref, types::BlockRef::from_parts(123, 4));
+            }
+            _ => panic!("expected FetchBlock"),
+        }
+    }
+
+    #[test]
+    fn e2e_group_member_picker_adds_contact_and_opens_composer() {
+        let mut h = TuiHarness::new();
+
+        h.press_char('g');
+        assert_eq!(h.app.overlay, Some(Overlay::CreateGroupMembers));
+        assert_eq!(h.app.pending_group_members.len(), 1);
+        h.assert_screen_contains("Select Members");
+        h.assert_screen_contains("Members (1)");
+
+        h.press_enter();
+        assert_eq!(h.app.pending_group_members.len(), 2);
+
+        h.press_tab();
+        assert_eq!(h.app.overlay, None);
+        assert_eq!(h.app.focus, Focus::Composer);
+        assert!(matches!(h.app.view, app::View::Group(0)));
+        assert_eq!(h.app.session.groups[0].members.len(), 2);
+    }
+
+    #[test]
+    fn e2e_search_overlay_applies_and_clears_query() {
+        let mut h = TuiHarness::new();
+
+        h.press_ctrl('f');
+        assert_eq!(h.app.overlay, Some(Overlay::Search));
+
+        h.type_text("alice");
+        assert_eq!(h.app.search_query, "alice");
+
+        h.press_enter();
+        assert_eq!(h.app.overlay, None);
+        assert_eq!(h.app.search_query, "alice");
+
+        h.press_ctrl('f');
+        h.type_text("bob");
+        h.press_esc();
+
+        assert_eq!(h.app.overlay, None);
+        assert_eq!(h.app.search_query, "");
+    }
+
+    #[test]
+    fn e2e_thread_draft_saves_and_restores() {
+        let mut h = TuiHarness::new();
+        let alice = pubkey_from_seed(&ALICE_SEED);
+        let idx = h.app.session.create_thread(alice).unwrap();
+        h.app.view = app::View::Thread(idx);
+        h.app.focus = Focus::Composer;
+
+        h.type_text("draft body");
+        h.press_esc();
+
+        assert_eq!(h.app.focus, Focus::Timeline);
+        assert_eq!(h.app.session.threads[idx].draft, "draft body");
+
+        h.press_enter();
+
+        assert_eq!(h.app.focus, Focus::Composer);
+        assert_eq!(h.app.input.as_str(), "draft body");
+    }
+
+    #[test]
+    fn e2e_too_small_terminal_renders_explicit_error() {
+        let mut h = TuiHarness::new();
+        h.terminal = Terminal::new(TestBackend::new(50, 10)).unwrap();
+
+        h.assert_screen_contains("requires at least 60x16");
     }
 }

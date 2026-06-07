@@ -55,5 +55,5 @@ clap = { version = "4", features = ["derive", "env"], optional = true }
 nucleo-matcher = "0.3"
 
 [dev-dependencies]
+static_assertions = "1"
 tempfile = "3"
-trybuild = "1"

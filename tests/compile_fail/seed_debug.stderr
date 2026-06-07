@@ -1,7 +1,0 @@
-error[E0277]: `Seed` doesn't implement `Debug`
- --> tests/compile_fail/seed_debug.rs:3:40
-  |
-3 |     let _debug: &dyn std::fmt::Debug = &seed;
-  |                                        ^^^^^ the trait `Debug` is not implemented for `Seed`
-  |
-  = note: required for the cast from `&Seed` to `&dyn Debug`
