@@ -64,7 +64,7 @@ jobs:
           cp target/${{ matrix.target }}/release/taolk dist/${{ matrix.artifact }}
           chmod +x dist/${{ matrix.artifact }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.artifact }}
@@ -73,7 +73,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -87,7 +87,7 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -100,7 +100,7 @@ jobs:
           echo "linux_arm64=$(sha256sum artifacts/taolk-linux-aarch64/taolk-linux-aarch64 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Update Homebrew formula
-        uses: peter-evans/repository-dispatch@v3
+        uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           repository: mcjkula/homebrew-tap
