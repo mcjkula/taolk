@@ -6,6 +6,7 @@ use samp::Remark;
 use crate::chain;
 use crate::error::ChainError;
 use crate::event::Event;
+use crate::extrinsic::RemarkCallIds;
 use crate::reader::{self, RemarkSource};
 use crate::secret::DecryptionKeys;
 use crate::types::{BlockRef, Pubkey};
@@ -32,6 +33,7 @@ pub async fn sync(
     expected_ss58_prefix: samp::Ss58Prefix,
     keys: &DecryptionKeys,
     my_pubkey: &Pubkey,
+    remark_calls: RemarkCallIds,
     subscribed_channels: Vec<BlockRef>,
     last_block: u64,
     tx: Sender<Event>,
@@ -44,6 +46,7 @@ pub async fn sync(
         expected_ss58_prefix,
         keys,
         my_pubkey,
+        remark_calls,
         subscribed_channels,
         last_block,
         &tx,
@@ -63,6 +66,7 @@ async fn sync_inner(
     expected_ss58_prefix: samp::Ss58Prefix,
     keys: &DecryptionKeys,
     my_pubkey: &Pubkey,
+    remark_calls: RemarkCallIds,
     subscribed_channels: Vec<BlockRef>,
     last_block: u64,
     tx: &Sender<Event>,
@@ -86,8 +90,8 @@ async fn sync_inner(
     let message_hints =
         fetch_message_hints(&client, &healthy, last_block, &subscribed_channels).await;
 
-    resolve_channel_hints(node_url, channel_hints, tx).await;
-    resolve_message_hints(node_url, message_hints, my_pubkey, keys, tx).await;
+    resolve_channel_hints(node_url, channel_hints, remark_calls, tx).await;
+    resolve_message_hints(node_url, message_hints, my_pubkey, keys, remark_calls, tx).await;
 
     let _ = tx.send(Event::Status("All caught up".into()));
     Ok(())
@@ -102,6 +106,7 @@ pub async fn fetch_channel(
     channel_ref: BlockRef,
     my_pubkey: &Pubkey,
     keys: &DecryptionKeys,
+    remark_calls: RemarkCallIds,
     tx: Sender<Event>,
 ) {
     let client = reqwest::Client::new();
@@ -120,7 +125,7 @@ pub async fn fetch_channel(
     }
     let (b, i) = (channel_ref.block().get(), channel_ref.index().get());
     let hints = fetch_per_channel_hints(&client, &healthy, b, i, 0).await;
-    resolve_message_hints(node_url, hints, my_pubkey, keys, &tx).await;
+    resolve_message_hints(node_url, hints, my_pubkey, keys, remark_calls, &tx).await;
     let _ = tx.send(Event::CatchupComplete);
 }
 
@@ -273,6 +278,7 @@ async fn resolve_message_hints(
     hints: HashSet<(u32, u16)>,
     my_pubkey: &Pubkey,
     keys: &DecryptionKeys,
+    remark_calls: RemarkCallIds,
     tx: &Sender<Event>,
 ) {
     if hints.is_empty() {
@@ -298,15 +304,24 @@ async fn resolve_message_hints(
         let Some(ext_hex) = block.extrinsics.get(usize::from(ext_index)) else {
             continue;
         };
-        if let Some(source) =
-            reader::source_from_extrinsic(ext_hex, block_num, ext_index, block.timestamp_ms)
-        {
+        if let Some(source) = reader::source_from_extrinsic(
+            ext_hex,
+            block_num,
+            ext_index,
+            block.timestamp_ms,
+            &remark_calls,
+        ) {
             reader::process_remark(&source, my_pubkey, keys, tx);
         }
     }
 }
 
-async fn resolve_channel_hints(node_url: &str, hints: HashSet<(u32, u16)>, tx: &Sender<Event>) {
+async fn resolve_channel_hints(
+    node_url: &str,
+    hints: HashSet<(u32, u16)>,
+    remark_calls: RemarkCallIds,
+    tx: &Sender<Event>,
+) {
     if hints.is_empty() {
         return;
     }
@@ -327,9 +342,13 @@ async fn resolve_channel_hints(node_url: &str, hints: HashSet<(u32, u16)>, tx: &
         let Some(ext_hex) = block.extrinsics.get(usize::from(ext_index)) else {
             continue;
         };
-        let Some(source) =
-            reader::source_from_extrinsic(ext_hex, block_num, ext_index, block.timestamp_ms)
-        else {
+        let Some(source) = reader::source_from_extrinsic(
+            ext_hex,
+            block_num,
+            ext_index,
+            block.timestamp_ms,
+            &remark_calls,
+        ) else {
             continue;
         };
         emit_channel_create(&source, tx);

@@ -13,14 +13,38 @@ use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 use crate::error::ChainError;
 use crate::types::Pubkey;
 
-pub(crate) const SYSTEM_REMARK: (u8, u8) = (0, 9);
-pub(crate) const SYSTEM_REMARK_WITH_EVENT: (u8, u8) = (0, 7);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RemarkCallIds {
+    pub remark: Option<(u8, u8)>,
+    pub remark_with_event: (u8, u8),
+}
+
+impl RemarkCallIds {
+    pub fn from_metadata(metadata: &Metadata) -> Result<Self, ChainError> {
+        let remark = metadata.find_call_index("System", "remark");
+        let remark_with_event = metadata
+            .find_call_index("System", "remark_with_event")
+            .ok_or(ChainError::RuntimeCallMissing(
+                "System",
+                "remark_with_event",
+            ))?;
+        Ok(Self {
+            remark,
+            remark_with_event,
+        })
+    }
+
+    pub fn accepts(self, pair: (u8, u8)) -> bool {
+        self.remark == Some(pair) || self.remark_with_event == pair
+    }
+}
 
 #[derive(Clone)]
 pub struct ChainInfo {
     pub name: crate::types::ChainName,
     pub ss58_prefix: samp::Ss58Prefix,
     pub chain_params: ChainParams,
+    pub remark_calls: RemarkCallIds,
     pub account_storage: StorageLayout,
     pub errors: Arc<ErrorTable>,
 }
@@ -68,6 +92,7 @@ pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, ChainError> {
     let metadata_bytes = hex::decode(metadata_hex.trim_start_matches("0x"))?;
     let metadata = Metadata::from_runtime_metadata(&metadata_bytes)?;
 
+    let remark_calls = RemarkCallIds::from_metadata(&metadata)?;
     let account_storage = metadata.storage_layout("System", "Account", &["data", "free"])?;
 
     let req = json!({"jsonrpc":"2.0","id":4,"method":"system_chain","params":[]});
@@ -100,6 +125,7 @@ pub async fn fetch_chain_info(node_url: &str) -> Result<ChainInfo, ChainError> {
             SpecVersion::new(spec_version),
             TxVersion::new(tx_version),
         ),
+        remark_calls,
         account_storage,
         errors: Arc::new(metadata.errors().clone()),
     })
@@ -142,6 +168,7 @@ async fn refresh_signing_params(
             SpecVersion::new(spec_version),
             TxVersion::new(tx_version),
         ),
+        remark_calls: base.remark_calls,
         account_storage: base.account_storage.clone(),
         errors: base.errors.clone(),
     })
@@ -206,9 +233,10 @@ fn build_remark_with_event(
 ) -> Result<samp::ExtrinsicBytes, ChainError> {
     let args = build_remark_call_args(remark)?;
     let public_key = signing.public_key();
+    let (pallet, call) = chain_info.remark_calls.remark_with_event;
     build_signed_extrinsic(
-        PalletIdx::new(SYSTEM_REMARK_WITH_EVENT.0),
-        CallIdx::new(SYSTEM_REMARK_WITH_EVENT.1),
+        PalletIdx::new(pallet),
+        CallIdx::new(call),
         &args,
         &public_key,
         |msg| samp::Signature::from_bytes(signing.sign(msg)),
@@ -434,6 +462,97 @@ fn hex_to_32(hex_str: &str) -> Result<[u8; 32], ChainError> {
 mod tests {
     use super::*;
 
+    fn test_remark_calls() -> RemarkCallIds {
+        RemarkCallIds {
+            remark: Some((0, 9)),
+            remark_with_event: (0, 7),
+        }
+    }
+
+    fn test_chain_info_with_calls(remark_calls: RemarkCallIds) -> ChainInfo {
+        ChainInfo {
+            name: crate::types::ChainName::parse("Test").unwrap(),
+            ss58_prefix: samp::Ss58Prefix::SUBSTRATE_GENERIC,
+            chain_params: samp::extrinsic::ChainParams::new(
+                samp::GenesisHash::from_bytes([0; 32]),
+                samp::SpecVersion::new(1),
+                samp::TxVersion::new(1),
+            ),
+            remark_calls,
+            account_storage: samp::metadata::StorageLayout {
+                offset: 16,
+                width: 8,
+            },
+            errors: Default::default(),
+        }
+    }
+
+    fn push_compact(out: &mut Vec<u8>, value: u32) {
+        samp::scale::encode_compact(u64::from(value), out);
+    }
+
+    fn push_string(out: &mut Vec<u8>, value: &str) {
+        push_compact(out, value.len() as u32);
+        out.extend_from_slice(value.as_bytes());
+    }
+
+    fn push_strings(out: &mut Vec<u8>, values: &[&str]) {
+        push_compact(out, values.len() as u32);
+        for value in values {
+            push_string(out, value);
+        }
+    }
+
+    fn metadata_with_system_calls(remark: Option<u8>, remark_with_event: Option<u8>) -> Metadata {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"meta");
+        bytes.push(14);
+
+        push_compact(&mut bytes, 1);
+        push_compact(&mut bytes, 0);
+        push_strings(&mut bytes, &[]);
+        push_compact(&mut bytes, 0);
+        bytes.push(1);
+
+        let mut variants = Vec::new();
+        if let Some(idx) = remark {
+            variants.push(("remark", idx));
+        }
+        if let Some(idx) = remark_with_event {
+            variants.push(("remark_with_event", idx));
+        }
+        push_compact(&mut bytes, variants.len() as u32);
+        for (name, idx) in variants {
+            push_string(&mut bytes, name);
+            push_compact(&mut bytes, 0);
+            bytes.push(idx);
+            push_strings(&mut bytes, &[]);
+        }
+        push_strings(&mut bytes, &[]);
+
+        push_compact(&mut bytes, 1);
+        push_string(&mut bytes, "System");
+        bytes.push(0);
+        bytes.push(1);
+        push_compact(&mut bytes, 0);
+        bytes.push(0);
+        push_compact(&mut bytes, 0);
+        bytes.push(0);
+        bytes.push(3);
+
+        Metadata::from_runtime_metadata(&bytes).unwrap()
+    }
+
+    #[test]
+    fn push_strings_encodes_non_empty_vectors() {
+        let mut bytes = Vec::new();
+        push_strings(&mut bytes, &["doc"]);
+
+        assert_eq!(bytes[0], 4);
+        assert_eq!(bytes[1], 12);
+        assert_eq!(&bytes[2..], b"doc");
+    }
+
     #[test]
     fn twox128_system() {
         let hash = twox128(b"System");
@@ -565,20 +684,7 @@ mod tests {
         let seed = crate::secret::Seed::from_bytes([0xAA; 32]);
         let signing = seed.derive_signing_key();
         let remark = samp::RemarkBytes::from_bytes(b"test message".to_vec());
-        let chain_info = ChainInfo {
-            name: crate::types::ChainName::parse("Test").unwrap(),
-            ss58_prefix: samp::Ss58Prefix::SUBSTRATE_GENERIC,
-            chain_params: samp::extrinsic::ChainParams::new(
-                samp::GenesisHash::from_bytes([0; 32]),
-                samp::SpecVersion::new(1),
-                samp::TxVersion::new(1),
-            ),
-            account_storage: samp::metadata::StorageLayout {
-                offset: 16,
-                width: 8,
-            },
-            errors: Default::default(),
-        };
+        let chain_info = test_chain_info_with_calls(test_remark_calls());
         let ext = build_remark_with_event(&remark, &signing, 0, &chain_info).unwrap();
         assert!(!ext.as_bytes().is_empty());
 
@@ -586,8 +692,8 @@ mod tests {
         assert_eq!(signer, signing.public_key());
 
         let call = samp::extrinsic::extract_call(&ext).unwrap();
-        assert_eq!(call.pallet().get(), SYSTEM_REMARK_WITH_EVENT.0);
-        assert_eq!(call.call().get(), SYSTEM_REMARK_WITH_EVENT.1);
+        assert_eq!(call.pallet().get(), 0);
+        assert_eq!(call.call().get(), 7);
     }
 
     #[test]
@@ -595,28 +701,67 @@ mod tests {
         let seed = crate::secret::Seed::from_bytes([0xAA; 32]);
         let signing = seed.derive_signing_key();
         let remark = samp::RemarkBytes::from_bytes(b"msg".to_vec());
-        let chain_info = ChainInfo {
-            name: crate::types::ChainName::parse("Test").unwrap(),
-            ss58_prefix: samp::Ss58Prefix::SUBSTRATE_GENERIC,
-            chain_params: samp::extrinsic::ChainParams::new(
-                samp::GenesisHash::from_bytes([0; 32]),
-                samp::SpecVersion::new(1),
-                samp::TxVersion::new(1),
-            ),
-            account_storage: samp::metadata::StorageLayout {
-                offset: 16,
-                width: 8,
-            },
-            errors: Default::default(),
-        };
+        let chain_info = test_chain_info_with_calls(test_remark_calls());
         let ext0 = build_remark_with_event(&remark, &signing, 0, &chain_info).unwrap();
         let ext1 = build_remark_with_event(&remark, &signing, 1, &chain_info).unwrap();
         assert_ne!(ext0.as_bytes(), ext1.as_bytes());
     }
 
     #[test]
-    fn system_remark_constants() {
-        assert_eq!(SYSTEM_REMARK, (0, 9));
-        assert_eq!(SYSTEM_REMARK_WITH_EVENT, (0, 7));
+    fn build_remark_with_event_uses_resolved_call_id() {
+        let seed = crate::secret::Seed::from_bytes([0xAA; 32]);
+        let signing = seed.derive_signing_key();
+        let remark = samp::RemarkBytes::from_bytes(b"msg".to_vec());
+        let chain_info = test_chain_info_with_calls(RemarkCallIds {
+            remark: Some((3, 4)),
+            remark_with_event: (5, 6),
+        });
+
+        let ext = build_remark_with_event(&remark, &signing, 0, &chain_info).unwrap();
+        let call = samp::extrinsic::extract_call(&ext).unwrap();
+
+        assert_eq!(call.pallet().get(), 5);
+        assert_eq!(call.call().get(), 6);
+    }
+
+    #[test]
+    fn remark_call_ids_accepts_resolved_pairs() {
+        let calls = RemarkCallIds {
+            remark: Some((3, 4)),
+            remark_with_event: (5, 6),
+        };
+
+        assert!(calls.accepts((3, 4)));
+        assert!(calls.accepts((5, 6)));
+        assert!(!calls.accepts((0, 7)));
+    }
+
+    #[test]
+    fn remark_call_ids_from_metadata_resolves_non_default_indices() {
+        let metadata = metadata_with_system_calls(Some(4), Some(6));
+        let calls = RemarkCallIds::from_metadata(&metadata).unwrap();
+
+        assert_eq!(calls.remark, Some((3, 4)));
+        assert_eq!(calls.remark_with_event, (3, 6));
+    }
+
+    #[test]
+    fn remark_call_ids_from_metadata_allows_missing_plain_remark() {
+        let metadata = metadata_with_system_calls(None, Some(6));
+        let calls = RemarkCallIds::from_metadata(&metadata).unwrap();
+
+        assert_eq!(calls.remark, None);
+        assert_eq!(calls.remark_with_event, (3, 6));
+    }
+
+    #[test]
+    fn remark_call_ids_from_metadata_requires_remark_with_event() {
+        let metadata = metadata_with_system_calls(Some(4), None);
+        let err = RemarkCallIds::from_metadata(&metadata).unwrap_err();
+
+        assert!(matches!(
+            err,
+            ChainError::RuntimeCallMissing("System", "remark_with_event")
+        ));
     }
 }

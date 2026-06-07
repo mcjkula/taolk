@@ -8,7 +8,7 @@ use samp::{GenesisHash, SpecVersion, Ss58Prefix, TxVersion};
 use serde::{Deserialize, Serialize};
 
 use crate::error::SdkError;
-use crate::extrinsic::ChainInfo;
+use crate::extrinsic::{ChainInfo, RemarkCallIds};
 use crate::types::ChainName;
 
 // Cached `spec_version`/`tx_version` are never used at sign time:
@@ -23,6 +23,8 @@ pub struct ChainSnapshot {
     pub genesis_hash: [u8; 32],
     pub spec_version: u32,
     pub tx_version: u32,
+    pub system_remark_call: Option<[u8; 2]>,
+    pub system_remark_with_event_call: [u8; 2],
     pub account_storage_offset: usize,
     pub account_storage_width: usize,
     pub errors: Vec<ErrorRecord>,
@@ -58,6 +60,11 @@ impl ChainSnapshot {
             genesis_hash: *info.chain_params.genesis_hash().as_bytes(),
             spec_version: info.chain_params.spec_version().get(),
             tx_version: info.chain_params.tx_version().get(),
+            system_remark_call: info.remark_calls.remark.map(|(p, c)| [p, c]),
+            system_remark_with_event_call: [
+                info.remark_calls.remark_with_event.0,
+                info.remark_calls.remark_with_event.1,
+            ],
             account_storage_offset: info.account_storage.offset,
             account_storage_width: info.account_storage.width,
             errors,
@@ -89,6 +96,13 @@ impl ChainSnapshot {
                 SpecVersion::new(self.spec_version),
                 TxVersion::new(self.tx_version),
             ),
+            remark_calls: RemarkCallIds {
+                remark: self.system_remark_call.map(|[p, c]| (p, c)),
+                remark_with_event: (
+                    self.system_remark_with_event_call[0],
+                    self.system_remark_with_event_call[1],
+                ),
+            },
             account_storage: StorageLayout {
                 offset: self.account_storage_offset,
                 width: self.account_storage_width,

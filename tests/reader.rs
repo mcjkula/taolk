@@ -1,8 +1,12 @@
 mod common;
 
-use common::{build_remark_ext, signing_from_seed as signing};
+use common::{
+    build_remark_ext, build_remark_ext_with_call, signing_from_seed as signing,
+    test_remark_call_ids,
+};
 use std::sync::mpsc;
 use taolk::event::Event;
+use taolk::extrinsic::RemarkCallIds;
 use taolk::reader::{self, ReadContext};
 use taolk::secret::DecryptionKeys;
 use taolk::types::Pubkey;
@@ -21,9 +25,19 @@ fn make_ctx<'a>(
     pubkey: &'a Pubkey,
     tx: &'a mpsc::Sender<Event>,
 ) -> ReadContext<'a> {
+    make_ctx_with_calls(keys, pubkey, tx, test_remark_call_ids())
+}
+
+fn make_ctx_with_calls<'a>(
+    keys: &'a DecryptionKeys,
+    pubkey: &'a Pubkey,
+    tx: &'a mpsc::Sender<Event>,
+    remark_calls: RemarkCallIds,
+) -> ReadContext<'a> {
     ReadContext {
         my_pubkey: pubkey,
         keys,
+        remark_calls,
         tx,
     }
 }
@@ -427,7 +441,8 @@ fn read_block_non_string_extrinsic_skipped() {
 
 #[test]
 fn source_from_extrinsic_invalid_hex() {
-    let result = reader::source_from_extrinsic("not-hex!!", 100, 0, 0);
+    let calls = test_remark_call_ids();
+    let result = reader::source_from_extrinsic("not-hex!!", 100, 0, 0, &calls);
     assert!(result.is_none());
 }
 
@@ -441,11 +456,40 @@ fn source_from_extrinsic_valid_public() {
     let ext = build_remark_ext(&remark, &alice_sk, 0);
     let hex = ext_to_hex(&ext);
 
-    let source = reader::source_from_extrinsic(&hex, 100, 5, 1_700_000_000_000).unwrap();
+    let calls = test_remark_call_ids();
+    let source = reader::source_from_extrinsic(&hex, 100, 5, 1_700_000_000_000, &calls).unwrap();
     assert_eq!(source.sender, alice_sk.public_key());
     assert_eq!(source.at.block().get(), 100);
     assert_eq!(source.at.index().get(), 5);
     assert_eq!(source.timestamp_secs, 1_700_000_000);
+}
+
+#[test]
+fn read_extrinsic_uses_metadata_resolved_call_ids() {
+    let alice_seed = [0xAA; 32];
+    let alice_sk = signing(&alice_seed);
+    let bob_seed = [0xBB; 32];
+    let bob_pubkey = signing(&bob_seed).public_key();
+
+    let calls = RemarkCallIds {
+        remark: Some((3, 4)),
+        remark_with_event: (5, 6),
+    };
+    let remark = samp::encode_public(&bob_pubkey, "hello bob");
+    let ext = build_remark_ext_with_call(&remark, &alice_sk, 0, calls.remark_with_event);
+    let hex = ext_to_hex(&ext);
+
+    assert!(reader::source_from_extrinsic(&hex, 100, 5, 0, &test_remark_call_ids()).is_none());
+
+    let (tx, rx) = mpsc::channel();
+    let keys = make_keys(&bob_seed);
+    let ctx = make_ctx_with_calls(&keys, &bob_pubkey, &tx, calls);
+    reader::read_extrinsic(&hex, &ctx, 100, 5, 0);
+
+    match rx.try_recv() {
+        Ok(Event::NewMessage { sender, .. }) => assert_eq!(sender, alice_sk.public_key()),
+        other => panic!("expected NewMessage, got {:?}", event_debug(&other)),
+    }
 }
 
 #[test]

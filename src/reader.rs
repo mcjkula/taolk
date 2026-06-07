@@ -8,13 +8,14 @@ use serde_json::Value;
 use std::sync::mpsc::Sender;
 
 use crate::event::Event;
-use crate::extrinsic::{SYSTEM_REMARK, SYSTEM_REMARK_WITH_EVENT};
+use crate::extrinsic::RemarkCallIds;
 use crate::secret::DecryptionKeys;
 use crate::types::{BlockRef, Pubkey};
 
 pub struct ReadContext<'a> {
     pub my_pubkey: &'a Pubkey,
     pub keys: &'a DecryptionKeys,
+    pub remark_calls: RemarkCallIds,
     pub tx: &'a Sender<Event>,
 }
 
@@ -46,9 +47,13 @@ pub fn read_block(block: &Value, ctx: &ReadContext) {
             continue;
         };
         let ext_index_u16 = u16::try_from(ext_index).unwrap_or(u16::MAX);
-        if let Some(source) =
-            source_from_extrinsic(ext_hex, block_number, ext_index_u16, block_ts_ms)
-        {
+        if let Some(source) = source_from_extrinsic(
+            ext_hex,
+            block_number,
+            ext_index_u16,
+            block_ts_ms,
+            &ctx.remark_calls,
+        ) {
             process_remark(&source, ctx.my_pubkey, ctx.keys, ctx.tx);
         }
     }
@@ -61,7 +66,13 @@ pub fn read_extrinsic(
     ext_index: u16,
     block_ts_ms: u64,
 ) {
-    if let Some(source) = source_from_extrinsic(ext_hex, block_number, ext_index, block_ts_ms) {
+    if let Some(source) = source_from_extrinsic(
+        ext_hex,
+        block_number,
+        ext_index,
+        block_ts_ms,
+        &ctx.remark_calls,
+    ) {
         process_remark(&source, ctx.my_pubkey, ctx.keys, ctx.tx);
     }
 }
@@ -71,11 +82,12 @@ pub fn source_from_extrinsic(
     block_number: u32,
     ext_index: u16,
     block_ts_ms: u64,
+    remark_calls: &RemarkCallIds,
 ) -> Option<RemarkSource> {
     let ext_bytes =
         samp::ExtrinsicBytes::from_bytes(hex::decode(ext_hex.trim_start_matches("0x")).ok()?);
     let sender = samp_extract_signer(&ext_bytes)?;
-    let remark_bytes = extract_remark_from_call(&ext_bytes)?;
+    let remark_bytes = extract_remark_from_call(&ext_bytes, remark_calls)?;
     let remark = decode_remark(&remark_bytes).ok()?;
     Some(RemarkSource {
         sender,
@@ -86,10 +98,13 @@ pub fn source_from_extrinsic(
     })
 }
 
-fn extract_remark_from_call(ext_bytes: &samp::ExtrinsicBytes) -> Option<samp::RemarkBytes> {
+fn extract_remark_from_call(
+    ext_bytes: &samp::ExtrinsicBytes,
+    remark_calls: &RemarkCallIds,
+) -> Option<samp::RemarkBytes> {
     let call = extract_call(ext_bytes)?;
     let pair = (call.pallet().get(), call.call().get());
-    if pair != SYSTEM_REMARK && pair != SYSTEM_REMARK_WITH_EVENT {
+    if !remark_calls.accepts(pair) {
         return None;
     }
     let (payload, _) = decode_bytes(call.args().as_bytes())?;
