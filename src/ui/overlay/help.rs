@@ -72,7 +72,7 @@ const CARDS: &[Card] = &[
         glyph: icons::DRAFT,
         entries: &[
             ("Enter", "Send (preview fee)"),
-            ("S-Enter", "Insert newline"),
+            ("A-Enter / S-Enter", "Insert newline"),
             ("Esc", "Save draft and exit"),
             ("C-\u{F004D} / C-\u{F0054}", "Jump by word"),
             ("Backspace", "Delete left"),

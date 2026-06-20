@@ -1950,7 +1950,10 @@ fn handle_composer_key(app: &mut App, key: crossterm::event::KeyEvent) {
         KeyCode::Char('/') if app.input.is_empty() => {
             app.open_palette();
         }
-        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+        KeyCode::Enter
+            if key.modifiers.contains(KeyModifiers::SHIFT)
+                || key.modifiers.contains(KeyModifiers::ALT) =>
+        {
             app.input.insert_newline();
         }
         KeyCode::Enter => {
