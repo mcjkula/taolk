@@ -37,6 +37,70 @@ Or from source: `git clone https://github.com/mcjkula/taolk.git && cd taolk && c
 
 > Linux requires `libasound2-dev` (Debian/Ubuntu), `alsa-lib` (Arch), or `alsa-lib-devel` (Fedora).
 
+### A Nerd Font is required
+
+taolk's interface uses [Nerd Font](https://www.nerdfonts.com/) icon glyphs — specifically
+Material Design Icons in the Unicode Private Use Area (`U+F0000`–`U+F1AF0`). Without a Nerd
+Font, these render as blank boxes ("tofu") or the wrong characters. This is not a terminal
+bug: your terminal simply has no font containing the glyphs.
+
+**Recommended: install a full patched Nerd Font and set it as your terminal's font** (e.g.
+`JetBrainsMono Nerd Font`). A full patched font sizes every icon to exactly one cell, so the
+icons *and* taolk's box-drawing borders stay aligned.
+
+| Platform | Install a full Nerd Font |
+|----------|--------------------------|
+| Arch | `sudo pacman -S ttf-jetbrains-mono-nerd` |
+| macOS (Homebrew) | `brew install --cask font-jetbrains-mono-nerd-font` |
+| Debian / Ubuntu / Fedora / other | Download from [nerdfonts.com](https://www.nerdfonts.com/font-downloads), unzip into `~/.local/share/fonts/`, then `fc-cache -f` |
+
+After installing, run `fc-cache -f` and **fully restart your terminal**, then set the terminal's
+font to the Nerd Font.
+
+#### Why not the symbols-only font?
+
+The symbols-only *Symbols Nerd Font* works as an automatic fontconfig fallback and makes the
+icons *visible* — but in VTE-based terminals (GNOME Terminal) its glyphs render ~1.6 cells
+wide. taolk lays each icon out as one cell, so the overflow shifts everything after it and
+**breaks the panel borders and column alignment**. Prefer a full patched font as the primary
+font; it renders icons at exactly one cell.
+
+#### GNOME Terminal
+
+1. **Install a full Nerd Font** and run `fc-cache -f` (above).
+2. **Restart the terminal _server_, not just the window.** GNOME Terminal runs a single
+   long-lived `gnome-terminal-server` that loads fonts once at startup; opening a new window
+   reuses it and won't see a newly installed font. **Log out and back in** so the server
+   reloads fonts.
+3. **Set the profile font:** Preferences → your profile → Text → Custom font →
+   `JetBrainsMono Nerd Font`.
+4. **Use a normal-contrast palette.** taolk draws borders and dim/secondary text with the
+   terminal's ANSI "dark gray". Low-contrast schemes (e.g. Solarized) can make those nearly
+   invisible. If borders or some text disappear, switch to a conventional palette (the default
+   GNOME palette, Tango, or a Tokyo Night-style palette).
+
+Tip: leave your everyday profile untouched and add a dedicated profile (e.g. `taolk`) with the
+Nerd Font + a normal-contrast palette, then launch with `gnome-terminal --profile=taolk`.
+
+#### Verify the setup (Linux)
+
+```
+# 1) fontconfig resolves the icon range to a Nerd Font (not Noto/DejaVu):
+fc-match ':charset=f0423'
+
+# 2) the Pango/VTE render path actually selects the Nerd Font for the glyph:
+python3 - <<'PY'
+import gi; gi.require_version('Pango','1.0'); gi.require_version('PangoCairo','1.0')
+from gi.repository import Pango, PangoCairo
+import cairo
+cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 8, 8))
+l = PangoCairo.create_layout(cr)
+l.set_font_description(Pango.FontDescription("monospace 16"))
+l.set_text("\U000F0423", -1)  # CHANNELS icon
+print(l.get_iter().get_run_readonly().item.analysis.font.describe().to_string())
+PY
+```
+
 ## Getting started
 
 ### 1. Create a wallet
