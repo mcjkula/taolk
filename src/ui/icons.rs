@@ -11,6 +11,10 @@
 //! Fonts v3 (`nf-md-*`, U+F0001+); the recommended fallback font is
 //! "Symbols Nerd Font Mono" (the Mono variant keeps glyphs single-cell).
 
+// The runtime API below is consumed by the migration and startup commits; until
+// then these items are intentionally unused. Removed once startup wires it in.
+#![allow(dead_code)]
+
 // Legacy flat constants — still referenced by call sites until the migration
 // commit replaces them with `icons().field`. Kept here so all PUA literals live
 // in one module.
@@ -46,8 +50,6 @@ pub const CHEVRON_LEFT: &str = "\u{F0141}";
 pub const CHEVRON_RIGHT: &str = "\u{F0142}";
 
 /// Nerd Font Material Design glyphs (v3 nf-md-*). Needs a patched font.
-// `allow` is dropped in the next commit once `icons()`/`resolve` consume the sets.
-#[allow(dead_code)]
 pub const NERD: IconSet = IconSet {
     inbox: "\u{F02FB}",
     outbox: "\u{F048A}",
@@ -87,7 +89,6 @@ pub const NERD: IconSet = IconSet {
 
 /// Plain single-cell Unicode symbols (East-Asian-Width N) that render on any
 /// terminal without a Nerd Font. The default theme.
-#[allow(dead_code)]
 pub const UNICODE: IconSet = IconSet {
     inbox: "\u{21A7}",   // downwards arrow from bar
     outbox: "\u{21A5}",  // upwards arrow from bar
@@ -126,7 +127,6 @@ pub const UNICODE: IconSet = IconSet {
 };
 
 /// Pure ASCII for the most limited terminals (and non-TTY output).
-#[allow(dead_code)]
 pub const ASCII: IconSet = IconSet {
     inbox: "i",
     outbox: "o",
@@ -166,7 +166,6 @@ pub const ASCII: IconSet = IconSet {
 
 /// One glyph per UI affordance. Fields are `&'static str` so a set is a plain
 /// const and call sites keep `&'static str` types.
-#[allow(dead_code)]
 pub struct IconSet {
     pub inbox: &'static str,
     pub outbox: &'static str,
@@ -202,6 +201,146 @@ pub struct IconSet {
     pub arrow_down: &'static str,
     pub arrow_left: &'static str,
     pub arrow_right: &'static str,
+}
+
+use std::sync::OnceLock;
+
+/// The three selectable themes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum IconStyle {
+    Nerd,
+    Unicode,
+    Ascii,
+}
+
+impl IconStyle {
+    /// Parse a config/env value; `None` for anything unrecognised.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "nerd" => Some(Self::Nerd),
+            "unicode" => Some(Self::Unicode),
+            "ascii" => Some(Self::Ascii),
+            _ => None,
+        }
+    }
+
+    /// The theme this style selects.
+    pub fn set(self) -> &'static IconSet {
+        match self {
+            Self::Nerd => &NERD,
+            Self::Unicode => &UNICODE,
+            Self::Ascii => &ASCII,
+        }
+    }
+}
+
+static ACTIVE: OnceLock<&'static IconSet> = OnceLock::new();
+
+/// The active theme. Defaults to the safe `UNICODE` set until `init` runs.
+pub fn icons() -> &'static IconSet {
+    ACTIVE.get().copied().unwrap_or(&UNICODE)
+}
+
+/// Set the active theme once. The first call wins; later calls (e.g. a wallet
+/// switch re-entering the session) are no-ops.
+pub fn init(set: &'static IconSet) {
+    let _ = ACTIVE.set(set);
+}
+
+/// Pure theme resolution. Precedence: `TAOLK_ICONS` env, then `NERD_FONT=1`,
+/// then the `ui.icons` config value, then a non-TTY downgrade to ASCII, then the
+/// default `UNICODE`. An explicit env/config choice beats the non-TTY rule.
+pub fn resolve_with(
+    cfg_value: &str,
+    taolk_env: Option<&str>,
+    nerd_env: Option<&str>,
+    is_tty: bool,
+) -> &'static IconSet {
+    if let Some(style) = taolk_env.and_then(IconStyle::parse) {
+        return style.set();
+    }
+    if nerd_env == Some("1") {
+        return &NERD;
+    }
+    if let Some(style) = IconStyle::parse(cfg_value) {
+        return style.set();
+    }
+    if !is_tty {
+        return &ASCII;
+    }
+    &UNICODE
+}
+
+/// Resolve the active theme from the real environment and TTY state.
+pub fn resolve(cfg_value: &str) -> &'static IconSet {
+    use std::io::IsTerminal;
+    let taolk = std::env::var("TAOLK_ICONS").ok();
+    let nerd = std::env::var("NERD_FONT").ok();
+    resolve_with(
+        cfg_value,
+        taolk.as_deref(),
+        nerd.as_deref(),
+        std::io::stdout().is_terminal(),
+    )
+}
+
+/// An icon referenced from a `const` table, where a runtime `&str` can't go.
+/// Resolved to a glyph through the active theme at render time.
+#[derive(Clone, Copy)]
+pub enum Icon {
+    Threads,
+    Outbox,
+    Groups,
+    Magnify,
+    Channels,
+    Inbox,
+    Menu,
+    Help,
+    Block,
+    Refresh,
+    Copy,
+    LockOpen,
+    Encrypted,
+    Swap,
+    Exit,
+    Keyboard,
+    Cog,
+    Draft,
+    Check,
+    Account,
+}
+
+impl Icon {
+    /// The glyph for this icon in a given theme (pure).
+    pub fn pick(self, set: &IconSet) -> &'static str {
+        match self {
+            Icon::Threads => set.threads,
+            Icon::Outbox => set.outbox,
+            Icon::Groups => set.groups,
+            Icon::Magnify => set.magnify,
+            Icon::Channels => set.channels,
+            Icon::Inbox => set.inbox,
+            Icon::Menu => set.menu,
+            Icon::Help => set.help,
+            Icon::Block => set.block,
+            Icon::Refresh => set.refresh,
+            Icon::Copy => set.copy,
+            Icon::LockOpen => set.lock_open,
+            Icon::Encrypted => set.encrypted,
+            Icon::Swap => set.swap,
+            Icon::Exit => set.exit,
+            Icon::Keyboard => set.keyboard,
+            Icon::Cog => set.cog,
+            Icon::Draft => set.draft,
+            Icon::Check => set.check,
+            Icon::Account => set.account,
+        }
+    }
+
+    /// The glyph for this icon in the active theme.
+    pub fn glyph(self) -> &'static str {
+        self.pick(icons())
+    }
 }
 
 #[cfg(test)]
@@ -292,5 +431,53 @@ mod tests {
         assert_eq!(NERD.wallet, "\u{F0BDD}");
         assert_eq!(NERD.arrow_up, "\u{F005D}");
         assert_eq!(NERD.arrow_right, "\u{F0054}");
+    }
+
+    #[test]
+    fn iconstyle_parse_is_case_insensitive() {
+        assert_eq!(IconStyle::parse("nerd"), Some(IconStyle::Nerd));
+        assert_eq!(IconStyle::parse("UNICODE"), Some(IconStyle::Unicode));
+        assert_eq!(IconStyle::parse(" Ascii "), Some(IconStyle::Ascii));
+        assert_eq!(IconStyle::parse("bogus"), None);
+    }
+
+    // `inbox` differs across all three themes, so it identifies which set we got.
+    // (Pointer identity is unreliable here: `&NERD` on a `const` can be a fresh
+    // promoted address each use.)
+    #[test]
+    fn iconstyle_set_maps_to_the_right_theme() {
+        assert_eq!(IconStyle::Nerd.set().inbox, NERD.inbox);
+        assert_eq!(IconStyle::Unicode.set().inbox, UNICODE.inbox);
+        assert_eq!(IconStyle::Ascii.set().inbox, ASCII.inbox);
+    }
+
+    #[test]
+    fn resolve_with_follows_precedence() {
+        // TAOLK_ICONS wins over everything.
+        assert_eq!(
+            resolve_with("nerd", Some("ascii"), Some("1"), true).inbox,
+            ASCII.inbox
+        );
+        // NERD_FONT=1 beats config.
+        assert_eq!(
+            resolve_with("unicode", None, Some("1"), true).inbox,
+            NERD.inbox
+        );
+        // config value when no env.
+        assert_eq!(resolve_with("nerd", None, None, true).inbox, NERD.inbox);
+        // bad config falls through to the default.
+        assert_eq!(resolve_with("bogus", None, None, true).inbox, UNICODE.inbox);
+        // non-TTY downgrades the default to ascii.
+        assert_eq!(resolve_with("", None, None, false).inbox, ASCII.inbox);
+        // but an explicit choice beats the non-TTY rule.
+        assert_eq!(resolve_with("nerd", None, None, false).inbox, NERD.inbox);
+    }
+
+    #[test]
+    fn icon_pick_maps_to_the_set_field() {
+        assert_eq!(Icon::Threads.pick(&ASCII), ASCII.threads);
+        assert_eq!(Icon::Channels.pick(&UNICODE), UNICODE.channels);
+        assert_eq!(Icon::Check.pick(&NERD), NERD.check);
+        assert_eq!(Icon::Exit.pick(&ASCII), ASCII.exit);
     }
 }
