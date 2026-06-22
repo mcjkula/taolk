@@ -11,43 +11,9 @@
 //! Fonts v3 (`nf-md-*`, U+F0001+); the recommended fallback font is
 //! "Symbols Nerd Font Mono" (the Mono variant keeps glyphs single-cell).
 
-// The runtime API below is consumed by the migration and startup commits; until
-// then these items are intentionally unused. Removed once startup wires it in.
+// `resolve`/`init` are consumed by the startup commit; until then they are
+// intentionally unused. Removed once startup wires them in.
 #![allow(dead_code)]
-
-// Legacy flat constants — still referenced by call sites until the migration
-// commit replaces them with `icons().field`. Kept here so all PUA literals live
-// in one module.
-pub const INBOX: &str = "\u{F02FB}";
-pub const OUTBOX: &str = "\u{F048A}";
-pub const THREADS: &str = "\u{F0369}";
-pub const CHANNELS: &str = "\u{F0423}";
-pub const GROUPS: &str = "\u{F0849}";
-pub const PUBLIC: &str = "\u{F0FC6}";
-pub const ENCRYPTED: &str = "\u{F033E}";
-pub const CREATOR: &str = "\u{F01A5}";
-pub const DRAFT: &str = "\u{F03EB}";
-pub const CHECK: &str = "\u{F012C}";
-pub const ERROR: &str = "\u{F0028}";
-pub const LOCK_CLOCK: &str = "\u{F097F}";
-pub const HISTORY: &str = "\u{F02DA}";
-pub const SYNC: &str = "\u{F04E6}";
-pub const BLOCK: &str = "\u{F01A7}";
-pub const ACCOUNT: &str = "\u{F0B55}";
-pub const WALLET: &str = "\u{F0BDD}";
-pub const KEY: &str = "\u{F030B}";
-pub const HELP: &str = "\u{F0625}";
-pub const EXIT: &str = "\u{F0206}";
-pub const MAGNIFY: &str = "\u{F0349}";
-pub const MENU: &str = "\u{F035C}";
-pub const KEYBOARD: &str = "\u{F097B}";
-pub const COG: &str = "\u{F0493}";
-pub const REFRESH: &str = "\u{F0450}";
-pub const SWAP: &str = "\u{F04E1}";
-pub const COPY: &str = "\u{F018F}";
-pub const LOCK_OPEN: &str = "\u{F0340}";
-pub const CHEVRON_LEFT: &str = "\u{F0141}";
-pub const CHEVRON_RIGHT: &str = "\u{F0142}";
 
 /// Nerd Font Material Design glyphs (v3 nf-md-*). Needs a patched font.
 pub const NERD: IconSet = IconSet {
@@ -479,5 +445,45 @@ mod tests {
         assert_eq!(Icon::Channels.pick(&UNICODE), UNICODE.channels);
         assert_eq!(Icon::Check.pick(&NERD), NERD.check);
         assert_eq!(Icon::Exit.pick(&ASCII), ASCII.exit);
+    }
+
+    // All Nerd Font PUA glyphs (U+F0000..U+FFFFD, written as \u{F0..}/\u{F1..} or
+    // raw) must live only in this module. This keeps the codebase font-agnostic:
+    // a contributor can't scatter a hard nerd glyph into a widget.
+    #[test]
+    fn no_nerd_pua_outside_registry() {
+        use std::path::Path;
+
+        fn scan(dir: &Path, offenders: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    scan(&path, offenders);
+                } else if path.extension().is_some_and(|e| e == "rs")
+                    && !path.ends_with("ui/icons.rs")
+                {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    for (i, line) in text.lines().enumerate() {
+                        let escaped = ["\\u{F0", "\\u{f0", "\\u{F1", "\\u{f1"]
+                            .iter()
+                            .any(|p| line.contains(p));
+                        let raw = line
+                            .chars()
+                            .any(|c| ('\u{F0000}'..='\u{FFFFD}').contains(&c));
+                        if escaped || raw {
+                            offenders.push(format!("{}:{}", path.display(), i + 1));
+                        }
+                    }
+                }
+            }
+        }
+
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut offenders = Vec::new();
+        scan(&src, &mut offenders);
+        assert!(
+            offenders.is_empty(),
+            "Nerd PUA glyphs must live only in ui/icons.rs; found: {offenders:?}"
+        );
     }
 }

@@ -160,7 +160,7 @@ pub fn render(frame: &mut Frame, app: &App) {
                     if selected { selected_style } else { name_style },
                 ),
                 Span::styled(
-                    format!("{} ", cmd.glyph),
+                    format!("{} ", cmd.glyph.glyph()),
                     if selected { selected_style } else { name_style },
                 ),
                 Span::styled(

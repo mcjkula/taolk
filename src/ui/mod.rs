@@ -99,7 +99,7 @@ fn render_main_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 fn render_too_small(frame: &mut Frame, area: Rect) {
     let msg = format!(
         "{} taolk requires at least {MIN_WIDTH}x{MIN_HEIGHT} — current {}x{}",
-        icons::ERROR,
+        icons::icons().error,
         area.width,
         area.height,
     );

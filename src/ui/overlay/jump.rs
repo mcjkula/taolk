@@ -43,23 +43,23 @@ impl JumpState {
         let mut targets: Vec<JumpTarget> = Vec::new();
         targets.push(JumpTarget {
             label: "Inbox".into(),
-            glyph: icons::INBOX,
+            glyph: icons::icons().inbox,
             view: View::Inbox,
         });
         targets.push(JumpTarget {
             label: "Sent".into(),
-            glyph: icons::OUTBOX,
+            glyph: icons::icons().outbox,
             view: View::Outbox,
         });
         targets.push(JumpTarget {
             label: "Channels".into(),
-            glyph: icons::CHANNELS,
+            glyph: icons::icons().channels,
             view: View::ChannelDir,
         });
         for (i, t) in app.session.threads.iter().enumerate() {
             targets.push(JumpTarget {
                 label: t.peer_ss58.clone(),
-                glyph: icons::THREADS,
+                glyph: icons::icons().threads,
                 view: View::Thread(i),
             });
         }
@@ -69,7 +69,7 @@ impl JumpState {
             }
             targets.push(JumpTarget {
                 label: format!("#{}", c.name),
-                glyph: icons::CHANNELS,
+                glyph: icons::icons().channels,
                 view: View::Channel(i),
             });
         }
@@ -77,7 +77,7 @@ impl JumpState {
             let members = g.members.len();
             targets.push(JumpTarget {
                 label: format!("group ({members})"),
-                glyph: icons::GROUPS,
+                glyph: icons::icons().groups,
                 view: View::Group(i),
             });
         }
