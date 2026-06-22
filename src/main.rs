@@ -123,6 +123,7 @@ enum Commands {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let cfg = config::load();
+    ui::icons::init(ui::icons::resolve(&cfg.ui.icons));
 
     match cli.command {
         Some(Commands::Wallet { action }) => cmd::wallet::run(action),
@@ -2683,6 +2684,24 @@ mod tests {
     #[test]
     fn parse_channel_ref_index_overflow() {
         assert!(parse_channel_ref("100:99999").is_err());
+    }
+
+    #[test]
+    fn e2e_default_theme_is_unicode_no_pua() {
+        // Tests never call icons::init, so the active theme is the safe default
+        // (unicode). The screen must render real glyphs and never a nerd PUA glyph.
+        let mut h = TuiHarness::new();
+        let screen = h.screen();
+        assert!(
+            screen.contains(ui::icons::UNICODE.inbox),
+            "default render should use the unicode inbox glyph"
+        );
+        assert!(
+            !screen
+                .chars()
+                .any(|c| (0xF0000..=0xFFFFD).contains(&(c as u32))),
+            "no nerd PUA glyph should appear under the default theme"
+        );
     }
 
     #[test]

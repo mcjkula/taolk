@@ -11,10 +11,6 @@
 //! Fonts v3 (`nf-md-*`, U+F0001+); the recommended fallback font is
 //! "Symbols Nerd Font Mono" (the Mono variant keeps glyphs single-cell).
 
-// `resolve`/`init` are consumed by the startup commit; until then they are
-// intentionally unused. Removed once startup wires them in.
-#![allow(dead_code)]
-
 /// Nerd Font Material Design glyphs (v3 nf-md-*). Needs a patched font.
 pub const NERD: IconSet = IconSet {
     inbox: "\u{F02FB}",
