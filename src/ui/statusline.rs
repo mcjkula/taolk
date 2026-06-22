@@ -14,7 +14,7 @@ fn reconnect_pill(state: ConnState) -> Option<Span<'static>> {
     match state {
         ConnState::Connected => None,
         ConnState::Reconnecting { in_secs } => Some(Span::styled(
-            format!(" {} reconnecting in {in_secs}s ", icons::SYNC),
+            format!(" {} reconnecting in {in_secs}s ", icons::icons().sync),
             Style::default()
                 .fg(palette::ERROR)
                 .add_modifier(Modifier::REVERSED | Modifier::BOLD),
@@ -32,12 +32,12 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             ))
         } else if is_error {
             Line::from(Span::styled(
-                format!(" {} {status} ", icons::ERROR),
+                format!(" {} {status} ", icons::icons().error),
                 Style::default().fg(palette::ERROR),
             ))
         } else {
             Line::from(Span::styled(
-                format!(" {} {status} ", icons::CHECK),
+                format!(" {} {status} ", icons::icons().check),
                 palette::strong(),
             ))
         }
@@ -74,7 +74,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
     let block_str = format!(
         " {} {} ",
-        icons::BLOCK,
+        icons::icons().block,
         format_number(u128::from(app.session.block_number))
     );
     let block_fresh = app.frame.wrapping_sub(app.block_changed_at) < highlight_frames;
@@ -92,7 +92,11 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let locked_str = if app.locked_outbound.is_empty() {
         String::new()
     } else {
-        format!(" {} {} (U) ", icons::LOCK_CLOCK, app.locked_outbound.len())
+        format!(
+            " {} {} (U) ",
+            icons::icons().lock_clock,
+            app.locked_outbound.len()
+        )
     };
 
     let right_width = u16::try_from(locked_str.chars().count()).unwrap_or(0)

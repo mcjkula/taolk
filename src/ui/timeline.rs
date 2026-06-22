@@ -234,7 +234,7 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
             frame,
             app,
             &app.session.inbox,
-            &format!("{} Inbox", super::icons::INBOX),
+            &format!("{} Inbox", super::icons::icons().inbox),
             "From",
             None,
             area,
@@ -243,7 +243,7 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
             frame,
             app,
             &app.session.outbox,
-            &format!("{} Sent", super::icons::OUTBOX),
+            &format!("{} Sent", super::icons::icons().outbox),
             "To",
             pending_text(app, View::Outbox),
             area,
@@ -287,12 +287,14 @@ fn render_standalone(
                 .to_string();
             let (type_icon, type_label, badge_bg) =
                 match samp::ContentType::from_byte(msg.content_type) {
-                    Ok(samp::ContentType::Public) => (super::icons::PUBLIC, "public", Color::Cyan),
+                    Ok(samp::ContentType::Public) => {
+                        (super::icons::icons().public, "public", Color::Cyan)
+                    }
                     Ok(samp::ContentType::Encrypted) => {
-                        (super::icons::ENCRYPTED, "encrypted", Color::Magenta)
+                        (super::icons::icons().encrypted, "encrypted", Color::Magenta)
                     }
                     _ => (
-                        super::icons::BLOCK,
+                        super::icons::icons().block,
                         &*format!("0x{:02x}", msg.content_type),
                         Color::DarkGray,
                     ),
@@ -348,8 +350,10 @@ fn render_standalone(
     if let Some(text) = pending {
         let spinner = app.spinner_16();
         let type_badge: Option<(&str, &str)> = match app.pending_msg_type {
-            Some(samp::ContentType::Public) => Some((super::icons::PUBLIC, "public")),
-            Some(samp::ContentType::Encrypted) => Some((super::icons::ENCRYPTED, "encrypted")),
+            Some(samp::ContentType::Public) => Some((super::icons::icons().public, "public")),
+            Some(samp::ContentType::Encrypted) => {
+                Some((super::icons::icons().encrypted, "encrypted"))
+            }
             _ => None,
         };
         let recipient_label = app
@@ -398,7 +402,7 @@ fn id_block_str(id_str: &str) -> String {
     if id_str.is_empty() {
         String::new()
     } else {
-        format!("{} {}", super::icons::BLOCK, id_str)
+        format!("{} {}", super::icons::icons().block, id_str)
     }
 }
 
@@ -597,7 +601,7 @@ fn group_member_title(group: &crate::conversation::Group, app: &App, title_max: 
             taolk::util::ss58_short(pk)
         };
         let label = if *pk == group.creator_pubkey {
-            format!("{label}{}", super::icons::CREATOR)
+            format!("{label}{}", super::icons::icons().creator)
         } else {
             label
         };
@@ -626,7 +630,7 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
     let count = app.session.known_channels.len();
     let mut lines: Vec<Line> = vec![
         header_line(
-            super::icons::CHANNELS,
+            super::icons::icons().channels,
             "Channels",
             &format!("{count} channels"),
             usize::from(area.width),
@@ -645,10 +649,14 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
         let subscribed = app.session.is_subscribed(&info.channel_ref);
 
         let indicator = if selected { "> " } else { "  " };
-        let check = if subscribed { " \u{F012C}" } else { "" };
+        let check = if subscribed {
+            format!(" {}", super::icons::icons().check)
+        } else {
+            String::new()
+        };
         let id_str = format!(
             " {} {}:{}",
-            super::icons::BLOCK,
+            super::icons::icons().block,
             info.channel_ref.block().get(),
             info.channel_ref.index().get()
         );
@@ -703,7 +711,7 @@ fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut lines: Vec<Line> = vec![
         header_line(
-            super::icons::ACCOUNT,
+            super::icons::icons().account,
             "Contacts",
             &format!("{total} contacts"),
             w,
@@ -770,7 +778,7 @@ fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut lines: Vec<Line> = vec![
         header_line(
-            super::icons::ACCOUNT,
+            super::icons::icons().account,
             "Copy SS58",
             &format!("{total} senders in view"),
             w,
@@ -829,7 +837,7 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut lines: Vec<Line> = vec![
         header_line(
-            super::icons::GROUPS,
+            super::icons::icons().groups,
             "Select Members",
             &format!("{others_selected} selected, {total} contacts"),
             w,
@@ -855,7 +863,11 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
         let addr_max = w.saturating_sub(6);
 
         let indicator = if cursor { "> " } else { "  " };
-        let check = if is_member { "\u{F012C} " } else { "  " };
+        let check = if is_member {
+            format!("{} ", super::icons::icons().check)
+        } else {
+            "  ".to_string()
+        };
         let addr_color = if cursor {
             Color::Reset
         } else if is_member {
@@ -941,7 +953,7 @@ fn render_messages(
             };
             let gap_str = format!(
                 " {} Earlier messages may be missing \u{00B7} press r to load",
-                super::icons::HISTORY
+                super::icons::icons().history
             );
             let gap_text = truncate(&gap_str, width);
             lines.push(Line::from(vec![Span::styled(

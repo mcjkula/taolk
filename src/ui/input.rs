@@ -169,7 +169,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             render_single_input(
                 frame,
                 app,
-                &format!("{} ", icons::MAGNIFY),
+                &format!("{} ", icons::icons().magnify),
                 "Search messages...",
                 None,
                 area,
@@ -211,12 +211,12 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                     Span::raw(" "),
                     Span::styled("[p] ", Style::default().fg(palette::ACCENT)),
                     Span::styled(
-                        format!("{} public  ", icons::PUBLIC),
+                        format!("{} public  ", icons::icons().public),
                         Style::default().fg(ratatui::style::Color::Reset),
                     ),
                     Span::styled("[e] ", Style::default().fg(palette::ACCENT)),
                     Span::styled(
-                        format!("{} encrypted  ", icons::ENCRYPTED),
+                        format!("{} encrypted  ", icons::icons().encrypted),
                         Style::default().fg(ratatui::style::Color::Reset),
                     ),
                     Span::styled(

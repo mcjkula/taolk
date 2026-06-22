@@ -123,6 +123,7 @@ enum Commands {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let cfg = config::load();
+    ui::icons::init(ui::icons::resolve(&cfg.ui.icons));
 
     match cli.command {
         Some(Commands::Wallet { action }) => cmd::wallet::run(action),
@@ -320,7 +321,7 @@ fn run_lock_screen(
 
                 let mut spans: Vec<Span<'static>> = Vec::new();
                 if win_start > 0 {
-                    spans.push(Span::styled(ui::icons::CHEVRON_LEFT, dim_style));
+                    spans.push(Span::styled(ui::icons::icons().chevron_left, dim_style));
                     spans.push(Span::raw("  "));
                 } else {
                     spans.push(Span::raw("   "));
@@ -337,7 +338,7 @@ fn run_lock_screen(
                 }
                 if win_end < wallets.len() {
                     spans.push(Span::raw("  "));
-                    spans.push(Span::styled(ui::icons::CHEVRON_RIGHT, dim_style));
+                    spans.push(Span::styled(ui::icons::icons().chevron_right, dim_style));
                 } else {
                     spans.push(Span::raw("  "));
                 }
@@ -345,7 +346,7 @@ fn run_lock_screen(
                 lines.push(centered_spans(spans, w));
             } else {
                 lines.push(centered_line(
-                    &format!("{} Wallet: {}", ui::icons::WALLET, current_wallet),
+                    &format!("{} Wallet: {}", ui::icons::icons().wallet, current_wallet),
                     w,
                     active_style,
                 ));
@@ -353,7 +354,7 @@ fn run_lock_screen(
 
             lines.push(Line::raw(""));
 
-            let prompt = format!("{} Password: ", ui::icons::KEY);
+            let prompt = format!("{} Password: ", ui::icons::icons().key);
             let prompt_cols = prompt.chars().count();
             let prompt_style = if inserting {
                 prompt_active_style
@@ -376,13 +377,17 @@ fn run_lock_screen(
             }
 
             let hints = if inserting {
-                "Enter unlock \u{00B7} Esc back"
+                "Enter unlock \u{00B7} Esc back".to_string()
             } else if show_carousel {
-                "\u{F004D}/\u{F0054} select \u{00B7} i unlock \u{00B7} q quit"
+                format!(
+                    "{}/{} select \u{00B7} i unlock \u{00B7} q quit",
+                    ui::icons::icons().arrow_left,
+                    ui::icons::icons().arrow_right
+                )
             } else {
-                "i unlock \u{00B7} q quit"
+                "i unlock \u{00B7} q quit".to_string()
             };
-            lines.push(centered_line(hints, w, dim_style));
+            lines.push(centered_line(&hints, w, dim_style));
 
             frame.render_widget(Paragraph::new(lines), area);
 
@@ -724,7 +729,7 @@ fn prompt_password_modal(
             let inner = block.inner(rect);
             frame.render_widget(block, rect);
 
-            let prompt_text = format!("{} Password: ", ui::icons::KEY);
+            let prompt_text = format!("{} Password: ", ui::icons::icons().key);
             let prompt_cols = u16::try_from(prompt_text.chars().count()).unwrap_or(u16::MAX);
             let mut lines: Vec<Line> = Vec::new();
             lines.push(Line::raw(""));
@@ -2679,6 +2684,24 @@ mod tests {
     #[test]
     fn parse_channel_ref_index_overflow() {
         assert!(parse_channel_ref("100:99999").is_err());
+    }
+
+    #[test]
+    fn e2e_default_theme_is_unicode_no_pua() {
+        // Tests never call icons::init, so the active theme is the safe default
+        // (unicode). The screen must render real glyphs and never a nerd PUA glyph.
+        let mut h = TuiHarness::new();
+        let screen = h.screen();
+        assert!(
+            screen.contains(ui::icons::UNICODE.inbox),
+            "default render should use the unicode inbox glyph"
+        );
+        assert!(
+            !screen
+                .chars()
+                .any(|c| (0xF0000..=0xFFFFD).contains(&(c as u32))),
+            "no nerd PUA glyph should appear under the default theme"
+        );
     }
 
     #[test]

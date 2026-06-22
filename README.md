@@ -169,6 +169,20 @@ async fn main() -> taolk::error::Result<()> {
 | `ui.mouse` | `true` | Mouse support |
 | `ui.timestamp_format` | `%H:%M` | Message time format |
 | `ui.date_format` | `%Y-%m-%d %H:%M` | Full date format |
+| `ui.icons` | `unicode` | Icon style: `nerd`, `unicode`, or `ascii` |
+
+### Icons
+
+taolk draws its UI icons in one of three styles, set with `ui.icons` or the `TAOLK_ICONS`
+environment variable:
+
+- `unicode` (default) — plain single-cell symbols that render on any terminal, no special font.
+- `nerd` — [Nerd Font](https://www.nerdfonts.com/) glyphs (nicer, but needs a patched font such as
+  a Nerd Font or `Symbols Nerd Font Mono`). Also enabled by `NERD_FONT=1`.
+- `ascii` — pure ASCII, for the most limited terminals.
+
+Precedence: `TAOLK_ICONS` > `NERD_FONT=1` > `ui.icons` > default. When output isn't a terminal
+(piped or redirected), icons fall back to `ascii`.
 
 ## Mirrors
 

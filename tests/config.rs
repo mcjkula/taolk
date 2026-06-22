@@ -83,7 +83,20 @@ fn suggest_key_no_match() {
 
 #[test]
 fn key_count() {
-    assert_eq!(config::KEYS.len(), 14);
+    assert_eq!(config::KEYS.len(), 15);
+}
+
+#[test]
+fn ui_icons_defaults_to_unicode() {
+    let cfg = config::Config::default();
+    assert_eq!(cfg.ui.icons, "unicode");
+    assert_eq!(config::get_value(&cfg, "ui.icons"), "unicode");
+}
+
+#[test]
+fn set_key_icons_invalid_value() {
+    let result = config::set_key("ui.icons", &["bogus".into()]);
+    assert!(result.is_err());
 }
 
 // --- set_key validation errors (no filesystem write needed) ---
