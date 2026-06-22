@@ -38,6 +38,7 @@ pub struct Ui {
     pub mouse: bool,
     pub timestamp_format: String,
     pub date_format: String,
+    pub icons: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -75,6 +76,7 @@ impl Default for Ui {
             mouse: true,
             timestamp_format: "%H:%M".into(),
             date_format: "%Y-%m-%d %H:%M".into(),
+            icons: "unicode".into(),
         }
     }
 }
@@ -179,6 +181,13 @@ pub const KEYS: &[KeyDef] = &[
         default_display: "%Y-%m-%d %H:%M",
     },
     KeyDef {
+        key: "ui.icons",
+        section: "ui",
+        field: "icons",
+        description: "Icon style (nerd, unicode, ascii)",
+        default_display: "unicode",
+    },
+    KeyDef {
         key: "notifications.enabled",
         section: "notifications",
         field: "enabled",
@@ -250,6 +259,7 @@ pub fn get_value(config: &Config, key: &str) -> String {
         "ui.mouse" => config.ui.mouse.to_string(),
         "ui.timestamp_format" => config.ui.timestamp_format.clone(),
         "ui.date_format" => config.ui.date_format.clone(),
+        "ui.icons" => config.ui.icons.clone(),
         "notifications.enabled" => config.notifications.enabled.to_string(),
         "notifications.volume" => config.notifications.volume.to_string(),
         "notifications.dm" => config.notifications.dm.to_string(),
@@ -286,6 +296,16 @@ pub fn set_key(key: &str, raw: &[String]) -> Result<String, ConfigError> {
     let toml_value = match key {
         "wallet.default" | "network.node" | "ui.timestamp_format" | "ui.date_format" => {
             toml::Value::String(raw.join(" "))
+        }
+        "ui.icons" => {
+            let v = raw.first().map(|s| s.as_str()).unwrap_or("");
+            if !matches!(v, "nerd" | "unicode" | "ascii") {
+                return Err(ConfigError::InvalidValue {
+                    expected: "nerd, unicode, or ascii".into(),
+                    got: v.into(),
+                });
+            }
+            toml::Value::String(v.to_string())
         }
         "network.mirrors" => {
             let items: Vec<toml::Value> = raw
