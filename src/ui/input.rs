@@ -161,6 +161,68 @@ fn render_single_input(
     }
 }
 
+/// Preview lines for the Confirm overlay: the channel being created, or every
+/// line of the message being sent (capped). Used both to render the overlay and
+/// to size it (`render_main_panel`), so the height matches the content.
+pub(super) fn confirm_preview(app: &App, width: u16) -> Vec<Line<'static>> {
+    let reset = Style::default().fg(ratatui::style::Color::Reset);
+    let muted = Style::default().fg(palette::MUTED);
+    let max = usize::from(width).saturating_sub(4);
+
+    if let Some(name) = &app.pending_channel_name {
+        let desc = app.pending_channel_desc.as_deref().unwrap_or("");
+        let text = if desc.is_empty() {
+            format!("  #{name}")
+        } else {
+            format!("  #{name} -- {desc}")
+        };
+        return vec![Line::from(Span::styled(fit(&text, max), reset))];
+    }
+
+    let Some(text) = &app.pending_text else {
+        return vec![Line::raw("")];
+    };
+    if text.is_empty() {
+        return vec![Line::from(Span::styled(
+            " empty",
+            muted.add_modifier(Modifier::ITALIC),
+        ))];
+    }
+
+    let total = text.lines().count();
+    if total <= 1 {
+        let first = text.lines().next().unwrap_or("");
+        return vec![Line::from(Span::styled(
+            fit(&format!(" \"{first}\" ({} chars)", text.len()), max),
+            reset,
+        ))];
+    }
+
+    // Multi-line message: show each line (capped), then a dim summary line.
+    const MAX_LINES: usize = 6;
+    let mut lines: Vec<Line<'static>> = text
+        .lines()
+        .take(MAX_LINES)
+        .map(|l| {
+            Line::from(Span::styled(
+                format!("  {}", fit(l, max.saturating_sub(2))),
+                reset,
+            ))
+        })
+        .collect();
+    let suffix = if total > MAX_LINES {
+        format!(
+            "  \u{2026} +{} more lines ({} chars)",
+            total - MAX_LINES,
+            text.len()
+        )
+    } else {
+        format!("  ({} chars)", text.len())
+    };
+    lines.push(Line::from(Span::styled(suffix, muted)));
+    lines
+}
+
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let sep = sep_line(area.width);
 
@@ -235,48 +297,11 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 Some(fee) => format!("Fee: {fee}"),
                 None => format!("{} Estimating fee", app.spinner_1()),
             };
-
-            let is_channel = app.is_pending_channel();
-            let action = if is_channel { "Create?" } else { "Send?" };
-
-            let (preview, is_empty_preview) = if let Some(name) = &app.pending_channel_name {
-                let desc = app.pending_channel_desc.as_deref().unwrap_or("");
-                let text = if desc.is_empty() {
-                    format!("  #{name}")
-                } else {
-                    format!("  #{name} -- {desc}")
-                };
-                let max = usize::from(area.width) - 2;
-                let trimmed = if text.len() > max {
-                    format!("{}\u{2026}", &text[..max.saturating_sub(1)])
-                } else {
-                    text
-                };
-                (trimmed, false)
-            } else if let Some(text) = &app.pending_text {
-                let first = text.lines().next().unwrap_or("");
-                let max = (usize::from(area.width)).saturating_sub(16);
-                let display = if first.len() > max {
-                    format!("\"{}\u{2026}\"", &first[..max.saturating_sub(3)])
-                } else {
-                    format!("\"{first}\"")
-                };
-                if text.is_empty() {
-                    (" empty".to_string(), true)
-                } else {
-                    (format!(" {display} ({} chars)", text.len()), false)
-                }
+            let action = if app.is_pending_channel() {
+                "Create?"
             } else {
-                (String::new(), false)
+                "Send?"
             };
-            let preview_style = if is_empty_preview {
-                Style::default()
-                    .fg(palette::MUTED)
-                    .add_modifier(Modifier::ITALIC)
-            } else {
-                Style::default().fg(ratatui::style::Color::Reset)
-            };
-            let preview_line = Line::from(vec![Span::styled(preview, preview_style)]);
 
             let confirm_line = Line::from(vec![
                 Span::raw(" "),
@@ -288,7 +313,33 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 ),
                 Span::styled(fee_text, Style::default().fg(palette::ACCENT)),
             ]);
-            frame.render_widget(Paragraph::new(vec![sep, preview_line, confirm_line]), area);
+
+            // Show who the message is going to so the recipient can be verified
+            // before sending. Channels/groups have no single address, so keep the
+            // plain separator there.
+            let recipient = if let Some((_, ss58)) = &app.msg_recipient {
+                Some(ss58.clone())
+            } else if let crate::app::View::Thread(idx) = app.view {
+                app.session.threads.get(idx).map(|t| t.peer_ss58.clone())
+            } else {
+                None
+            };
+            let header = match recipient {
+                Some(ss58) => Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled("To ", Style::default().fg(palette::MUTED)),
+                    Span::styled(
+                        fit(&ss58, usize::from(area.width).saturating_sub(4)),
+                        Style::default().fg(palette::ACCENT),
+                    ),
+                ]),
+                None => sep,
+            };
+
+            let mut lines = vec![header];
+            lines.extend(confirm_preview(app, area.width));
+            lines.push(confirm_line);
+            frame.render_widget(Paragraph::new(lines), area);
         }
         Some(Overlay::SenderPicker)
         | Some(Overlay::Help)

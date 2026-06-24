@@ -2733,6 +2733,63 @@ mod tests {
     }
 
     #[test]
+    fn e2e_confirm_shows_recipient_address() {
+        let mut h = TuiHarness::new();
+
+        h.press_char('n');
+        h.press_enter(); // select first contact
+        let recipient = h.app.msg_recipient.clone().expect("recipient set").1;
+
+        h.type_text("hi");
+        h.press_enter();
+        h.install_confirm_for_pending_send();
+        assert_eq!(h.app.overlay, Some(Overlay::Confirm));
+
+        let screen = h.screen();
+        let prefix = &recipient[..recipient.len().min(10)];
+        assert!(
+            screen.contains(prefix),
+            "confirm prompt should show the recipient address (looking for {prefix:?})"
+        );
+    }
+
+    #[test]
+    fn e2e_confirm_shows_multiline_message() {
+        let mut h = TuiHarness::new();
+        h.app.pending_text = Some("first line\nsecond line".to_string());
+        h.app.overlay = Some(Overlay::Confirm);
+
+        let screen = h.screen();
+        assert!(screen.contains("first line"), "confirm should show line 1");
+        assert!(screen.contains("second line"), "confirm should show line 2");
+    }
+
+    #[test]
+    fn e2e_composer_indicates_hidden_lines() {
+        let mut h = TuiHarness::new();
+        h.press_char('n');
+        h.press_enter(); // -> focus Composer in a thread
+        h.app.input.set("l1\nl2\nl3\nl4\nl5\nl6".to_string());
+
+        // cursor sits at the end, so earlier lines are scrolled off above.
+        let scrolled_down = h.screen();
+        assert!(
+            scrolled_down.contains('\u{2191}'),
+            "composer should show an up arrow when lines are hidden above"
+        );
+
+        // move to the top, so later lines are scrolled off below.
+        for _ in 0..6 {
+            h.app.input.move_line_up();
+        }
+        let scrolled_up = h.screen();
+        assert!(
+            scrolled_up.contains('\u{2193}'),
+            "composer should show a down arrow when lines are hidden below"
+        );
+    }
+
+    #[test]
     fn e2e_standalone_public_message_flow_submits_to_outbox() {
         let mut h = TuiHarness::new();
 
