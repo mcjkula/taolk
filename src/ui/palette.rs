@@ -1,7 +1,3 @@
-// The theme system below is consumed by later commits; until then some items
-// are unused. The allow is removed once startup wires it in.
-#![allow(dead_code)]
-
 use ratatui::style::{Color, Modifier, Style};
 
 pub fn dim() -> Style {

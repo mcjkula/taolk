@@ -124,6 +124,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let cfg = config::load();
     ui::icons::init(ui::icons::resolve(&cfg.ui.icons));
+    ui::palette::init(ui::palette::resolve(&cfg.ui.colors));
 
     match cli.command {
         Some(Commands::Wallet { action }) => cmd::wallet::run(action),
