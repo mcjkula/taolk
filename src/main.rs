@@ -2733,6 +2733,27 @@ mod tests {
     }
 
     #[test]
+    fn e2e_confirm_shows_recipient_address() {
+        let mut h = TuiHarness::new();
+
+        h.press_char('n');
+        h.press_enter(); // select first contact
+        let recipient = h.app.msg_recipient.clone().expect("recipient set").1;
+
+        h.type_text("hi");
+        h.press_enter();
+        h.install_confirm_for_pending_send();
+        assert_eq!(h.app.overlay, Some(Overlay::Confirm));
+
+        let screen = h.screen();
+        let prefix = &recipient[..recipient.len().min(10)];
+        assert!(
+            screen.contains(prefix),
+            "confirm prompt should show the recipient address (looking for {prefix:?})"
+        );
+    }
+
+    #[test]
     fn e2e_standalone_public_message_flow_submits_to_outbox() {
         let mut h = TuiHarness::new();
 

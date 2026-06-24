@@ -288,7 +288,33 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 ),
                 Span::styled(fee_text, Style::default().fg(palette::ACCENT)),
             ]);
-            frame.render_widget(Paragraph::new(vec![sep, preview_line, confirm_line]), area);
+
+            // Show who the message is going to so the recipient can be verified
+            // before sending. Channels/groups have no single address, so keep the
+            // plain separator there. Replaces the separator line to avoid changing
+            // the overlay height.
+            let recipient = if let Some((_, ss58)) = &app.msg_recipient {
+                Some(ss58.clone())
+            } else if let crate::app::View::Thread(idx) = app.view {
+                app.session.threads.get(idx).map(|t| t.peer_ss58.clone())
+            } else {
+                None
+            };
+            let header = match recipient {
+                Some(ss58) => Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled("To ", Style::default().fg(palette::MUTED)),
+                    Span::styled(
+                        fit(&ss58, usize::from(area.width).saturating_sub(4)),
+                        Style::default().fg(palette::ACCENT),
+                    ),
+                ]),
+                None => sep,
+            };
+            frame.render_widget(
+                Paragraph::new(vec![header, preview_line, confirm_line]),
+                area,
+            );
         }
         Some(Overlay::SenderPicker)
         | Some(Overlay::Help)
