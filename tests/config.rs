@@ -83,7 +83,7 @@ fn suggest_key_no_match() {
 
 #[test]
 fn key_count() {
-    assert_eq!(config::KEYS.len(), 15);
+    assert_eq!(config::KEYS.len(), 16);
 }
 
 #[test]
@@ -96,6 +96,19 @@ fn ui_icons_defaults_to_unicode() {
 #[test]
 fn set_key_icons_invalid_value() {
     let result = config::set_key("ui.icons", &["bogus".into()]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn ui_colors_defaults_to_dark() {
+    let cfg = config::Config::default();
+    assert_eq!(cfg.ui.colors, "dark");
+    assert_eq!(config::get_value(&cfg, "ui.colors"), "dark");
+}
+
+#[test]
+fn set_key_colors_invalid_value() {
+    let result = config::set_key("ui.colors", &["bogus".into()]);
     assert!(result.is_err());
 }
 
