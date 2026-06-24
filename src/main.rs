@@ -251,14 +251,14 @@ fn run_lock_screen(
     use ui::palette;
 
     let logo_style = Style::default()
-        .fg(palette::ACCENT)
+        .fg(palette::theme().accent)
         .add_modifier(Modifier::BOLD);
-    let subtitle_style = Style::default().fg(palette::MUTED);
-    let dim_style = Style::default().fg(palette::MUTED);
+    let subtitle_style = Style::default().fg(palette::theme().muted);
+    let dim_style = Style::default().fg(palette::theme().muted);
     let active_style = Style::default().add_modifier(Modifier::BOLD);
     let prompt_active_style = Style::default();
-    let prompt_idle_style = Style::default().fg(palette::MUTED);
-    let error_style = Style::default().fg(palette::ERROR);
+    let prompt_idle_style = Style::default().fg(palette::theme().muted);
+    let error_style = Style::default().fg(palette::theme().error);
 
     const LOGO: &[&str] = &[
         "   \u{2591}\u{2588}\u{2588}                                     \u{2591}\u{2588}\u{2588} \u{2591}\u{2588}\u{2588}",
@@ -699,14 +699,14 @@ fn prompt_password_modal(
     use ui::palette;
 
     let title_style = Style::default()
-        .fg(palette::ACCENT)
+        .fg(palette::theme().accent)
         .add_modifier(Modifier::BOLD);
     let border_style = Style::default()
-        .fg(palette::ACCENT)
+        .fg(palette::theme().accent)
         .add_modifier(Modifier::BOLD);
     let prompt_style = Style::default();
-    let error_style = Style::default().fg(palette::ERROR);
-    let hint_style = Style::default().fg(palette::MUTED);
+    let error_style = Style::default().fg(palette::theme().error);
+    let hint_style = Style::default().fg(palette::theme().muted);
 
     let mut password = zeroize::Zeroizing::new(String::new());
     let mut error_msg: Option<String> = None;
@@ -816,8 +816,8 @@ fn draw_connecting(
     use ratatui::widgets::Paragraph;
     use ui::palette;
 
-    let dim = Style::default().fg(palette::MUTED);
-    let accent = Style::default().fg(palette::ACCENT);
+    let dim = Style::default().fg(palette::theme().muted);
+    let accent = Style::default().fg(palette::theme().accent);
 
     terminal.draw(|frame| {
         let area = frame.area();

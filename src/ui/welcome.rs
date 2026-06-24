@@ -9,7 +9,7 @@ use ratatui::widgets::Paragraph;
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let _ = app;
-    let key = Style::default().fg(palette::ACCENT);
+    let key = Style::default().fg(palette::theme().accent);
     let text = Style::default();
 
     let shortcuts: &[(&str, &str, &str)] = &[

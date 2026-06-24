@@ -171,7 +171,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         None => return,
     };
     let prompt = Line::from(vec![
-        Span::styled(" > ", Style::default().fg(palette::ACCENT)),
+        Span::styled(" > ", Style::default().fg(palette::theme().accent)),
         Span::styled(
             state.query.as_str().to_string(),
             Style::default().fg(ratatui::style::Color::Reset),
@@ -180,10 +180,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(prompt), rows[0]);
 
     let selected_style = Style::default()
-        .fg(palette::ACCENT)
+        .fg(palette::theme().accent)
         .add_modifier(Modifier::BOLD);
     let name_style = Style::default().fg(ratatui::style::Color::Reset);
-    let glyph_style = Style::default().fg(palette::MUTED);
+    let glyph_style = Style::default().fg(palette::theme().muted);
 
     let items: Vec<ListItem> = state
         .ranking

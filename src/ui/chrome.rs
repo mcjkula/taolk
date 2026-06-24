@@ -6,10 +6,10 @@ use ratatui::widgets::{Block, Padding};
 pub fn panel(focused: bool) -> Block<'static> {
     let border_style = if focused {
         Style::default()
-            .fg(palette::ACCENT)
+            .fg(palette::theme().accent)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(palette::MUTED)
+        Style::default().fg(palette::theme().muted)
     };
     Block::bordered()
         .border_type(symbols::PANEL_BORDER)

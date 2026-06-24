@@ -16,7 +16,7 @@ fn reconnect_pill(state: ConnState) -> Option<Span<'static>> {
         ConnState::Reconnecting { in_secs } => Some(Span::styled(
             format!(" {} reconnecting in {in_secs}s ", icons::icons().sync),
             Style::default()
-                .fg(palette::ERROR)
+                .fg(palette::theme().error)
                 .add_modifier(Modifier::REVERSED | Modifier::BOLD),
         )),
     }
@@ -28,12 +28,12 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             let spinner = app.spinner_1();
             Line::from(Span::styled(
                 format!(" {spinner} {status} "),
-                Style::default().fg(palette::ACCENT),
+                Style::default().fg(palette::theme().accent),
             ))
         } else if is_error {
             Line::from(Span::styled(
                 format!(" {} {status} ", icons::icons().error),
-                Style::default().fg(palette::ERROR),
+                Style::default().fg(palette::theme().error),
             ))
         } else {
             Line::from(Span::styled(
@@ -44,7 +44,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     } else if !app.search_query.is_empty() {
         Line::from(Span::styled(
             format!(" /{} ", app.search_query),
-            Style::default().fg(palette::ACCENT),
+            Style::default().fg(palette::theme().accent),
         ))
     } else {
         hintbar::hints(app)
@@ -64,9 +64,9 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let balance_fresh = app.frame.wrapping_sub(app.balance_changed_at) < highlight_frames;
     let balance_style = if balance_fresh {
         if app.balance_decreased {
-            Style::default().fg(palette::ERROR)
+            Style::default().fg(palette::theme().error)
         } else {
-            Style::default().fg(palette::SUCCESS)
+            Style::default().fg(palette::theme().success)
         }
     } else {
         Style::default()
@@ -117,7 +117,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         right_spans.push(Span::styled(
             locked_str,
             Style::default()
-                .fg(palette::WARNING)
+                .fg(palette::theme().warning)
                 .add_modifier(Modifier::REVERSED | Modifier::BOLD),
         ));
     }

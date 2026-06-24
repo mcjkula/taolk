@@ -4,35 +4,18 @@
 
 use ratatui::style::{Color, Modifier, Style};
 
-pub const ACCENT: Color = Color::Cyan;
-pub const ACCENT_ALT: Color = Color::Magenta;
-pub const ERROR: Color = Color::Red;
-pub const WARNING: Color = Color::Yellow;
-pub const SUCCESS: Color = Color::Green;
-pub const MUTED: Color = Color::DarkGray;
-
 pub fn dim() -> Style {
-    Style::default().fg(MUTED)
+    Style::default().fg(theme().muted)
 }
 
 pub fn strong() -> Style {
     Style::default().add_modifier(Modifier::BOLD)
 }
 
-pub const SENDER_ROTATION: [Color; 8] = [
-    Color::Cyan,
-    Color::Green,
-    Color::Magenta,
-    Color::Blue,
-    Color::Yellow,
-    Color::LightCyan,
-    Color::LightMagenta,
-    Color::LightBlue,
-];
-
 pub fn sender_color(ss58: &str) -> Color {
     let hash: u8 = ss58.bytes().fold(0u8, |acc, b| acc.wrapping_add(b));
-    SENDER_ROTATION[usize::from(hash) % SENDER_ROTATION.len()]
+    let senders = theme().senders;
+    senders[usize::from(hash) % senders.len()]
 }
 
 // --- Selectable color themes ---------------------------------------------
@@ -200,7 +183,7 @@ mod tests {
     #[test]
     fn sender_color_is_in_rotation() {
         let c = sender_color("anything");
-        assert!(SENDER_ROTATION.contains(&c));
+        assert!(theme().senders.contains(&c));
     }
 
     // `muted` differs across all three themes, so it identifies which one we got.

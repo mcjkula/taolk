@@ -11,10 +11,10 @@ use ratatui::widgets::{List, ListItem};
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let text_style = Style::default();
     let selected_style = Style::default()
-        .fg(palette::ACCENT)
+        .fg(palette::theme().accent)
         .add_modifier(Modifier::BOLD);
     let dim_style = palette::dim();
-    let accent_style = Style::default().fg(palette::ACCENT);
+    let accent_style = Style::default().fg(palette::theme().accent);
     let unread_style = selected_style;
     let title_style = selected_style;
     let item_style = |selected: bool| if selected { selected_style } else { text_style };

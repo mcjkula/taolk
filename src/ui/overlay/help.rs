@@ -130,9 +130,9 @@ const SIDE_MARGIN: usize = 2;
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let accent = Style::default()
-        .fg(palette::ACCENT)
+        .fg(palette::theme().accent)
         .add_modifier(Modifier::BOLD);
-    let dim = Style::default().fg(palette::MUTED);
+    let dim = Style::default().fg(palette::theme().muted);
 
     let body = Rect {
         x: area.x,
@@ -243,13 +243,13 @@ fn compute_card_width() -> usize {
 
 fn render_card(card: &Card, width: usize) -> Vec<Line<'static>> {
     let title_style = Style::default()
-        .fg(palette::ACCENT_ALT)
+        .fg(palette::theme().accent_alt)
         .add_modifier(Modifier::BOLD);
     let glyph_style = Style::default()
-        .fg(palette::ACCENT)
+        .fg(palette::theme().accent)
         .add_modifier(Modifier::BOLD);
     let desc_style = Style::default().fg(ratatui::style::Color::Reset);
-    let key_style = Style::default().fg(palette::ACCENT);
+    let key_style = Style::default().fg(palette::theme().accent);
 
     let mut lines = Vec::with_capacity(card.entries.len() + 3);
     let header = format!("{} {}", card.glyph.glyph(), card.title);

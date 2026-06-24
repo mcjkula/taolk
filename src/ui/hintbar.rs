@@ -5,7 +5,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 pub fn hints(app: &App) -> Line<'static> {
-    let key = Style::default().fg(palette::ACCENT);
+    let key = Style::default().fg(palette::theme().accent);
     let desc = palette::dim();
 
     let pairs = pairs_for(app);
