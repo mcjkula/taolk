@@ -330,7 +330,14 @@ pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
             avail,
             None,
         );
-        let line_prompt = if i == scroll_start && scroll_start == 0 {
+        // Gutter: the prompt on the first line, or an arrow when there are more
+        // lines scrolled off above/below (so vertical overflow is visible, like
+        // the "..." for an over-long single line).
+        let line_prompt = if i == scroll_start && scroll_start > 0 {
+            "\u{2191} "
+        } else if i == scroll_end - 1 && scroll_end < total_lines {
+            "\u{2193} "
+        } else if i == scroll_start && scroll_start == 0 {
             prompt
         } else {
             "  "

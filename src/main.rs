@@ -2765,6 +2765,31 @@ mod tests {
     }
 
     #[test]
+    fn e2e_composer_indicates_hidden_lines() {
+        let mut h = TuiHarness::new();
+        h.press_char('n');
+        h.press_enter(); // -> focus Composer in a thread
+        h.app.input.set("l1\nl2\nl3\nl4\nl5\nl6".to_string());
+
+        // cursor sits at the end, so earlier lines are scrolled off above.
+        let scrolled_down = h.screen();
+        assert!(
+            scrolled_down.contains('\u{2191}'),
+            "composer should show an up arrow when lines are hidden above"
+        );
+
+        // move to the top, so later lines are scrolled off below.
+        for _ in 0..6 {
+            h.app.input.move_line_up();
+        }
+        let scrolled_up = h.screen();
+        assert!(
+            scrolled_up.contains('\u{2193}'),
+            "composer should show a down arrow when lines are hidden below"
+        );
+    }
+
+    #[test]
     fn e2e_standalone_public_message_flow_submits_to_outbox() {
         let mut h = TuiHarness::new();
 
