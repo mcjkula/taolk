@@ -132,6 +132,9 @@ fn render_main_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let text_lines = if app.is_composing() && !app.input.is_empty() {
         app.input.split('\n').count().clamp(1, 4)
+    } else if matches!(app.overlay, Some(crate::app::Overlay::Confirm)) {
+        // Grow to fit the message preview (header + preview + confirm line).
+        input::confirm_preview(app, inner.width).len()
     } else {
         1
     };

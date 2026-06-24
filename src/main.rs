@@ -2754,6 +2754,17 @@ mod tests {
     }
 
     #[test]
+    fn e2e_confirm_shows_multiline_message() {
+        let mut h = TuiHarness::new();
+        h.app.pending_text = Some("first line\nsecond line".to_string());
+        h.app.overlay = Some(Overlay::Confirm);
+
+        let screen = h.screen();
+        assert!(screen.contains("first line"), "confirm should show line 1");
+        assert!(screen.contains("second line"), "confirm should show line 2");
+    }
+
+    #[test]
     fn e2e_standalone_public_message_flow_submits_to_outbox() {
         let mut h = TuiHarness::new();
 
