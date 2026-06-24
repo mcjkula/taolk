@@ -125,7 +125,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         .split(inner);
 
     let prompt = Line::from(vec![
-        Span::styled(" > ", Style::default().fg(palette::ACCENT)),
+        Span::styled(" > ", Style::default().fg(palette::theme().accent)),
         Span::styled(
             app.palette
                 .as_ref()
@@ -137,10 +137,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(prompt), rows[0]);
 
     let selected_style = Style::default()
-        .fg(palette::ACCENT)
+        .fg(palette::theme().accent)
         .add_modifier(Modifier::BOLD);
     let name_style = Style::default().fg(ratatui::style::Color::Reset);
-    let summary_style = Style::default().fg(palette::MUTED);
+    let summary_style = Style::default().fg(palette::theme().muted);
 
     let state = match &app.palette {
         Some(s) => s,
@@ -160,7 +160,7 @@ pub fn render(frame: &mut Frame, app: &App) {
                     if selected { selected_style } else { name_style },
                 ),
                 Span::styled(
-                    format!("{} ", cmd.glyph),
+                    format!("{} ", cmd.glyph.glyph()),
                     if selected { selected_style } else { name_style },
                 ),
                 Span::styled(

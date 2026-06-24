@@ -11,10 +11,10 @@ use ratatui::widgets::{List, ListItem};
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let text_style = Style::default();
     let selected_style = Style::default()
-        .fg(palette::ACCENT)
+        .fg(palette::theme().accent)
         .add_modifier(Modifier::BOLD);
     let dim_style = palette::dim();
-    let accent_style = Style::default().fg(palette::ACCENT);
+    let accent_style = Style::default().fg(palette::theme().accent);
     let unread_style = selected_style;
     let title_style = selected_style;
     let item_style = |selected: bool| if selected { selected_style } else { text_style };
@@ -26,7 +26,10 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let inbox_style = item_style(inbox_selected);
     items.push(ListItem::new(Line::from(vec![
         Span::styled(indicator(inbox_selected), inbox_style),
-        Span::styled(format!("{} Inbox", super::icons::INBOX), inbox_style),
+        Span::styled(
+            format!("{} Inbox", super::icons::icons().inbox),
+            inbox_style,
+        ),
         Span::styled(format!(" ({})", app.session.inbox.len()), dim_style),
     ])));
 
@@ -34,7 +37,10 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let outbox_style = item_style(outbox_selected);
     items.push(ListItem::new(Line::from(vec![
         Span::styled(indicator(outbox_selected), outbox_style),
-        Span::styled(format!("{} Sent", super::icons::OUTBOX), outbox_style),
+        Span::styled(
+            format!("{} Sent", super::icons::icons().outbox),
+            outbox_style,
+        ),
         Span::styled(format!(" ({})", app.session.outbox.len()), dim_style),
     ])));
 
@@ -42,7 +48,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         items.push(ListItem::new(Line::raw("")));
         items.push(ListItem::new(Line::from(vec![
             Span::styled("  ", Style::default()),
-            Span::styled(format!("{} ", super::icons::THREADS), dim_style),
+            Span::styled(format!("{} ", super::icons::icons().threads), dim_style),
             Span::styled("Threads", dim_style),
         ])));
 
@@ -113,7 +119,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 }
                 if !thread.draft.is_empty() {
                     spans.push(Span::styled(
-                        format!(" {}", super::icons::DRAFT),
+                        format!(" {}", super::icons::icons().draft),
                         accent_style,
                     ));
                 }
@@ -161,7 +167,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                     }
                     if !thread.draft.is_empty() {
                         spans.push(Span::styled(
-                            format!(" {}", super::icons::DRAFT),
+                            format!(" {}", super::icons::icons().draft),
                             accent_style,
                         ));
                     }
@@ -177,7 +183,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         let dir_style = item_style(dir_selected);
         items.push(ListItem::new(Line::from(vec![
             Span::styled(indicator(dir_selected), dir_style),
-            Span::styled(format!("{} ", super::icons::CHANNELS), dim_style),
+            Span::styled(format!("{} ", super::icons::icons().channels), dim_style),
             Span::styled("Channels", dir_style),
             Span::styled(
                 format!(" ({})", app.session.known_channels.len()),
@@ -230,7 +236,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             }
             if !channel.draft.is_empty() {
                 spans.push(Span::styled(
-                    format!(" {}", super::icons::DRAFT),
+                    format!(" {}", super::icons::icons().draft),
                     accent_style,
                 ));
             }
@@ -242,7 +248,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         items.push(ListItem::new(Line::raw("")));
         items.push(ListItem::new(Line::from(vec![
             Span::styled("  ", Style::default()),
-            Span::styled(format!("{} ", super::icons::GROUPS), dim_style),
+            Span::styled(format!("{} ", super::icons::icons().groups), dim_style),
             Span::styled("Groups", dim_style),
         ])));
 
@@ -300,7 +306,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             }
             if !group.draft.is_empty() {
                 spans.push(Span::styled(
-                    format!(" {}", super::icons::DRAFT),
+                    format!(" {}", super::icons::icons().draft),
                     accent_style,
                 ));
             }

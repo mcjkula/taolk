@@ -53,7 +53,7 @@ pub(super) fn visible_input(
     if start > 0 {
         spans.push(Span::styled(
             "\u{2026}",
-            Style::default().fg(palette::MUTED),
+            Style::default().fg(palette::theme().muted),
         ));
     }
 
@@ -70,13 +70,13 @@ pub(super) fn visible_input(
             if ok_end < visible.len() {
                 spans.push(Span::styled(
                     visible[ok_end..].to_string(),
-                    Style::default().fg(palette::ERROR),
+                    Style::default().fg(palette::theme().error),
                 ));
             }
         } else {
             spans.push(Span::styled(
                 visible.to_string(),
-                Style::default().fg(palette::ERROR),
+                Style::default().fg(palette::theme().error),
             ));
         }
     } else {
@@ -89,15 +89,15 @@ pub(super) fn visible_input(
     if end < text_len {
         spans.push(Span::styled(
             "\u{2026}",
-            Style::default().fg(palette::MUTED),
+            Style::default().fg(palette::theme().muted),
         ));
     }
 
     if let Some(lim) = limit {
         let counter_color = if text_len > lim {
-            palette::ERROR
+            palette::theme().error
         } else {
-            palette::MUTED
+            palette::theme().muted
         };
         spans.push(Span::styled(
             format!(" {}/{}", text_len, lim),
@@ -111,7 +111,7 @@ pub(super) fn visible_input(
 fn sep_line(width: u16) -> Line<'static> {
     Line::styled(
         "\u{2500}".repeat(usize::from(width)),
-        Style::default().fg(palette::MUTED),
+        Style::default().fg(palette::theme().muted),
     )
 }
 
@@ -125,14 +125,14 @@ fn render_single_input(
 ) {
     use unicode_width::UnicodeWidthStr;
     let sep = sep_line(area.width);
-    let prompt_span = Span::styled(prompt, Style::default().fg(palette::MUTED));
+    let prompt_span = Span::styled(prompt, Style::default().fg(palette::theme().muted));
     let prompt_width = UnicodeWidthStr::width(prompt) + 1;
 
     if app.input.is_empty() {
         let input_line = Line::from(vec![
             Span::raw(" "),
             prompt_span,
-            Span::styled(placeholder, Style::default().fg(palette::MUTED)),
+            Span::styled(placeholder, Style::default().fg(palette::theme().muted)),
         ]);
         frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), input_line]), area);
         let cursor_x = area.x + u16::try_from(prompt_width).unwrap_or(u16::MAX);
@@ -169,7 +169,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             render_single_input(
                 frame,
                 app,
-                &format!("{} ", icons::MAGNIFY),
+                &format!("{} ", icons::icons().magnify),
                 "Search messages...",
                 None,
                 area,
@@ -209,19 +209,19 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 let ss58_max = (usize::from(area.width)).saturating_sub(prefix_len);
                 let selector = Line::from(vec![
                     Span::raw(" "),
-                    Span::styled("[p] ", Style::default().fg(palette::ACCENT)),
+                    Span::styled("[p] ", Style::default().fg(palette::theme().accent)),
                     Span::styled(
-                        format!("{} public  ", icons::PUBLIC),
+                        format!("{} public  ", icons::icons().public),
                         Style::default().fg(ratatui::style::Color::Reset),
                     ),
-                    Span::styled("[e] ", Style::default().fg(palette::ACCENT)),
+                    Span::styled("[e] ", Style::default().fg(palette::theme().accent)),
                     Span::styled(
-                        format!("{} encrypted  ", icons::ENCRYPTED),
+                        format!("{} encrypted  ", icons::icons().encrypted),
                         Style::default().fg(ratatui::style::Color::Reset),
                     ),
                     Span::styled(
                         fit(&format!("to {ss58}"), ss58_max),
-                        Style::default().fg(palette::MUTED),
+                        Style::default().fg(palette::theme().muted),
                     ),
                 ]);
                 frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), selector]), area);
@@ -271,7 +271,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             };
             let preview_style = if is_empty_preview {
                 Style::default()
-                    .fg(palette::MUTED)
+                    .fg(palette::theme().muted)
                     .add_modifier(Modifier::ITALIC)
             } else {
                 Style::default().fg(ratatui::style::Color::Reset)
@@ -286,7 +286,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                         .fg(ratatui::style::Color::Reset)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(fee_text, Style::default().fg(palette::ACCENT)),
+                Span::styled(fee_text, Style::default().fg(palette::theme().accent)),
             ]);
             frame.render_widget(Paragraph::new(vec![sep, preview_line, confirm_line]), area);
         }
@@ -310,9 +310,9 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                 let visible = fit(&draft_str, avail);
                 Line::from(vec![
                     Span::raw(" "),
-                    Span::styled("> ", Style::default().fg(palette::MUTED)),
-                    Span::styled(visible, Style::default().fg(palette::MUTED)),
-                    Span::styled(suffix, Style::default().fg(palette::ACCENT)),
+                    Span::styled("> ", Style::default().fg(palette::theme().muted)),
+                    Span::styled(visible, Style::default().fg(palette::theme().muted)),
+                    Span::styled(suffix, Style::default().fg(palette::theme().accent)),
                 ])
             } else if app.view == crate::app::View::ChannelDir && !app.channel_dir_input.is_empty()
             {
@@ -324,7 +324,10 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                     avail,
                     None,
                 );
-                let mut spans = vec![Span::styled(prompt, Style::default().fg(palette::MUTED))];
+                let mut spans = vec![Span::styled(
+                    prompt,
+                    Style::default().fg(palette::theme().muted),
+                )];
                 spans.extend(text_spans);
                 let input_line = Line::from(spans);
                 frame.render_widget(
@@ -351,10 +354,10 @@ fn render_picker_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
 
     if app.input.is_empty() {
         let prompt = Line::from(vec![
-            Span::styled(" To: ", Style::default().fg(palette::MUTED)),
+            Span::styled(" To: ", Style::default().fg(palette::theme().muted)),
             Span::styled(
                 "type to search or paste address",
-                Style::default().fg(palette::MUTED),
+                Style::default().fg(palette::theme().muted),
             ),
         ]);
         frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), prompt]), area);
@@ -367,7 +370,10 @@ fn render_picker_input(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
         let avail = w.saturating_sub(6);
         let (text_spans, cursor_off) =
             visible_input(app.input.as_str(), app.input.cursor(), avail, None);
-        let mut spans = vec![Span::styled(" To: ", Style::default().fg(palette::MUTED))];
+        let mut spans = vec![Span::styled(
+            " To: ",
+            Style::default().fg(palette::theme().muted),
+        )];
         spans.extend(text_spans);
         let input_line = Line::from(spans);
         frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), input_line]), area);
@@ -387,11 +393,11 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area:
         let prompt = Line::from(vec![
             Span::styled(
                 format!(" Members ({selected_count}): "),
-                Style::default().fg(palette::MUTED),
+                Style::default().fg(palette::theme().muted),
             ),
             Span::styled(
                 "type to search or paste address",
-                Style::default().fg(palette::MUTED),
+                Style::default().fg(palette::theme().muted),
             ),
         ]);
         frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), prompt]), area);
@@ -408,7 +414,7 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, sep: Line<'_>, area:
             visible_input(app.input.as_str(), app.input.cursor(), avail, None);
         let mut spans = vec![Span::styled(
             &prompt_str,
-            Style::default().fg(palette::MUTED),
+            Style::default().fg(palette::theme().muted),
         )];
         spans.extend(text_spans);
         let input_line = Line::from(spans);

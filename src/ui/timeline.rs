@@ -40,7 +40,7 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
                 spans.push(Span::styled(
                     osc,
                     Style::default()
-                        .fg(palette::ACCENT_ALT)
+                        .fg(palette::theme().accent_alt)
                         .add_modifier(Modifier::UNDERLINED),
                 ));
                 pos += end;
@@ -50,9 +50,9 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
             if bytes[pos] == b'@' && is_ss58_at(bytes, pos + 1) {
                 let is_self = &text[pos + 1..pos + 49] == my_ss58;
                 let color = if is_self {
-                    palette::ACCENT
+                    palette::theme().accent
                 } else {
-                    palette::ACCENT_ALT
+                    palette::theme().accent_alt
                 };
                 spans.push(Span::styled(
                     text[pos..pos + 49].to_string(),
@@ -68,7 +68,7 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
                 spans.push(Span::styled(
                     text[pos..pos + 48].to_string(),
                     Style::default()
-                        .fg(palette::MUTED)
+                        .fg(palette::theme().muted)
                         .add_modifier(Modifier::UNDERLINED),
                 ));
                 pos += 48;
@@ -85,7 +85,7 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
                     spans.push(Span::styled(
                         remaining[..end].to_string(),
                         Style::default()
-                            .fg(palette::ACCENT)
+                            .fg(palette::theme().accent)
                             .add_modifier(Modifier::UNDERLINED),
                     ));
                     pos += end;
@@ -105,7 +105,7 @@ fn render_body_line(text: &str, base_color: Color, my_ss58: &str) -> Line<'stati
                         spans.push(Span::styled(
                             remaining[..end].to_string(),
                             Style::default()
-                                .fg(palette::ACCENT)
+                                .fg(palette::theme().accent)
                                 .add_modifier(Modifier::UNDERLINED),
                         ));
                         pos += end;
@@ -207,7 +207,7 @@ fn date_separator(date_str: &str) -> Line<'static> {
     Line::styled(
         sep,
         Style::default()
-            .fg(palette::MUTED)
+            .fg(palette::theme().muted)
             .add_modifier(Modifier::ITALIC),
     )
 }
@@ -234,7 +234,7 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
             frame,
             app,
             &app.session.inbox,
-            &format!("{} Inbox", super::icons::INBOX),
+            &format!("{} Inbox", super::icons::icons().inbox),
             "From",
             None,
             area,
@@ -243,7 +243,7 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
             frame,
             app,
             &app.session.outbox,
-            &format!("{} Sent", super::icons::OUTBOX),
+            &format!("{} Sent", super::icons::icons().outbox),
             "To",
             pending_text(app, View::Outbox),
             area,
@@ -287,19 +287,24 @@ fn render_standalone(
                 .to_string();
             let (type_icon, type_label, badge_bg) =
                 match samp::ContentType::from_byte(msg.content_type) {
-                    Ok(samp::ContentType::Public) => (super::icons::PUBLIC, "public", Color::Cyan),
+                    Ok(samp::ContentType::Public) => {
+                        (super::icons::icons().public, "public", Color::Cyan)
+                    }
                     Ok(samp::ContentType::Encrypted) => {
-                        (super::icons::ENCRYPTED, "encrypted", Color::Magenta)
+                        (super::icons::icons().encrypted, "encrypted", Color::Magenta)
                     }
                     _ => (
-                        super::icons::BLOCK,
+                        super::icons::icons().block,
                         &*format!("0x{:02x}", msg.content_type),
                         Color::DarkGray,
                     ),
                 };
 
             lines.push(Line::from(vec![
-                Span::styled(format!(" {time} "), Style::default().fg(palette::MUTED)),
+                Span::styled(
+                    format!(" {time} "),
+                    Style::default().fg(palette::theme().muted),
+                ),
                 Span::styled(
                     format!(" {type_icon} {type_label} "),
                     Style::default()
@@ -310,7 +315,7 @@ fn render_standalone(
                 Span::raw(" "),
                 Span::styled(
                     format!("{direction}: "),
-                    Style::default().fg(palette::MUTED),
+                    Style::default().fg(palette::theme().muted),
                 ),
                 Span::styled(
                     truncate(&msg.peer_ss58, 20),
@@ -324,7 +329,7 @@ fn render_standalone(
                 lines.push(Line::from(vec![Span::styled(
                     "   empty",
                     Style::default()
-                        .fg(palette::MUTED)
+                        .fg(palette::theme().muted)
                         .add_modifier(Modifier::ITALIC),
                 )]));
             } else {
@@ -348,8 +353,10 @@ fn render_standalone(
     if let Some(text) = pending {
         let spinner = app.spinner_16();
         let type_badge: Option<(&str, &str)> = match app.pending_msg_type {
-            Some(samp::ContentType::Public) => Some((super::icons::PUBLIC, "public")),
-            Some(samp::ContentType::Encrypted) => Some((super::icons::ENCRYPTED, "encrypted")),
+            Some(samp::ContentType::Public) => Some((super::icons::icons().public, "public")),
+            Some(samp::ContentType::Encrypted) => {
+                Some((super::icons::icons().encrypted, "encrypted"))
+            }
             _ => None,
         };
         let recipient_label = app
@@ -361,23 +368,26 @@ fn render_standalone(
         lines.push(Line::raw(""));
         let mut spans = vec![Span::styled(
             format!(" {spinner} "),
-            Style::default().fg(palette::MUTED),
+            Style::default().fg(palette::theme().muted),
         )];
         if let Some((icon, label)) = type_badge {
             spans.push(Span::styled(
                 format!(" {icon} {label} "),
                 Style::default()
-                    .fg(palette::MUTED)
+                    .fg(palette::theme().muted)
                     .add_modifier(Modifier::BOLD),
             ));
             spans.push(Span::raw(" "));
         }
         if !recipient_label.is_empty() {
-            spans.push(Span::styled("To: ", Style::default().fg(palette::MUTED)));
+            spans.push(Span::styled(
+                "To: ",
+                Style::default().fg(palette::theme().muted),
+            ));
             spans.push(Span::styled(
                 truncate(&recipient_label, 20),
                 Style::default()
-                    .fg(palette::MUTED)
+                    .fg(palette::theme().muted)
                     .add_modifier(Modifier::BOLD),
             ));
         }
@@ -386,7 +396,7 @@ fn render_standalone(
         for text_line in text.lines() {
             lines.push(Line::styled(
                 format!("   {text_line}"),
-                Style::default().fg(palette::MUTED),
+                Style::default().fg(palette::theme().muted),
             ));
         }
     }
@@ -398,7 +408,7 @@ fn id_block_str(id_str: &str) -> String {
     if id_str.is_empty() {
         String::new()
     } else {
-        format!("{} {}", super::icons::BLOCK, id_str)
+        format!("{} {}", super::icons::icons().block, id_str)
     }
 }
 
@@ -430,7 +440,7 @@ fn title_header_line(
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" ".repeat(pad)),
-        Span::styled(id_block, Style::default().fg(palette::MUTED)),
+        Span::styled(id_block, Style::default().fg(palette::theme().muted)),
     ])
 }
 
@@ -521,7 +531,7 @@ fn render_channel(frame: &mut Frame, app: &mut App, chan_idx: usize, area: Rect)
         let desc_max = (usize::from(area.width)).saturating_sub(3);
         lines.push(Line::from(vec![Span::styled(
             format!(" {} ", truncate(&channel.description, desc_max)),
-            Style::default().fg(palette::MUTED),
+            Style::default().fg(palette::theme().muted),
         )]));
     }
 
@@ -561,7 +571,7 @@ fn render_group(frame: &mut Frame, app: &mut App, group_idx: usize, area: Rect) 
     let title = group_member_title(group, app, w.saturating_sub(2 + id_reserve));
 
     let lines = vec![
-        title_header_line(title, palette::ACCENT, id_str, w),
+        title_header_line(title, palette::theme().accent, id_str, w),
         separator(area.width),
     ];
 
@@ -597,7 +607,7 @@ fn group_member_title(group: &crate::conversation::Group, app: &App, title_max: 
             taolk::util::ss58_short(pk)
         };
         let label = if *pk == group.creator_pubkey {
-            format!("{label}{}", super::icons::CREATOR)
+            format!("{label}{}", super::icons::icons().creator)
         } else {
             label
         };
@@ -626,7 +636,7 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
     let count = app.session.known_channels.len();
     let mut lines: Vec<Line> = vec![
         header_line(
-            super::icons::CHANNELS,
+            super::icons::icons().channels,
             "Channels",
             &format!("{count} channels"),
             usize::from(area.width),
@@ -645,10 +655,14 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
         let subscribed = app.session.is_subscribed(&info.channel_ref);
 
         let indicator = if selected { "> " } else { "  " };
-        let check = if subscribed { " \u{F012C}" } else { "" };
+        let check = if subscribed {
+            format!(" {}", super::icons::icons().check)
+        } else {
+            String::new()
+        };
         let id_str = format!(
             " {} {}:{}",
-            super::icons::BLOCK,
+            super::icons::icons().block,
             info.channel_ref.block().get(),
             info.channel_ref.index().get()
         );
@@ -657,7 +671,7 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
         let name_color = if selected {
             Color::Reset
         } else if !subscribed {
-            palette::ACCENT
+            palette::theme().accent
         } else {
             Color::Reset
         };
@@ -671,14 +685,14 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
             lines.push(Line::raw(""));
         }
         lines.push(Line::from(vec![
-            Span::styled(indicator, Style::default().fg(palette::ACCENT)),
-            Span::styled("  ", Style::default().fg(palette::MUTED)),
+            Span::styled(indicator, Style::default().fg(palette::theme().accent)),
+            Span::styled("  ", Style::default().fg(palette::theme().muted)),
             Span::styled(
                 name_str,
                 Style::default().fg(name_color).add_modifier(name_mod),
             ),
-            Span::styled(id_str, Style::default().fg(palette::MUTED)),
-            Span::styled(check, Style::default().fg(palette::SUCCESS)),
+            Span::styled(id_str, Style::default().fg(palette::theme().muted)),
+            Span::styled(check, Style::default().fg(palette::theme().success)),
         ]));
 
         if !info.description.is_empty() {
@@ -687,7 +701,7 @@ fn render_channel_dir(frame: &mut Frame, app: &App, area: Rect) {
                 Span::raw("      "),
                 Span::styled(
                     truncate(&info.description, desc_max),
-                    Style::default().fg(palette::MUTED),
+                    Style::default().fg(palette::theme().muted),
                 ),
             ]));
         }
@@ -703,7 +717,7 @@ fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut lines: Vec<Line> = vec![
         header_line(
-            super::icons::ACCOUNT,
+            super::icons::icons().account,
             "Contacts",
             &format!("{total} contacts"),
             w,
@@ -739,11 +753,11 @@ fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
 
         let indicator = if selected { "> " } else { "  " };
         let addr_color = if is_self {
-            palette::MUTED
+            palette::theme().muted
         } else if selected {
             Color::Reset
         } else {
-            palette::ACCENT
+            palette::theme().accent
         };
         let addr_mod = if selected {
             Modifier::BOLD
@@ -752,7 +766,7 @@ fn render_contact_picker(frame: &mut Frame, app: &App, area: Rect) {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(indicator, Style::default().fg(palette::ACCENT)),
+            Span::styled(indicator, Style::default().fg(palette::theme().accent)),
             Span::styled(
                 truncate(&label, addr_max),
                 Style::default().fg(addr_color).add_modifier(addr_mod),
@@ -770,7 +784,7 @@ fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut lines: Vec<Line> = vec![
         header_line(
-            super::icons::ACCOUNT,
+            super::icons::icons().account,
             "Copy SS58",
             &format!("{total} senders in view"),
             w,
@@ -794,9 +808,9 @@ fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
         let addr_color = if selected {
             Color::Reset
         } else if pk.is_some() {
-            palette::ACCENT
+            palette::theme().accent
         } else {
-            palette::MUTED
+            palette::theme().muted
         };
         let addr_mod = if selected {
             Modifier::BOLD
@@ -805,7 +819,7 @@ fn render_sender_picker(frame: &mut Frame, app: &App, area: Rect) {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(indicator, Style::default().fg(palette::ACCENT)),
+            Span::styled(indicator, Style::default().fg(palette::theme().accent)),
             Span::styled(
                 truncate(&display, addr_max),
                 Style::default().fg(addr_color).add_modifier(addr_mod),
@@ -829,7 +843,7 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut lines: Vec<Line> = vec![
         header_line(
-            super::icons::GROUPS,
+            super::icons::icons().groups,
             "Select Members",
             &format!("{others_selected} selected, {total} contacts"),
             w,
@@ -855,11 +869,15 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
         let addr_max = w.saturating_sub(6);
 
         let indicator = if cursor { "> " } else { "  " };
-        let check = if is_member { "\u{F012C} " } else { "  " };
+        let check = if is_member {
+            format!("{} ", super::icons::icons().check)
+        } else {
+            "  ".to_string()
+        };
         let addr_color = if cursor {
             Color::Reset
         } else if is_member {
-            palette::SUCCESS
+            palette::theme().success
         } else {
             Color::Reset
         };
@@ -870,8 +888,8 @@ fn render_group_member_picker(frame: &mut Frame, app: &App, area: Rect) {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(indicator, Style::default().fg(palette::ACCENT)),
-            Span::styled(check, Style::default().fg(palette::SUCCESS)),
+            Span::styled(indicator, Style::default().fg(palette::theme().accent)),
+            Span::styled(check, Style::default().fg(palette::theme().success)),
             Span::styled(
                 truncate(&full_addr, addr_max),
                 Style::default().fg(addr_color).add_modifier(addr_mod),
@@ -893,20 +911,23 @@ fn render_pending(lines: &mut Vec<Line<'static>>, app: &App, view: View) {
         lines.push(Line::from(vec![
             Span::styled(
                 format!(" {} ", app.spinner_5()),
-                Style::default().fg(palette::MUTED),
+                Style::default().fg(palette::theme().muted),
             ),
             Span::styled(
                 "You  ",
                 Style::default()
-                    .fg(palette::MUTED)
+                    .fg(palette::theme().muted)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(first_line.to_string(), Style::default().fg(palette::MUTED)),
+            Span::styled(
+                first_line.to_string(),
+                Style::default().fg(palette::theme().muted),
+            ),
         ]));
         for body_line in text.lines().skip(1) {
             lines.push(Line::styled(
                 format!("{:indent$}{body_line}", ""),
-                Style::default().fg(palette::MUTED),
+                Style::default().fg(palette::theme().muted),
             ));
         }
     }
@@ -935,13 +956,13 @@ fn render_messages(
 
         if msg.has_gap {
             let pulse = if app.frame % 8 < 4 {
-                palette::MUTED
+                palette::theme().muted
             } else {
-                palette::WARNING
+                palette::theme().warning
             };
             let gap_str = format!(
                 " {} Earlier messages may be missing \u{00B7} press r to load",
-                super::icons::HISTORY
+                super::icons::icons().history
             );
             let gap_text = truncate(&gap_str, width);
             lines.push(Line::from(vec![Span::styled(
@@ -956,7 +977,7 @@ fn render_messages(
         let has_match =
             !search.is_empty() && msg.body.to_lowercase().contains(&search.to_lowercase());
         let body_color = if has_match {
-            palette::ACCENT
+            palette::theme().accent
         } else {
             Color::Reset
         };
@@ -974,7 +995,7 @@ fn render_messages(
         };
 
         let body_color = if is_empty_body {
-            palette::MUTED
+            palette::theme().muted
         } else {
             body_color
         };
@@ -983,7 +1004,7 @@ fn render_messages(
             lines.push(Line::from(vec![Span::styled(
                 format!("{:last_indent$}empty", ""),
                 Style::default()
-                    .fg(palette::MUTED)
+                    .fg(palette::theme().muted)
                     .add_modifier(Modifier::ITALIC),
             )]));
         } else if is_empty_body {
@@ -993,7 +1014,7 @@ fn render_messages(
                 .format(&app.config.timestamp_format)
                 .to_string();
             let (name, name_color) = if msg.is_mine {
-                ("You".to_string(), palette::ACCENT)
+                ("You".to_string(), palette::theme().accent)
             } else {
                 (
                     truncate(&msg.sender_ss58, 16),
@@ -1011,7 +1032,10 @@ fn render_messages(
                 ));
             }
             lines.push(Line::from(vec![
-                Span::styled(format!(" {time} "), Style::default().fg(palette::MUTED)),
+                Span::styled(
+                    format!(" {time} "),
+                    Style::default().fg(palette::theme().muted),
+                ),
                 Span::styled(
                     format!("{name}  "),
                     Style::default().fg(name_color).add_modifier(Modifier::BOLD),
@@ -1019,7 +1043,7 @@ fn render_messages(
                 Span::styled(
                     "empty",
                     Style::default()
-                        .fg(palette::MUTED)
+                        .fg(palette::theme().muted)
                         .add_modifier(Modifier::ITALIC),
                 ),
             ]));
@@ -1049,7 +1073,10 @@ fn render_messages(
 
             let pad = last_indent.saturating_sub(7);
             let mut spans = vec![
-                Span::styled(format!(" {time} "), Style::default().fg(palette::MUTED)),
+                Span::styled(
+                    format!(" {time} "),
+                    Style::default().fg(palette::theme().muted),
+                ),
                 Span::styled(format!("{:pad$}", ""), Style::default()),
             ];
             let rendered = render_body_line(&first_wrapped.0, body_color, my_ss58);
@@ -1084,7 +1111,7 @@ fn render_messages(
                 .format(&app.config.timestamp_format)
                 .to_string();
             let (name, name_color) = if msg.is_mine {
-                ("You".to_string(), palette::ACCENT)
+                ("You".to_string(), palette::theme().accent)
             } else {
                 (
                     truncate(&msg.sender_ss58, 16),
@@ -1116,7 +1143,10 @@ fn render_messages(
                 ));
             }
             let mut first_spans = vec![
-                Span::styled(format!(" {time} "), Style::default().fg(palette::MUTED)),
+                Span::styled(
+                    format!(" {time} "),
+                    Style::default().fg(palette::theme().muted),
+                ),
                 Span::styled(
                     format!("{name}  "),
                     Style::default().fg(name_color).add_modifier(Modifier::BOLD),
@@ -1167,19 +1197,25 @@ fn header_line(glyph: &str, title: &str, right: &str, width: usize) -> Line<'sta
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" ".repeat(pad)),
-        Span::styled(right.to_string(), Style::default().fg(palette::MUTED)),
+        Span::styled(
+            right.to_string(),
+            Style::default().fg(palette::theme().muted),
+        ),
     ])
 }
 
 fn separator(width: u16) -> Line<'static> {
     Line::styled(
         "\u{2500}".repeat(usize::from(width)),
-        Style::default().fg(palette::MUTED),
+        Style::default().fg(palette::theme().muted),
     )
 }
 
 fn dim(text: &str) -> Line<'static> {
-    Line::styled(text.to_string(), Style::default().fg(palette::MUTED))
+    Line::styled(
+        text.to_string(),
+        Style::default().fg(palette::theme().muted),
+    )
 }
 
 fn render_scrolled(frame: &mut ratatui::Frame, lines: Vec<Line<'_>>, scroll: usize, area: Rect) {

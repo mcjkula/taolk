@@ -169,6 +169,34 @@ async fn main() -> taolk::error::Result<()> {
 | `ui.mouse` | `true` | Mouse support |
 | `ui.timestamp_format` | `%H:%M` | Message time format |
 | `ui.date_format` | `%Y-%m-%d %H:%M` | Full date format |
+| `ui.icons` | `unicode` | Icon style: `nerd`, `unicode`, or `ascii` |
+| `ui.colors` | `dark` | Color theme: `terminal`, `dark`, or `light` |
+
+### Icons
+
+taolk draws its UI icons in one of three styles, set with `ui.icons` or the `TAOLK_ICONS`
+environment variable:
+
+- `unicode` (default) — plain single-cell symbols that render on any terminal, no special font.
+- `nerd` — [Nerd Font](https://www.nerdfonts.com/) glyphs (nicer, but needs a patched font such as
+  a Nerd Font or `Symbols Nerd Font Mono`). Also enabled by `NERD_FONT=1`.
+- `ascii` — pure ASCII, for the most limited terminals.
+
+Precedence: `TAOLK_ICONS` > `NERD_FONT=1` > `ui.icons` > default. When output isn't a terminal
+(piped or redirected), icons fall back to `ascii`.
+
+### Colors
+
+taolk picks its colors from a theme, set with `ui.colors` or the `TAOLK_COLORS` environment
+variable:
+
+- `dark` (default) — fixed colors tuned for dark terminals; readable on any palette.
+- `light` — fixed colors tuned for light terminals.
+- `terminal` — follow your terminal's own 16-color palette (matches your theme, but borders and
+  dim text can be low-contrast on schemes like Solarized).
+
+Precedence: `TAOLK_COLORS` > `ui.colors` > default. With no setting, taolk uses `light` when it can
+tell the terminal background is light (via `COLORFGBG`), otherwise `dark`.
 
 ## Mirrors
 

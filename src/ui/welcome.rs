@@ -9,16 +9,16 @@ use ratatui::widgets::Paragraph;
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let _ = app;
-    let key = Style::default().fg(palette::ACCENT);
+    let key = Style::default().fg(palette::theme().accent);
     let text = Style::default();
 
     let shortcuts: &[(&str, &str, &str)] = &[
-        ("n", icons::THREADS, "new thread"),
-        ("m", icons::OUTBOX, "standalone message"),
-        ("c", icons::CHANNELS, "channels"),
-        ("g", icons::GROUPS, "create group"),
-        ("?", icons::HELP, "help"),
-        ("q", icons::EXIT, "quit"),
+        ("n", icons::icons().threads, "new thread"),
+        ("m", icons::icons().outbox, "standalone message"),
+        ("c", icons::icons().channels, "channels"),
+        ("g", icons::icons().groups, "create group"),
+        ("?", icons::icons().help, "help"),
+        ("q", icons::icons().exit, "quit"),
     ];
 
     let content_h = u16::try_from(shortcuts.len()).unwrap_or(u16::MAX);

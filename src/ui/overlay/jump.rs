@@ -43,23 +43,23 @@ impl JumpState {
         let mut targets: Vec<JumpTarget> = Vec::new();
         targets.push(JumpTarget {
             label: "Inbox".into(),
-            glyph: icons::INBOX,
+            glyph: icons::icons().inbox,
             view: View::Inbox,
         });
         targets.push(JumpTarget {
             label: "Sent".into(),
-            glyph: icons::OUTBOX,
+            glyph: icons::icons().outbox,
             view: View::Outbox,
         });
         targets.push(JumpTarget {
             label: "Channels".into(),
-            glyph: icons::CHANNELS,
+            glyph: icons::icons().channels,
             view: View::ChannelDir,
         });
         for (i, t) in app.session.threads.iter().enumerate() {
             targets.push(JumpTarget {
                 label: t.peer_ss58.clone(),
-                glyph: icons::THREADS,
+                glyph: icons::icons().threads,
                 view: View::Thread(i),
             });
         }
@@ -69,7 +69,7 @@ impl JumpState {
             }
             targets.push(JumpTarget {
                 label: format!("#{}", c.name),
-                glyph: icons::CHANNELS,
+                glyph: icons::icons().channels,
                 view: View::Channel(i),
             });
         }
@@ -77,7 +77,7 @@ impl JumpState {
             let members = g.members.len();
             targets.push(JumpTarget {
                 label: format!("group ({members})"),
-                glyph: icons::GROUPS,
+                glyph: icons::icons().groups,
                 view: View::Group(i),
             });
         }
@@ -171,7 +171,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         None => return,
     };
     let prompt = Line::from(vec![
-        Span::styled(" > ", Style::default().fg(palette::ACCENT)),
+        Span::styled(" > ", Style::default().fg(palette::theme().accent)),
         Span::styled(
             state.query.as_str().to_string(),
             Style::default().fg(ratatui::style::Color::Reset),
@@ -180,10 +180,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(prompt), rows[0]);
 
     let selected_style = Style::default()
-        .fg(palette::ACCENT)
+        .fg(palette::theme().accent)
         .add_modifier(Modifier::BOLD);
     let name_style = Style::default().fg(ratatui::style::Color::Reset);
-    let glyph_style = Style::default().fg(palette::MUTED);
+    let glyph_style = Style::default().fg(palette::theme().muted);
 
     let items: Vec<ListItem> = state
         .ranking

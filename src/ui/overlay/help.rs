@@ -6,28 +6,36 @@ use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
-use crate::ui::icons;
+use crate::ui::icons::{self, Icon};
 use crate::ui::palette;
 
 struct Card {
     title: &'static str,
-    glyph: &'static str,
+    glyph: Icon,
     entries: &'static [(&'static str, &'static str)],
+}
+
+/// Expand arrow placeholders in a key hint into the active theme's glyphs.
+fn expand(s: &str) -> String {
+    s.replace("{up}", icons::icons().arrow_up)
+        .replace("{dn}", icons::icons().arrow_down)
+        .replace("{lt}", icons::icons().arrow_left)
+        .replace("{rt}", icons::icons().arrow_right)
 }
 
 const CARDS: &[Card] = &[
     Card {
         title: "Sidebar",
-        glyph: icons::MENU,
+        glyph: Icon::Menu,
         entries: &[
-            ("\u{F005D} / \u{F0045}", "Previous / next conversation"),
+            ("{up} / {dn}", "Previous / next conversation"),
             ("Tab / S-Tab", "Previous / next conversation"),
             ("Space", "Toggle sidebar"),
         ],
     },
     Card {
         title: "Page content",
-        glyph: icons::KEYBOARD,
+        glyph: Icon::Keyboard,
         entries: &[
             ("j / k", "Down / up one line"),
             ("C-d / C-u", "Half-page down / up"),
@@ -38,7 +46,7 @@ const CARDS: &[Card] = &[
     },
     Card {
         title: "Actions",
-        glyph: icons::COG,
+        glyph: Icon::Cog,
         entries: &[
             ("i", "Compose or reply in current"),
             ("n", "New thread"),
@@ -58,7 +66,7 @@ const CARDS: &[Card] = &[
     },
     Card {
         title: "Channel directory",
-        glyph: icons::CHANNELS,
+        glyph: Icon::Channels,
         entries: &[
             ("j / k", "Move channel cursor"),
             ("digits / :", "Type a channel ref"),
@@ -69,45 +77,45 @@ const CARDS: &[Card] = &[
     },
     Card {
         title: "Insert",
-        glyph: icons::DRAFT,
+        glyph: Icon::Draft,
         entries: &[
             ("Enter", "Send (preview fee)"),
             ("S-Enter", "Insert newline"),
             ("Esc", "Save draft and exit"),
-            ("C-\u{F004D} / C-\u{F0054}", "Jump by word"),
+            ("C-{lt} / C-{rt}", "Jump by word"),
             ("Backspace", "Delete left"),
         ],
     },
     Card {
         title: "Confirm",
-        glyph: icons::CHECK,
+        glyph: Icon::Check,
         entries: &[("Enter", "Submit transaction"), ("Esc", "Back to edit")],
     },
     Card {
         title: "Compose / Message",
-        glyph: icons::OUTBOX,
+        glyph: Icon::Outbox,
         entries: &[
             ("type", "Filter or paste SS58"),
-            ("\u{F005D} / \u{F0045}", "Pick contact"),
+            ("{up} / {dn}", "Pick contact"),
             ("Enter", "Confirm and compose"),
             ("Esc", "Cancel"),
         ],
     },
     Card {
         title: "Sender picker",
-        glyph: icons::ACCOUNT,
+        glyph: Icon::Account,
         entries: &[
-            ("\u{F005D} / \u{F0045}", "Pick sender"),
+            ("{up} / {dn}", "Pick sender"),
             ("Enter", "Copy SS58 to clipboard"),
             ("Esc", "Cancel"),
         ],
     },
     Card {
         title: "Group members",
-        glyph: icons::GROUPS,
+        glyph: Icon::Groups,
         entries: &[
             ("type", "Filter or paste SS58"),
-            ("\u{F005D} / \u{F0045}", "Pick contact"),
+            ("{up} / {dn}", "Pick contact"),
             ("Enter", "Add or remove"),
             ("Tab", "Done, create group"),
             ("Esc", "Cancel"),
@@ -122,9 +130,9 @@ const SIDE_MARGIN: usize = 2;
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let accent = Style::default()
-        .fg(palette::ACCENT)
+        .fg(palette::theme().accent)
         .add_modifier(Modifier::BOLD);
-    let dim = Style::default().fg(palette::MUTED);
+    let dim = Style::default().fg(palette::theme().muted);
 
     let body = Rect {
         x: area.x,
@@ -220,10 +228,13 @@ fn compute_card_width() -> usize {
     let mut max_entry = 0usize;
     let mut max_header = 0usize;
     for card in CARDS {
-        let header = format!("{} {}", card.glyph, card.title);
+        let header = format!("{} {}", card.glyph.glyph(), card.title);
         max_header = max_header.max(UnicodeWidthStr::width(header.as_str()));
         for (key, desc) in card.entries {
-            let w = UnicodeWidthStr::width(*key) + UnicodeWidthStr::width(*desc) + CARD_ENTRY_GAP;
+            let key = expand(key);
+            let w = UnicodeWidthStr::width(key.as_str())
+                + UnicodeWidthStr::width(*desc)
+                + CARD_ENTRY_GAP;
             max_entry = max_entry.max(w);
         }
     }
@@ -232,29 +243,30 @@ fn compute_card_width() -> usize {
 
 fn render_card(card: &Card, width: usize) -> Vec<Line<'static>> {
     let title_style = Style::default()
-        .fg(palette::ACCENT_ALT)
+        .fg(palette::theme().accent_alt)
         .add_modifier(Modifier::BOLD);
     let glyph_style = Style::default()
-        .fg(palette::ACCENT)
+        .fg(palette::theme().accent)
         .add_modifier(Modifier::BOLD);
     let desc_style = Style::default().fg(ratatui::style::Color::Reset);
-    let key_style = Style::default().fg(palette::ACCENT);
+    let key_style = Style::default().fg(palette::theme().accent);
 
     let mut lines = Vec::with_capacity(card.entries.len() + 3);
-    let header = format!("{} {}", card.glyph, card.title);
+    let header = format!("{} {}", card.glyph.glyph(), card.title);
     let header_w = UnicodeWidthStr::width(header.as_str());
     let left = (width.saturating_sub(header_w)) / 2;
     let right = width.saturating_sub(header_w).saturating_sub(left);
     lines.push(Line::from(vec![
         Span::raw(" ".repeat(left)),
-        Span::styled(format!("{} ", card.glyph), glyph_style),
+        Span::styled(format!("{} ", card.glyph.glyph()), glyph_style),
         Span::styled(card.title.to_string(), title_style),
         Span::raw(" ".repeat(right)),
     ]));
     lines.push(blank_line(width));
 
     for (key, desc) in card.entries {
-        let key_w = UnicodeWidthStr::width(*key);
+        let key = expand(key);
+        let key_w = UnicodeWidthStr::width(key.as_str());
         let desc_w = UnicodeWidthStr::width(*desc);
         let used = CARD_H_PAD * 2 + key_w + desc_w;
         let gap = width.saturating_sub(used).max(1);
@@ -262,7 +274,7 @@ fn render_card(card: &Card, width: usize) -> Vec<Line<'static>> {
             Span::raw(" ".repeat(CARD_H_PAD)),
             Span::styled((*desc).to_string(), desc_style),
             Span::raw(" ".repeat(gap)),
-            Span::styled((*key).to_string(), key_style),
+            Span::styled(key, key_style),
             Span::raw(" ".repeat(CARD_H_PAD)),
         ]));
     }

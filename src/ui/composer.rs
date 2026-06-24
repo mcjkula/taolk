@@ -295,8 +295,8 @@ pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
         };
         let input_line = Line::from(vec![
             Span::raw(" "),
-            Span::styled(prompt, Style::default().fg(palette::MUTED)),
-            Span::styled(placeholder, Style::default().fg(palette::MUTED)),
+            Span::styled(prompt, Style::default().fg(palette::theme().muted)),
+            Span::styled(placeholder, Style::default().fg(palette::theme().muted)),
         ]);
         frame.render_widget(Paragraph::new(vec![sep, Line::raw(""), input_line]), area);
         let cursor_x = area.x + u16::try_from(prompt_width).unwrap_or(u16::MAX);
@@ -337,7 +337,7 @@ pub fn render_composer(frame: &mut Frame, app: &App, sep: Line<'_>, area: Rect) 
         };
         let mut spans = vec![
             Span::raw(" "),
-            Span::styled(line_prompt, Style::default().fg(palette::MUTED)),
+            Span::styled(line_prompt, Style::default().fg(palette::theme().muted)),
         ];
         spans.extend(text_spans);
         paragraph_lines.push(Line::from(spans));

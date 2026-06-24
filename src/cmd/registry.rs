@@ -1,12 +1,12 @@
 use crate::app::{App, Focus, Overlay, View};
-use crate::ui::icons;
+use crate::ui::icons::Icon;
 use taolk::types::BlockRef;
 
 pub type CmdResult = Result<(), String>;
 
 pub struct Command {
     pub name: &'static str,
-    pub glyph: &'static str,
+    pub glyph: Icon,
     pub summary: &'static str,
     pub run: fn(&mut App, &[&str]) -> CmdResult,
 }
@@ -15,100 +15,100 @@ pub const COMMANDS: &[Command] = &[
     // Compose
     Command {
         name: "thread",
-        glyph: icons::THREADS,
+        glyph: Icon::Threads,
         summary: "Start a new thread with a contact",
         run: run_thread,
     },
     Command {
         name: "message",
-        glyph: icons::OUTBOX,
+        glyph: Icon::Outbox,
         summary: "Send a one-off message (not a thread)",
         run: run_message,
     },
     Command {
         name: "group",
-        glyph: icons::GROUPS,
+        glyph: Icon::Groups,
         summary: "Create a new group conversation",
         run: run_group,
     },
     // Navigate
     Command {
         name: "search",
-        glyph: icons::MAGNIFY,
+        glyph: Icon::Magnify,
         summary: "Search messages in the current view",
         run: run_search,
     },
     Command {
         name: "channels",
-        glyph: icons::CHANNELS,
+        glyph: Icon::Channels,
         summary: "Browse the channel directory",
         run: run_channels,
     },
     Command {
         name: "inbox",
-        glyph: icons::INBOX,
+        glyph: Icon::Inbox,
         summary: "Jump to the inbox view",
         run: run_inbox,
     },
     Command {
         name: "outbox",
-        glyph: icons::OUTBOX,
+        glyph: Icon::Outbox,
         summary: "Jump to the sent view",
         run: run_outbox,
     },
     // View
     Command {
         name: "sidebar",
-        glyph: icons::MENU,
+        glyph: Icon::Menu,
         summary: "Toggle the sidebar",
         run: run_sidebar,
     },
     Command {
         name: "help",
-        glyph: icons::HELP,
+        glyph: Icon::Help,
         summary: "Show the help overlay",
         run: run_help,
     },
     // System
     Command {
         name: "get",
-        glyph: icons::BLOCK,
+        glyph: Icon::Block,
         summary: "Get remark(s) at block:index positions",
         run: run_fetch,
     },
     Command {
         name: "refresh",
-        glyph: icons::REFRESH,
+        glyph: Icon::Refresh,
         summary: "Reload and fill message gaps",
         run: run_refresh,
     },
     Command {
         name: "copy",
-        glyph: icons::COPY,
+        glyph: Icon::Copy,
         summary: "Copy a sender's SS58 address",
         run: run_copy,
     },
     Command {
         name: "unlock",
-        glyph: icons::LOCK_OPEN,
+        glyph: Icon::LockOpen,
         summary: "Unlock all locked outbound messages",
         run: run_unlock,
     },
     Command {
         name: "lock",
-        glyph: icons::ENCRYPTED,
+        glyph: Icon::Encrypted,
         summary: "Lock the session",
         run: run_lock,
     },
     Command {
         name: "wallet",
-        glyph: icons::SWAP,
+        glyph: Icon::Swap,
         summary: "Switch to a different wallet",
         run: run_wallet,
     },
     Command {
         name: "quit",
-        glyph: icons::EXIT,
+        glyph: Icon::Exit,
         summary: "Exit taolk",
         run: run_quit,
     },
@@ -253,7 +253,7 @@ mod tests {
         for c in COMMANDS {
             assert!(!c.name.is_empty());
             assert!(!c.summary.is_empty());
-            assert!(!c.glyph.is_empty());
+            assert!(!c.glyph.glyph().is_empty());
         }
     }
 }
